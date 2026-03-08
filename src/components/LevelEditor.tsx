@@ -36,6 +36,53 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [tool, setTool] = useState<EditorTool>('rail');
   const [tiles, setTiles] = useState<Record<string, TileType>>({});
+  // Track explicit connections between rail tiles: key -> Set of connected keys
+  const railConnectionsRef = useRef<Record<string, Set<string>>>({});
+  const lastPlacedRailRef = useRef<string | null>(null);
+
+  const addRailConnection = (keyA: string, keyB: string) => {
+    const conns = railConnectionsRef.current;
+    if (!conns[keyA]) conns[keyA] = new Set();
+    if (!conns[keyB]) conns[keyB] = new Set();
+    // Only connect if each has fewer than 2 connections
+    if (conns[keyA].size < 2 && conns[keyB].size < 2) {
+      conns[keyA].add(keyB);
+      conns[keyB].add(keyA);
+    }
+  };
+
+  const removeRailConnections = (key: string) => {
+    const conns = railConnectionsRef.current;
+    const myConns = conns[key];
+    if (myConns) {
+      for (const other of myConns) {
+        conns[other]?.delete(key);
+      }
+      delete conns[key];
+    }
+  };
+
+  const rebuildConnectionsFromTiles = (tilesData: Record<string, TileType>) => {
+    const conns: Record<string, Set<string>> = {};
+    const isRailLike = (t: TileType | undefined) => t === 'rail' || t === 'rail_start' || t === 'rail_end';
+    const keys = Object.keys(tilesData).filter(k => isRailLike(tilesData[k]));
+    for (const key of keys) {
+      const [gx, gy] = parseTileKey(key);
+      // Only connect orthogonal neighbors (simple chain rebuild)
+      for (const [dx, dy] of [[1, 0], [0, 1]] as const) {
+        const nk = tileKey(gx + dx, gy + dy);
+        if (isRailLike(tilesData[nk])) {
+          if (!conns[key]) conns[key] = new Set();
+          if (!conns[nk]) conns[nk] = new Set();
+          if (conns[key].size < 2 && conns[nk].size < 2) {
+            conns[key].add(nk);
+            conns[nk].add(key);
+          }
+        }
+      }
+    }
+    railConnectionsRef.current = conns;
+  };
   const [camera, setCamera] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [isPanning, setIsPanning] = useState(false);
@@ -123,6 +170,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     ctx.setLineDash([]);
 
     // Tiles
+    const connections = railConnectionsRef.current;
     for (const [key, type] of Object.entries(tiles)) {
       if (type === 'empty') continue;
       const [gx, gy] = parseTileKey(key);
@@ -130,52 +178,31 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       const sy = gy * GRID_SIZE - cy;
       if (sx < -GRID_SIZE || sx > vw + GRID_SIZE || sy < -GRID_SIZE || sy > vh + GRID_SIZE) continue;
 
-      const isRailLike = (t: TileType | undefined) => t === 'rail' || t === 'rail_start' || t === 'rail_end';
-
       if (type === 'rail' || type === 'rail_start' || type === 'rail_end') {
         // Background color
         ctx.fillStyle = type === 'rail_start' ? '#00E676' : type === 'rail_end' ? '#FF4081' : '#FFD700';
         ctx.fillRect(sx + 2, sy + 2, GRID_SIZE - 4, GRID_SIZE - 4);
 
-        // Draw rail connections - limit to max 2 to form a path, not a mesh
+        // Draw rail connections using explicit connection map
         ctx.strokeStyle = '#333';
         ctx.lineWidth = 4;
         const centerX = sx + GRID_SIZE / 2;
         const centerY = sy + GRID_SIZE / 2;
 
-        // Collect all neighbors with their draw info
-        type Neighbor = { dx: number; dy: number; has: boolean; drawX: number; drawY: number };
-        const neighbors: Neighbor[] = [
-          { dx: -1, dy: 0, has: isRailLike(tiles[tileKey(gx - 1, gy)]), drawX: sx, drawY: centerY },
-          { dx: 1, dy: 0, has: isRailLike(tiles[tileKey(gx + 1, gy)]), drawX: sx + GRID_SIZE, drawY: centerY },
-          { dx: 0, dy: -1, has: isRailLike(tiles[tileKey(gx, gy - 1)]), drawX: centerX, drawY: sy },
-          { dx: 0, dy: 1, has: isRailLike(tiles[tileKey(gx, gy + 1)]), drawX: centerX, drawY: sy + GRID_SIZE },
-        ];
-
-        // Add diagonals only if neither adjacent orthogonal exists
-        const hasLeft = isRailLike(tiles[tileKey(gx - 1, gy)]);
-        const hasRight = isRailLike(tiles[tileKey(gx + 1, gy)]);
-        const hasUp = isRailLike(tiles[tileKey(gx, gy - 1)]);
-        const hasDown = isRailLike(tiles[tileKey(gx, gy + 1)]);
-        if (isRailLike(tiles[tileKey(gx - 1, gy - 1)]) && !hasUp && !hasLeft)
-          neighbors.push({ dx: -1, dy: -1, has: true, drawX: sx, drawY: sy });
-        if (isRailLike(tiles[tileKey(gx + 1, gy - 1)]) && !hasUp && !hasRight)
-          neighbors.push({ dx: 1, dy: -1, has: true, drawX: sx + GRID_SIZE, drawY: sy });
-        if (isRailLike(tiles[tileKey(gx - 1, gy + 1)]) && !hasDown && !hasLeft)
-          neighbors.push({ dx: -1, dy: 1, has: true, drawX: sx, drawY: sy + GRID_SIZE });
-        if (isRailLike(tiles[tileKey(gx + 1, gy + 1)]) && !hasDown && !hasRight)
-          neighbors.push({ dx: 1, dy: 1, has: true, drawX: sx + GRID_SIZE, drawY: sy + GRID_SIZE });
-
-        // Filter to present neighbors, limit to 2 (path, not junction)
-        const present = neighbors.filter(n => n.has);
-        const connected = present.slice(0, 2);
-
-        ctx.beginPath();
-        for (const n of connected) {
-          ctx.moveTo(n.drawX, n.drawY);
-          ctx.lineTo(centerX, centerY);
+        const myConnections = connections[key];
+        if (myConnections) {
+          ctx.beginPath();
+          for (const connKey of myConnections) {
+            const [cgx, cgy] = parseTileKey(connKey);
+            const dx = cgx - gx;
+            const dy = cgy - gy;
+            const drawX = sx + GRID_SIZE / 2 + dx * (GRID_SIZE / 2);
+            const drawY = sy + GRID_SIZE / 2 + dy * (GRID_SIZE / 2);
+            ctx.moveTo(drawX, drawY);
+            ctx.lineTo(centerX, centerY);
+          }
+          ctx.stroke();
         }
-        ctx.stroke();
 
         // Label for start/end
         if (type === 'rail_start' || type === 'rail_end') {
@@ -435,6 +462,11 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           setArcCenter({ gx, gy });
         } else {
           const points = generateArc(arcCenter.gx, arcCenter.gy, gx, gy);
+          // Add connections between consecutive arc points
+          for (let i = 1; i < points.length; i++) {
+            addRailConnection(tileKey(points[i - 1].gx, points[i - 1].gy), tileKey(points[i].gx, points[i].gy));
+          }
+          if (points.length > 0) lastPlacedRailRef.current = tileKey(points[points.length - 1].gx, points[points.length - 1].gy);
           setTiles(prev => {
             const next = { ...prev };
             for (const p of points) {
@@ -502,10 +534,17 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const handleMouseUp = () => {
     setIsPanning(false);
     setIsDrawing(false);
+    // Reset last placed rail so separate clicks don't auto-connect
+    lastPlacedRailRef.current = null;
 
     // Commit curve on mouse up if dragging control point
     if (isDraggingCurve && curveStart && curveEnd && curveControl) {
       const points = generateBezierCurve(curveStart, curveEnd, curveControl);
+      // Add connections between consecutive curve points
+      for (let i = 1; i < points.length; i++) {
+        addRailConnection(tileKey(points[i - 1].gx, points[i - 1].gy), tileKey(points[i].gx, points[i].gy));
+      }
+      if (points.length > 0) lastPlacedRailRef.current = tileKey(points[points.length - 1].gx, points[points.length - 1].gy);
       setTiles(prev => {
         const next = { ...prev };
         for (const p of points) {
@@ -524,23 +563,52 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const placeTile = (gx: number, gy: number) => {
     const key = tileKey(gx, gy);
     if (tool === 'eraser') {
+      removeRailConnections(key);
+      if (lastPlacedRailRef.current === key) lastPlacedRailRef.current = null;
       setTiles(prev => {
         const next = { ...prev };
         delete next[key];
         return next;
       });
     } else if (tool === 'rail' || tool === 'spinner' || tool === 'bouncer') {
+      const isRail = tool === 'rail';
+      if (isRail) {
+        // Connect to last placed rail if adjacent
+        const last = lastPlacedRailRef.current;
+        if (last && last !== key) {
+          const [lx, ly] = parseTileKey(last);
+          const dx = Math.abs(gx - lx);
+          const dy = Math.abs(gy - ly);
+          if (dx <= 1 && dy <= 1 && (dx + dy > 0)) {
+            addRailConnection(last, key);
+          }
+        }
+        lastPlacedRailRef.current = key;
+      }
       setTiles(prev => ({ ...prev, [key]: tool as TileType }));
     } else if (tool === 'rail_start' || tool === 'rail_end') {
       setTiles(prev => {
         const next = { ...prev };
-        // Remove any existing start/end marker of the same type
         for (const [k, v] of Object.entries(next)) {
-          if (v === tool) delete next[k];
+          if (v === tool) {
+            removeRailConnections(k);
+            delete next[k];
+          }
         }
         next[key] = tool as TileType;
         return next;
       });
+      // Connect to last placed rail if adjacent
+      const last = lastPlacedRailRef.current;
+      if (last && last !== key) {
+        const [lx, ly] = parseTileKey(last);
+        const dx = Math.abs(gx - lx);
+        const dy = Math.abs(gy - ly);
+        if (dx <= 1 && dy <= 1 && (dx + dy > 0)) {
+          addRailConnection(last, key);
+        }
+      }
+      lastPlacedRailRef.current = key;
     }
   };
 
@@ -678,6 +746,9 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     lastSavedTilesRef.current = JSON.stringify(level.tiles);
     setCurrentLevelName(level.name);
     setShowLoadDialog(false);
+    // Rebuild connections from adjacency for loaded levels
+    rebuildConnectionsFromTiles(level.tiles);
+    lastPlacedRailRef.current = null;
   };
 
   const handleDelete = (name: string) => {
@@ -700,6 +771,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const clearAll = () => {
     if (Object.keys(tiles).length > 0 && !confirm('Clear all tiles?')) return;
     setTiles({});
+    railConnectionsRef.current = {};
+    lastPlacedRailRef.current = null;
     setArcCenter(null);
     setArcPreview([]);
   };
