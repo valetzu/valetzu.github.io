@@ -20,6 +20,7 @@ const TOOLS: { tool: EditorTool; label: string; emoji: string }[] = [
   { tool: 'bouncer', label: 'Bouncer', emoji: '🔴' },
   { tool: 'eraser', label: 'Eraser', emoji: '🧹' },
   { tool: 'arc', label: 'Arc Tool', emoji: '⭕' },
+  { tool: 'curve', label: 'Curve', emoji: '〰️' },
 ];
 
 const TILE_COLORS: Record<TileType, string> = {
@@ -58,6 +59,13 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   // Arc tool state
   const [arcCenter, setArcCenter] = useState<{ gx: number; gy: number } | null>(null);
   const [arcPreview, setArcPreview] = useState<{ gx: number; gy: number }[]>([]);
+
+  // Curve tool state: click start, click end, then drag control point
+  const [curveStart, setCurveStart] = useState<{ gx: number; gy: number } | null>(null);
+  const [curveEnd, setCurveEnd] = useState<{ gx: number; gy: number } | null>(null);
+  const [curveControl, setCurveControl] = useState<{ gx: number; gy: number } | null>(null);
+  const [curvePreview, setCurvePreview] = useState<{ gx: number; gy: number }[]>([]);
+  const [isDraggingCurve, setIsDraggingCurve] = useState(false);
 
   const worldHeight = EDITOR_HEIGHT * GRID_SIZE;
 
@@ -208,6 +216,59 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       ctx.arc(acx, acy, 4, 0, Math.PI * 2);
       ctx.fill();
     }
+    // Curve preview
+    if (curvePreview.length > 0) {
+      ctx.fillStyle = 'rgba(100,200,255,0.4)';
+      for (const p of curvePreview) {
+        const sx2 = p.gx * GRID_SIZE - cx;
+        const sy2 = p.gy * GRID_SIZE - cy;
+        ctx.fillRect(sx2 + 2, sy2 + 2, GRID_SIZE - 4, GRID_SIZE - 4);
+      }
+    }
+
+    // Curve start/end markers
+    if (curveStart) {
+      const csx = curveStart.gx * GRID_SIZE + GRID_SIZE / 2 - cx;
+      const csy = curveStart.gy * GRID_SIZE + GRID_SIZE / 2 - cy;
+      ctx.strokeStyle = '#64C8FF';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(curveStart.gx * GRID_SIZE - cx + 1, curveStart.gy * GRID_SIZE - cy + 1, GRID_SIZE - 2, GRID_SIZE - 2);
+      ctx.fillStyle = '#64C8FF';
+      ctx.font = 'bold 10px system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('A', csx, csy);
+    }
+    if (curveEnd) {
+      const cex = curveEnd.gx * GRID_SIZE + GRID_SIZE / 2 - cx;
+      const cey = curveEnd.gy * GRID_SIZE + GRID_SIZE / 2 - cy;
+      ctx.strokeStyle = '#FF64C8';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(curveEnd.gx * GRID_SIZE - cx + 1, curveEnd.gy * GRID_SIZE - cy + 1, GRID_SIZE - 2, GRID_SIZE - 2);
+      ctx.fillStyle = '#FF64C8';
+      ctx.font = 'bold 10px system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('B', cex, cey);
+    }
+    // Curve control point marker
+    if (curveControl && curveStart && curveEnd) {
+      const ccx = curveControl.gx * GRID_SIZE + GRID_SIZE / 2 - cx;
+      const ccy = curveControl.gy * GRID_SIZE + GRID_SIZE / 2 - cy;
+      ctx.strokeStyle = '#FFFF00';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(curveStart.gx * GRID_SIZE + GRID_SIZE / 2 - cx, curveStart.gy * GRID_SIZE + GRID_SIZE / 2 - cy);
+      ctx.lineTo(ccx, ccy);
+      ctx.lineTo(curveEnd.gx * GRID_SIZE + GRID_SIZE / 2 - cx, curveEnd.gy * GRID_SIZE + GRID_SIZE / 2 - cy);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.arc(ccx, ccy, 6, 0, Math.PI * 2);
+      ctx.fillStyle = '#FFFF00';
+      ctx.fill();
+    }
 
     // Reset transform for HUD overlays
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -221,7 +282,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(`Middle-click / Right-click drag to pan • +/- to zoom (${Math.round(zoom * 100)}%) • Click to place tiles`, w / 2, h - 15);
-  }, [camera, tiles, tool, arcCenter, arcPreview, zoom]);
+  }, [camera, tiles, tool, arcCenter, arcPreview, zoom, curveStart, curveEnd, curveControl, curvePreview]);
 
   // Resize & render loop
   useEffect(() => {
@@ -276,6 +337,28 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     return points;
   };
 
+  const generateBezierCurve = (
+    start: { gx: number; gy: number },
+    end: { gx: number; gy: number },
+    control: { gx: number; gy: number }
+  ) => {
+    const points: { gx: number; gy: number }[] = [];
+    const dist = Math.sqrt((end.gx - start.gx) ** 2 + (end.gy - start.gy) ** 2);
+    const steps = Math.max(10, Math.round(dist * 3));
+
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const mt = 1 - t;
+      // Quadratic bezier: B(t) = (1-t)²·P0 + 2(1-t)t·P1 + t²·P2
+      const gx = Math.round(mt * mt * start.gx + 2 * mt * t * control.gx + t * t * end.gx);
+      const gy = Math.round(mt * mt * start.gy + 2 * mt * t * control.gy + t * t * end.gy);
+      if (points.length === 0 || points[points.length - 1].gx !== gx || points[points.length - 1].gy !== gy) {
+        points.push({ gx, gy });
+      }
+    }
+    return points;
+  };
+
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button === 1 || e.button === 2) {
       setIsPanning(true);
@@ -290,7 +373,6 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         if (!arcCenter) {
           setArcCenter({ gx, gy });
         } else {
-          // Place arc
           const points = generateArc(arcCenter.gx, arcCenter.gy, gx, gy);
           setTiles(prev => {
             const next = { ...prev };
@@ -301,6 +383,24 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           });
           setArcCenter(null);
           setArcPreview([]);
+        }
+        return;
+      }
+
+      if (tool === 'curve') {
+        if (!curveStart) {
+          setCurveStart({ gx, gy });
+        } else if (!curveEnd) {
+          setCurveEnd({ gx, gy });
+          // Default control point at midpoint
+          const mid = { gx: Math.round((curveStart.gx + gx) / 2), gy: Math.round((curveStart.gy + gy) / 2) };
+          setCurveControl(mid);
+          setCurvePreview(generateBezierCurve(curveStart, { gx, gy }, mid));
+        } else {
+          // Start dragging control point
+          setIsDraggingCurve(true);
+          setCurveControl({ gx, gy });
+          setCurvePreview(generateBezierCurve(curveStart, curveEnd, { gx, gy }));
         }
         return;
       }
@@ -329,11 +429,35 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       const { gx, gy } = screenToGrid(e.clientX, e.clientY);
       setArcPreview(generateArc(arcCenter.gx, arcCenter.gy, gx, gy));
     }
+
+    // Curve control point dragging
+    if (tool === 'curve' && curveStart && curveEnd && isDraggingCurve) {
+      const { gx, gy } = screenToGrid(e.clientX, e.clientY);
+      setCurveControl({ gx, gy });
+      setCurvePreview(generateBezierCurve(curveStart, curveEnd, { gx, gy }));
+    }
   };
 
   const handleMouseUp = () => {
     setIsPanning(false);
     setIsDrawing(false);
+
+    // Commit curve on mouse up if dragging control point
+    if (isDraggingCurve && curveStart && curveEnd && curveControl) {
+      const points = generateBezierCurve(curveStart, curveEnd, curveControl);
+      setTiles(prev => {
+        const next = { ...prev };
+        for (const p of points) {
+          next[tileKey(p.gx, p.gy)] = 'rail';
+        }
+        return next;
+      });
+      setCurveStart(null);
+      setCurveEnd(null);
+      setCurveControl(null);
+      setCurvePreview([]);
+      setIsDraggingCurve(false);
+    }
   };
 
   const placeTile = (gx: number, gy: number) => {
@@ -572,6 +696,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
                     onClick={() => {
                       setTool(t.tool);
                       if (t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); }
+                      if (t.tool !== 'curve') { setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); }
                       setShowTilesMenu(false);
                     }}
                     className={`w-full text-left px-3 py-2 rounded font-bold text-sm transition-all ${
@@ -588,12 +713,13 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           </div>
 
           {/* Standalone tools */}
-          {TOOLS.filter(t => ['eraser', 'arc'].includes(t.tool)).map(t => (
+          {TOOLS.filter(t => ['eraser', 'arc', 'curve'].includes(t.tool)).map(t => (
             <button
               key={t.tool}
               onClick={() => {
                 setTool(t.tool);
                 if (t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); }
+                if (t.tool !== 'curve') { setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); }
                 setShowTilesMenu(false);
               }}
               className={`px-3 py-2 rounded-lg font-bold text-sm transition-all ${
