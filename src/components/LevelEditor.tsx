@@ -567,7 +567,10 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
               onClick={() => { setShowTilesMenu(!showTilesMenu); setShowFileMenu(false); }}
               className="px-3 py-2 rounded-lg font-bold text-sm bg-game-card text-game-title border border-game-card-border hover:border-game-accent"
             >
-              🧱 Tiles ▾
+              {(() => {
+                const activeTile = TOOLS.find(t => t.tool === tool && ['rail', 'rail_start', 'rail_end', 'spinner', 'bouncer'].includes(t.tool));
+                return activeTile ? `${activeTile.emoji} ${activeTile.label}` : '🧱 Tiles';
+              })()} ▾
             </button>
             {showTilesMenu && (
               <div className="absolute top-full left-0 mt-1 bg-game-card border border-game-card-border rounded-lg p-1 min-w-[140px] shadow-lg">
