@@ -349,6 +349,16 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       });
     } else if (tool === 'rail' || tool === 'spinner' || tool === 'bouncer') {
       setTiles(prev => ({ ...prev, [key]: tool as TileType }));
+    } else if (tool === 'rail_start' || tool === 'rail_end') {
+      setTiles(prev => {
+        const next = { ...prev };
+        // Remove any existing start/end marker of the same type
+        for (const [k, v] of Object.entries(next)) {
+          if (v === tool) delete next[k];
+        }
+        next[key] = tool as TileType;
+        return next;
+      });
     }
   };
 
