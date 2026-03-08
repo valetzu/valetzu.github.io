@@ -100,7 +100,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     ctx.setLineDash([5, 5]);
     ctx.beginPath();
     ctx.moveTo(0, refY);
-    ctx.lineTo(w, refY);
+    ctx.lineTo(vw, refY);
     ctx.stroke();
     ctx.setLineDash([]);
 
