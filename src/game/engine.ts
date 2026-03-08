@@ -130,8 +130,8 @@ export class GameEngine {
           x, y: railY,
           radius: 18, angle: Math.random() * Math.PI * 2,
           rotSpeed: 0,
-          baseY: railY - 20, amplitude: 50 + Math.random() * 60,
-          bounceSpeed: 1.5 + Math.random() * 2,
+          baseY: railY - 20, amplitude: 100 + Math.random() * 80,
+          bounceSpeed: 0.6 + Math.random() * 0.8,
           armLength: 0, hit: false,
         };
       } else {
