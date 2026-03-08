@@ -282,7 +282,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(`Middle-click / Right-click drag to pan • +/- to zoom (${Math.round(zoom * 100)}%) • Click to place tiles`, w / 2, h - 15);
-  }, [camera, tiles, tool, arcCenter, arcPreview, zoom]);
+  }, [camera, tiles, tool, arcCenter, arcPreview, zoom, curveStart, curveEnd, curveControl, curvePreview]);
 
   // Resize & render loop
   useEffect(() => {
