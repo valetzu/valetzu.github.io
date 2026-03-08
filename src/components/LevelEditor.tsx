@@ -74,8 +74,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     // Grid
     const startGX = Math.floor(cx / GRID_SIZE);
     const startGY = Math.floor(cy / GRID_SIZE);
-    const endGX = Math.ceil((cx + w) / GRID_SIZE);
-    const endGY = Math.ceil((cy + h) / GRID_SIZE);
+    const endGX = Math.ceil((cx + vw) / GRID_SIZE);
+    const endGY = Math.ceil((cy + vh) / GRID_SIZE);
 
     ctx.strokeStyle = 'rgba(255,255,255,0.08)';
     ctx.lineWidth = 1;
