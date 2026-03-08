@@ -156,10 +156,12 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         if (hasRight) { ctx.moveTo(centerX, centerY); ctx.lineTo(sx + GRID_SIZE, centerY); }
         if (hasUp) { ctx.moveTo(centerX, sy); ctx.lineTo(centerX, centerY); }
         if (hasDown) { ctx.moveTo(centerX, centerY); ctx.lineTo(centerX, sy + GRID_SIZE); }
-        if (hasUL) { ctx.moveTo(sx, sy); ctx.lineTo(centerX, centerY); }
-        if (hasUR) { ctx.moveTo(sx + GRID_SIZE, sy); ctx.lineTo(centerX, centerY); }
-        if (hasDL) { ctx.moveTo(sx, sy + GRID_SIZE); ctx.lineTo(centerX, centerY); }
-        if (hasDR) { ctx.moveTo(sx + GRID_SIZE, sy + GRID_SIZE); ctx.lineTo(centerX, centerY); }
+        // Only draw diagonal if neither adjacent orthogonal neighbor exists
+        // This prevents thick doubled connections in stair patterns
+        if (hasUL && !hasUp && !hasLeft) { ctx.moveTo(sx, sy); ctx.lineTo(centerX, centerY); }
+        if (hasUR && !hasUp && !hasRight) { ctx.moveTo(sx + GRID_SIZE, sy); ctx.lineTo(centerX, centerY); }
+        if (hasDL && !hasDown && !hasLeft) { ctx.moveTo(sx, sy + GRID_SIZE); ctx.lineTo(centerX, centerY); }
+        if (hasDR && !hasDown && !hasRight) { ctx.moveTo(sx + GRID_SIZE, sy + GRID_SIZE); ctx.lineTo(centerX, centerY); }
         ctx.stroke();
 
         // Label for start/end
