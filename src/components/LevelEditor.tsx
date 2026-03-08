@@ -429,6 +429,13 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       const { gx, gy } = screenToGrid(e.clientX, e.clientY);
       setArcPreview(generateArc(arcCenter.gx, arcCenter.gy, gx, gy));
     }
+
+    // Curve control point dragging
+    if (tool === 'curve' && curveStart && curveEnd && isDraggingCurve) {
+      const { gx, gy } = screenToGrid(e.clientX, e.clientY);
+      setCurveControl({ gx, gy });
+      setCurvePreview(generateBezierCurve(curveStart, curveEnd, { gx, gy }));
+    }
   };
 
   const handleMouseUp = () => {
