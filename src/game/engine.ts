@@ -119,7 +119,7 @@ export class GameEngine {
           type: 'spinner',
           x, y: railY - 10 - Math.random() * 40,
           radius: 12, angle: Math.random() * Math.PI * 2,
-          rotSpeed: (1.5 + Math.random() * 2 + difficulty * 1.5) * (Math.random() > 0.5 ? 1 : -1),
+          rotSpeed: (0.6 + Math.random() * 0.8 + difficulty * 0.8) * (Math.random() > 0.5 ? 1 : -1),
           baseY: 0, amplitude: 0, bounceSpeed: 0,
           armLength: armLen, hit: false,
         };
@@ -130,8 +130,8 @@ export class GameEngine {
           x, y: railY,
           radius: 18, angle: Math.random() * Math.PI * 2,
           rotSpeed: 0,
-          baseY: railY - 20, amplitude: 50 + Math.random() * 60,
-          bounceSpeed: 1.5 + Math.random() * 2,
+          baseY: railY - 20, amplitude: 100 + Math.random() * 80,
+          bounceSpeed: 0.6 + Math.random() * 0.8,
           armLength: 0, hit: false,
         };
       } else {
