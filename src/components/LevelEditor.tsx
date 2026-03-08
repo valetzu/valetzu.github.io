@@ -237,8 +237,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   }, [render, testing]);
 
   const screenToGrid = (clientX: number, clientY: number) => {
-    const gx = Math.floor((clientX + camera.x) / GRID_SIZE);
-    const gy = Math.floor((clientY + camera.y) / GRID_SIZE);
+    const gx = Math.floor((clientX / zoom + camera.x) / GRID_SIZE);
+    const gy = Math.floor((clientY / zoom + camera.y) / GRID_SIZE);
     return { gx, gy };
   };
 
