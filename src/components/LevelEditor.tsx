@@ -501,7 +501,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       />
 
       {/* Toolbar */}
-      <div className="fixed top-4 left-1/2 -translate-x-1/2 flex gap-2 z-10">
+      <div className="fixed top-4 left-4 flex gap-2 z-10">
         {TOOLS.map(t => (
           <button
             key={t.tool}
