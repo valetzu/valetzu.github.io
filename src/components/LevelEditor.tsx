@@ -498,6 +498,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const handleLoad = (level: EditorLevel) => {
     setTiles(level.tiles);
     lastSavedTilesRef.current = JSON.stringify(level.tiles);
+    setCurrentLevelName(level.name);
     setShowLoadDialog(false);
   };
 
