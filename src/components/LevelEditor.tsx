@@ -534,8 +534,6 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const handleMouseUp = () => {
     setIsPanning(false);
     setIsDrawing(false);
-    // Reset last placed rail so separate clicks don't auto-connect
-    lastPlacedRailRef.current = null;
 
     // Commit curve on mouse up if dragging control point
     if (isDraggingCurve && curveStart && curveEnd && curveControl) {
