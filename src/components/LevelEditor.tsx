@@ -342,21 +342,67 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     end: { gx: number; gy: number },
     control: { gx: number; gy: number }
   ) => {
-    const points: { gx: number; gy: number }[] = [];
+    // Sample the bezier at high resolution
     const dist = Math.sqrt((end.gx - start.gx) ** 2 + (end.gy - start.gy) ** 2);
-    const steps = Math.max(10, Math.round(dist * 3));
+    const steps = Math.max(20, Math.round(dist * 6));
+    const rawPoints: { gx: number; gy: number }[] = [];
 
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
       const mt = 1 - t;
-      // Quadratic bezier: B(t) = (1-t)²·P0 + 2(1-t)t·P1 + t²·P2
       const gx = Math.round(mt * mt * start.gx + 2 * mt * t * control.gx + t * t * end.gx);
       const gy = Math.round(mt * mt * start.gy + 2 * mt * t * control.gy + t * t * end.gy);
-      if (points.length === 0 || points[points.length - 1].gx !== gx || points[points.length - 1].gy !== gy) {
-        points.push({ gx, gy });
+      if (rawPoints.length === 0 || rawPoints[rawPoints.length - 1].gx !== gx || rawPoints[rawPoints.length - 1].gy !== gy) {
+        rawPoints.push({ gx, gy });
       }
     }
-    return points;
+
+    // Walk through raw points using Bresenham between consecutive samples
+    // to ensure a single continuous 1-tile-wide path
+    const result: { gx: number; gy: number }[] = [];
+    const visited = new Set<string>();
+
+    const addPoint = (gx: number, gy: number) => {
+      const key = `${gx},${gy}`;
+      if (!visited.has(key)) {
+        visited.add(key);
+        result.push({ gx, gy });
+      }
+    };
+
+    for (let i = 0; i < rawPoints.length; i++) {
+      if (i === 0) {
+        addPoint(rawPoints[0].gx, rawPoints[0].gy);
+        continue;
+      }
+      // Bresenham line from previous to current
+      let x0 = rawPoints[i - 1].gx, y0 = rawPoints[i - 1].gy;
+      const x1 = rawPoints[i].gx, y1 = rawPoints[i].gy;
+      const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+      const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+      let err = dx - dy;
+
+      while (true) {
+        addPoint(x0, y0);
+        if (x0 === x1 && y0 === y1) break;
+        const e2 = 2 * err;
+        // Prefer stepping in the dominant direction only (no diagonals)
+        if (e2 > -dy && e2 < dx) {
+          // Would be diagonal - pick the dominant axis
+          if (dx > dy) {
+            err -= dy; x0 += sx;
+          } else {
+            err += dx; y0 += sy;
+          }
+        } else if (e2 > -dy) {
+          err -= dy; x0 += sx;
+        } else {
+          err += dx; y0 += sy;
+        }
+      }
+    }
+
+    return result;
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
