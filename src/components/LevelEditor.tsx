@@ -747,6 +747,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const clearAll = () => {
     if (Object.keys(tiles).length > 0 && !confirm('Clear all tiles?')) return;
     setTiles({});
+    railConnectionsRef.current = {};
+    lastPlacedRailRef.current = null;
     setArcCenter(null);
     setArcPreview([]);
   };
