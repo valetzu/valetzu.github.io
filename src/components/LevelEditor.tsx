@@ -1,0 +1,618 @@
+import { useState, useRef, useEffect, useCallback } from 'react';
+import {
+  GRID_SIZE, EDITOR_HEIGHT, EditorTool, TileType,
+  EditorLevel, tileKey, parseTileKey,
+  saveCustomLevel, loadCustomLevels, deleteCustomLevel,
+  convertLevelToGameData,
+} from '@/game/editorTypes';
+import { Point, Obstacle, WORLD_CONFIG } from '@/game/types';
+import { GameEngine } from '@/game/engine';
+
+interface LevelEditorProps {
+  onBack: () => void;
+}
+
+const TOOLS: { tool: EditorTool; label: string; emoji: string }[] = [
+  { tool: 'rail', label: 'Rail', emoji: '🛤️' },
+  { tool: 'spinner', label: 'Spinner', emoji: '🌀' },
+  { tool: 'bouncer', label: 'Bouncer', emoji: '🔴' },
+  { tool: 'eraser', label: 'Eraser', emoji: '🧹' },
+  { tool: 'arc', label: 'Arc Tool', emoji: '⭕' },
+];
+
+const TILE_COLORS: Record<TileType, string> = {
+  empty: 'transparent',
+  rail: '#FFD700',
+  spinner: '#FF6B35',
+  bouncer: '#E53935',
+};
+
+export default function LevelEditor({ onBack }: LevelEditorProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [tool, setTool] = useState<EditorTool>('rail');
+  const [tiles, setTiles] = useState<Record<string, TileType>>({});
+  const [camera, setCamera] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [levelName, setLevelName] = useState('');
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [showLoadDialog, setShowLoadDialog] = useState(false);
+  const [savedLevels, setSavedLevels] = useState<EditorLevel[]>([]);
+  const [testing, setTesting] = useState(false);
+  const testCanvasRef = useRef<HTMLCanvasElement>(null);
+  const engineRef = useRef<GameEngine | null>(null);
+  const gameOverRef = useRef(false);
+
+  // Arc tool state
+  const [arcCenter, setArcCenter] = useState<{ gx: number; gy: number } | null>(null);
+  const [arcPreview, setArcPreview] = useState<{ gx: number; gy: number }[]>([]);
+
+  const worldHeight = EDITOR_HEIGHT * GRID_SIZE;
+
+  // Draw the editor grid
+  const render = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d')!;
+    const w = canvas.width;
+    const h = canvas.height;
+    const cx = camera.x;
+    const cy = camera.y;
+
+    // Background
+    ctx.fillStyle = '#1A1A2E';
+    ctx.fillRect(0, 0, w, h);
+
+    // Grid
+    const startGX = Math.floor(cx / GRID_SIZE);
+    const startGY = Math.floor(cy / GRID_SIZE);
+    const endGX = Math.ceil((cx + w) / GRID_SIZE);
+    const endGY = Math.ceil((cy + h) / GRID_SIZE);
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = 1;
+    for (let gx = startGX; gx <= endGX; gx++) {
+      const sx = gx * GRID_SIZE - cx;
+      ctx.beginPath();
+      ctx.moveTo(sx, 0);
+      ctx.lineTo(sx, h);
+      ctx.stroke();
+    }
+    for (let gy = startGY; gy <= endGY; gy++) {
+      const sy = gy * GRID_SIZE - cy;
+      ctx.beginPath();
+      ctx.moveTo(0, sy);
+      ctx.lineTo(w, sy);
+      ctx.stroke();
+    }
+
+    // Horizontal reference line (center)
+    const refY = (EDITOR_HEIGHT / 2) * GRID_SIZE - cy;
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.moveTo(0, refY);
+    ctx.lineTo(w, refY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Tiles
+    for (const [key, type] of Object.entries(tiles)) {
+      if (type === 'empty') continue;
+      const [gx, gy] = parseTileKey(key);
+      const sx = gx * GRID_SIZE - cx;
+      const sy = gy * GRID_SIZE - cy;
+      if (sx < -GRID_SIZE || sx > w + GRID_SIZE || sy < -GRID_SIZE || sy > h + GRID_SIZE) continue;
+
+      if (type === 'rail') {
+        ctx.fillStyle = '#FFD700';
+        ctx.fillRect(sx + 2, sy + 2, GRID_SIZE - 4, GRID_SIZE - 4);
+        // Draw rail line through center connecting to neighbors
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 4;
+        const centerX = sx + GRID_SIZE / 2;
+        const centerY = sy + GRID_SIZE / 2;
+        // Check neighbors
+        const hasLeft = tiles[tileKey(gx - 1, gy)] === 'rail';
+        const hasRight = tiles[tileKey(gx + 1, gy)] === 'rail';
+        const hasUp = tiles[tileKey(gx, gy - 1)] === 'rail';
+        const hasDown = tiles[tileKey(gx, gy + 1)] === 'rail';
+        const hasUL = tiles[tileKey(gx - 1, gy - 1)] === 'rail';
+        const hasUR = tiles[tileKey(gx + 1, gy - 1)] === 'rail';
+        const hasDL = tiles[tileKey(gx - 1, gy + 1)] === 'rail';
+        const hasDR = tiles[tileKey(gx + 1, gy + 1)] === 'rail';
+
+        ctx.beginPath();
+        if (hasLeft) { ctx.moveTo(sx, centerY); ctx.lineTo(centerX, centerY); }
+        if (hasRight) { ctx.moveTo(centerX, centerY); ctx.lineTo(sx + GRID_SIZE, centerY); }
+        if (hasUp) { ctx.moveTo(centerX, sy); ctx.lineTo(centerX, centerY); }
+        if (hasDown) { ctx.moveTo(centerX, centerY); ctx.lineTo(centerX, sy + GRID_SIZE); }
+        if (hasUL) { ctx.moveTo(sx, sy); ctx.lineTo(centerX, centerY); }
+        if (hasUR) { ctx.moveTo(sx + GRID_SIZE, sy); ctx.lineTo(centerX, centerY); }
+        if (hasDL) { ctx.moveTo(sx, sy + GRID_SIZE); ctx.lineTo(centerX, centerY); }
+        if (hasDR) { ctx.moveTo(sx + GRID_SIZE, sy + GRID_SIZE); ctx.lineTo(centerX, centerY); }
+        ctx.stroke();
+
+        // Dot at center
+        ctx.fillStyle = '#333';
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, 4, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (type === 'spinner') {
+        ctx.fillStyle = 'rgba(255,107,53,0.3)';
+        ctx.fillRect(sx + 2, sy + 2, GRID_SIZE - 4, GRID_SIZE - 4);
+        ctx.font = `${GRID_SIZE * 0.6}px system-ui`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('🌀', sx + GRID_SIZE / 2, sy + GRID_SIZE / 2);
+      } else if (type === 'bouncer') {
+        ctx.fillStyle = 'rgba(229,57,53,0.3)';
+        ctx.fillRect(sx + 2, sy + 2, GRID_SIZE - 4, GRID_SIZE - 4);
+        ctx.font = `${GRID_SIZE * 0.6}px system-ui`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('🔴', sx + GRID_SIZE / 2, sy + GRID_SIZE / 2);
+      }
+    }
+
+    // Arc preview
+    if (arcPreview.length > 0) {
+      ctx.fillStyle = 'rgba(255,215,0,0.4)';
+      for (const p of arcPreview) {
+        const sx = p.gx * GRID_SIZE - cx;
+        const sy = p.gy * GRID_SIZE - cy;
+        ctx.fillRect(sx + 2, sy + 2, GRID_SIZE - 4, GRID_SIZE - 4);
+      }
+    }
+
+    // Arc center marker
+    if (arcCenter) {
+      const acx = arcCenter.gx * GRID_SIZE + GRID_SIZE / 2 - cx;
+      const acy = arcCenter.gy * GRID_SIZE + GRID_SIZE / 2 - cy;
+      ctx.strokeStyle = '#00FF88';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(acx, acy, 12, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = '#00FF88';
+      ctx.beginPath();
+      ctx.arc(acx, acy, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Tool indicator top-left
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, 200, 40);
+    ctx.fillStyle = '#FFF';
+    ctx.font = 'bold 16px system-ui';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    const toolInfo = TOOLS.find(t => t.tool === tool);
+    ctx.fillText(`${toolInfo?.emoji} ${toolInfo?.label}${tool === 'arc' && arcCenter ? ' (click radius)' : ''}`, 10, 12);
+
+    // Instructions
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(0, h - 30, w, 30);
+    ctx.fillStyle = '#AAA';
+    ctx.font = '12px system-ui';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Middle-click / Right-click drag to pan • Scroll to zoom • Click to place tiles', w / 2, h - 15);
+  }, [camera, tiles, tool, arcCenter, arcPreview]);
+
+  // Resize & render loop
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || testing) return;
+
+    const resize = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    };
+    resize();
+    window.addEventListener('resize', resize);
+
+    let frame: number;
+    const loop = () => {
+      render();
+      frame = requestAnimationFrame(loop);
+    };
+    loop();
+
+    return () => {
+      window.removeEventListener('resize', resize);
+      cancelAnimationFrame(frame);
+    };
+  }, [render, testing]);
+
+  const screenToGrid = (clientX: number, clientY: number) => {
+    const gx = Math.floor((clientX + camera.x) / GRID_SIZE);
+    const gy = Math.floor((clientY + camera.y) / GRID_SIZE);
+    return { gx, gy };
+  };
+
+  const generateArc = (centerGX: number, centerGY: number, targetGX: number, targetGY: number) => {
+    const dx = targetGX - centerGX;
+    const dy = targetGY - centerGY;
+    const radius = Math.sqrt(dx * dx + dy * dy);
+    if (radius < 1) return [];
+
+    const points: { gx: number; gy: number }[] = [];
+    const circumference = Math.round(2 * Math.PI * radius);
+    const steps = Math.max(12, circumference * 2);
+
+    for (let i = 0; i <= steps; i++) {
+      const angle = (i / steps) * Math.PI * 2;
+      const gx = Math.round(centerGX + Math.cos(angle) * radius);
+      const gy = Math.round(centerGY + Math.sin(angle) * radius);
+      // Avoid duplicates
+      if (points.length === 0 || points[points.length - 1].gx !== gx || points[points.length - 1].gy !== gy) {
+        points.push({ gx, gy });
+      }
+    }
+    return points;
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.button === 1 || e.button === 2) {
+      setIsPanning(true);
+      setPanStart({ x: e.clientX + camera.x, y: e.clientY + camera.y });
+      return;
+    }
+
+    if (e.button === 0) {
+      const { gx, gy } = screenToGrid(e.clientX, e.clientY);
+
+      if (tool === 'arc') {
+        if (!arcCenter) {
+          setArcCenter({ gx, gy });
+        } else {
+          // Place arc
+          const points = generateArc(arcCenter.gx, arcCenter.gy, gx, gy);
+          setTiles(prev => {
+            const next = { ...prev };
+            for (const p of points) {
+              next[tileKey(p.gx, p.gy)] = 'rail';
+            }
+            return next;
+          });
+          setArcCenter(null);
+          setArcPreview([]);
+        }
+        return;
+      }
+
+      setIsDrawing(true);
+      placeTile(gx, gy);
+    }
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (isPanning) {
+      setCamera({
+        x: panStart.x - e.clientX,
+        y: panStart.y - e.clientY,
+      });
+      return;
+    }
+
+    if (isDrawing) {
+      const { gx, gy } = screenToGrid(e.clientX, e.clientY);
+      placeTile(gx, gy);
+    }
+
+    // Arc preview
+    if (tool === 'arc' && arcCenter) {
+      const { gx, gy } = screenToGrid(e.clientX, e.clientY);
+      setArcPreview(generateArc(arcCenter.gx, arcCenter.gy, gx, gy));
+    }
+  };
+
+  const handleMouseUp = () => {
+    setIsPanning(false);
+    setIsDrawing(false);
+  };
+
+  const placeTile = (gx: number, gy: number) => {
+    const key = tileKey(gx, gy);
+    if (tool === 'eraser') {
+      setTiles(prev => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    } else if (tool === 'rail' || tool === 'spinner' || tool === 'bouncer') {
+      setTiles(prev => ({ ...prev, [key]: tool as TileType }));
+    }
+  };
+
+  const handleContextMenu = (e: React.MouseEvent) => e.preventDefault();
+
+  // Test the level
+  const startTest = () => {
+    const { railPoints, obstacles: obsData } = convertLevelToGameData(tiles);
+    if (railPoints.length < 3) {
+      alert('Place at least 3 rail tiles to test!');
+      return;
+    }
+    setTesting(true);
+    gameOverRef.current = false;
+  };
+
+  // Test mode rendering
+  useEffect(() => {
+    if (!testing) return;
+    const canvas = testCanvasRef.current;
+    if (!canvas) return;
+
+    const resize = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    };
+    resize();
+    window.addEventListener('resize', resize);
+
+    // Convert tiles to engine-compatible format
+    const { railPoints, obstacles: obsData } = convertLevelToGameData(tiles);
+
+    // Create a custom engine with pre-built rail
+    const engine = new GameEngine(canvas, 'overworld', { motor: 0, health: 0, grip: 0, rocket: 0, shield: 0 }, {
+      onGameOver: () => { gameOverRef.current = true; },
+    });
+
+    // Override the rail with our custom one
+    engine.rail = railPoints.map(p => ({ x: p.x * GRID_SIZE, y: p.y * GRID_SIZE }));
+    engine.ground = engine.rail.map(p => p.y + 150);
+    engine.obstacles = [];
+
+    // Add obstacles
+    for (const obs of obsData) {
+      const wx = obs.gx * GRID_SIZE;
+      const wy = obs.gy * GRID_SIZE;
+      if (obs.type === 'spinner') {
+        engine.obstacles.push({
+          type: 'spinner',
+          x: wx, y: wy,
+          radius: 12, angle: 0,
+          rotSpeed: -0.5,
+          baseY: 0, amplitude: 0, bounceSpeed: 0,
+          armLength: 120, hit: false,
+        });
+      } else {
+        engine.obstacles.push({
+          type: 'bouncer',
+          x: wx, y: wy,
+          radius: 18, angle: 0,
+          rotSpeed: 0,
+          baseY: wy - 20, amplitude: 80,
+          bounceSpeed: 0.7,
+          armLength: 0, hit: false,
+        });
+      }
+    }
+
+    // Prevent auto-generation of more rail
+    engine.generateRail = () => {};
+    engine.spawnObstacles = () => {};
+    engine.pos = 0;
+    engineRef.current = engine;
+    engine.start();
+
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.code === 'Escape') {
+        engine.stop();
+        setTesting(false);
+      }
+      if (e.code === 'Enter' && gameOverRef.current) {
+        engine.stop();
+        setTesting(false);
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+
+    return () => {
+      engine.stop();
+      window.removeEventListener('resize', resize);
+      window.removeEventListener('keydown', handleKey);
+    };
+  }, [testing, tiles]);
+
+  // Save dialog
+  const handleSave = () => {
+    if (!levelName.trim()) return;
+    const level: EditorLevel = {
+      name: levelName.trim(),
+      tiles,
+      createdAt: Date.now(),
+    };
+    saveCustomLevel(level);
+    setShowSaveDialog(false);
+    setLevelName('');
+  };
+
+  const handleLoad = (level: EditorLevel) => {
+    setTiles(level.tiles);
+    setShowLoadDialog(false);
+  };
+
+  const handleDelete = (name: string) => {
+    deleteCustomLevel(name);
+    setSavedLevels(loadCustomLevels());
+  };
+
+  const openLoadDialog = () => {
+    setSavedLevels(loadCustomLevels());
+    setShowLoadDialog(true);
+  };
+
+  const clearAll = () => {
+    if (Object.keys(tiles).length > 0 && !confirm('Clear all tiles?')) return;
+    setTiles({});
+    setArcCenter(null);
+    setArcPreview([]);
+  };
+
+  if (testing) {
+    return (
+      <div className="fixed inset-0">
+        <canvas ref={testCanvasRef} className="w-full h-full" />
+        <div className="fixed top-4 right-4 z-10">
+          <button
+            onClick={() => {
+              engineRef.current?.stop();
+              setTesting(false);
+            }}
+            className="px-4 py-2 rounded-lg bg-game-accent text-game-bg font-bold hover:brightness-110"
+          >
+            ✕ Back to Editor
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 overflow-hidden" onContextMenu={handleContextMenu}>
+      <canvas
+        ref={canvasRef}
+        className="w-full h-full cursor-crosshair"
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+      />
+
+      {/* Toolbar */}
+      <div className="fixed top-4 left-1/2 -translate-x-1/2 flex gap-2 z-10">
+        {TOOLS.map(t => (
+          <button
+            key={t.tool}
+            onClick={() => {
+              setTool(t.tool);
+              if (t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); }
+            }}
+            className={`px-3 py-2 rounded-lg font-bold text-sm transition-all ${
+              tool === t.tool
+                ? 'bg-game-accent text-game-bg scale-105'
+                : 'bg-game-card text-game-title border border-game-card-border hover:border-game-accent'
+            }`}
+          >
+            {t.emoji} {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Action buttons */}
+      <div className="fixed top-4 right-4 flex gap-2 z-10">
+        <button
+          onClick={startTest}
+          className="px-4 py-2 rounded-lg bg-green-600 text-white font-bold text-sm hover:bg-green-500"
+        >
+          ▶ Test
+        </button>
+        <button
+          onClick={() => setShowSaveDialog(true)}
+          className="px-4 py-2 rounded-lg bg-blue-600 text-white font-bold text-sm hover:bg-blue-500"
+        >
+          💾 Save
+        </button>
+        <button
+          onClick={openLoadDialog}
+          className="px-4 py-2 rounded-lg bg-purple-600 text-white font-bold text-sm hover:bg-purple-500"
+        >
+          📂 Load
+        </button>
+        <button
+          onClick={clearAll}
+          className="px-4 py-2 rounded-lg bg-red-700 text-white font-bold text-sm hover:bg-red-600"
+        >
+          🗑️ Clear
+        </button>
+        <button
+          onClick={onBack}
+          className="px-4 py-2 rounded-lg bg-game-card text-game-title border border-game-card-border font-bold text-sm hover:border-game-accent"
+        >
+          ← Menu
+        </button>
+      </div>
+
+      {/* Save Dialog */}
+      {showSaveDialog && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-20">
+          <div className="bg-game-card border-2 border-game-card-border rounded-2xl p-6 w-80">
+            <h3 className="text-game-title text-xl font-bold mb-4">Save Level</h3>
+            <input
+              type="text"
+              value={levelName}
+              onChange={e => setLevelName(e.target.value)}
+              placeholder="Level name..."
+              className="w-full px-3 py-2 rounded-lg bg-game-bg text-game-title border border-game-card-border mb-4 outline-none focus:border-game-accent"
+              autoFocus
+              onKeyDown={e => e.key === 'Enter' && handleSave()}
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={handleSave}
+                className="flex-1 py-2 rounded-lg bg-game-accent text-game-bg font-bold hover:brightness-110"
+              >
+                Save
+              </button>
+              <button
+                onClick={() => setShowSaveDialog(false)}
+                className="flex-1 py-2 rounded-lg bg-game-bar-bg text-game-subtitle font-bold hover:brightness-110"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Load Dialog */}
+      {showLoadDialog && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-20">
+          <div className="bg-game-card border-2 border-game-card-border rounded-2xl p-6 w-96 max-h-[70vh] flex flex-col">
+            <h3 className="text-game-title text-xl font-bold mb-4">Load Level</h3>
+            {savedLevels.length === 0 ? (
+              <p className="text-game-subtitle text-center py-8">No saved levels yet</p>
+            ) : (
+              <div className="flex-1 overflow-y-auto space-y-2">
+                {savedLevels.map(level => (
+                  <div key={level.name} className="flex items-center justify-between p-3 rounded-lg bg-game-bg border border-game-card-border">
+                    <div>
+                      <div className="text-game-title font-bold">{level.name}</div>
+                      <div className="text-game-subtitle text-xs">
+                        {Object.keys(level.tiles).length} tiles • {new Date(level.createdAt).toLocaleDateString()}
+                      </div>
+                    </div>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => handleLoad(level)}
+                        className="px-3 py-1 rounded bg-game-accent text-game-bg font-bold text-sm hover:brightness-110"
+                      >
+                        Load
+                      </button>
+                      <button
+                        onClick={() => handleDelete(level.name)}
+                        className="px-3 py-1 rounded bg-red-700 text-white font-bold text-sm hover:bg-red-600"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button
+              onClick={() => setShowLoadDialog(false)}
+              className="mt-4 w-full py-2 rounded-lg bg-game-bar-bg text-game-subtitle font-bold hover:brightness-110"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

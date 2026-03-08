@@ -2,8 +2,9 @@ import { useState, useCallback } from 'react';
 import { WorldType, SaveData, loadSave, saveSave } from '@/game/types';
 import GameCanvas from '@/components/GameCanvas';
 import GameMenu from '@/components/GameMenu';
+import LevelEditor from '@/components/LevelEditor';
 
-type Phase = 'menu' | 'playing';
+type Phase = 'menu' | 'playing' | 'editor';
 
 const Index = () => {
   const [phase, setPhase] = useState<Phase>('menu');
@@ -45,7 +46,11 @@ const Index = () => {
     );
   }
 
-  return <GameMenu save={save} onStartGame={startGame} onUpdateSave={setSave} />;
+  if (phase === 'editor') {
+    return <LevelEditor onBack={backToMenu} />;
+  }
+
+  return <GameMenu save={save} onStartGame={startGame} onUpdateSave={setSave} onOpenEditor={() => setPhase('editor')} />;
 };
 
 export default Index;
