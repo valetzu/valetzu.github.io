@@ -722,6 +722,9 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     lastSavedTilesRef.current = JSON.stringify(level.tiles);
     setCurrentLevelName(level.name);
     setShowLoadDialog(false);
+    // Rebuild connections from adjacency for loaded levels
+    rebuildConnectionsFromTiles(level.tiles);
+    lastPlacedRailRef.current = null;
   };
 
   const handleDelete = (name: string) => {
