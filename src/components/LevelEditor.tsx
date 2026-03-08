@@ -696,6 +696,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
                     onClick={() => {
                       setTool(t.tool);
                       if (t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); }
+                      if (t.tool !== 'curve') { setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); }
                       setShowTilesMenu(false);
                     }}
                     className={`w-full text-left px-3 py-2 rounded font-bold text-sm transition-all ${
