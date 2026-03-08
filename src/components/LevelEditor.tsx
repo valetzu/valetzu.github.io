@@ -476,8 +476,23 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     };
     saveCustomLevel(level);
     lastSavedTilesRef.current = JSON.stringify(tiles);
+    setCurrentLevelName(levelName.trim());
     setShowSaveDialog(false);
     setLevelName('');
+  };
+
+  const handleQuickSave = () => {
+    if (!currentLevelName) {
+      setShowSaveDialog(true);
+      return;
+    }
+    const level: EditorLevel = {
+      name: currentLevelName,
+      tiles,
+      createdAt: Date.now(),
+    };
+    saveCustomLevel(level);
+    lastSavedTilesRef.current = JSON.stringify(tiles);
   };
 
   const handleLoad = (level: EditorLevel) => {
