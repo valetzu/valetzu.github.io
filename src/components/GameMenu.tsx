@@ -14,7 +14,7 @@ interface GameMenuProps {
 
 type MenuView = 'main' | 'shop';
 
-export default function GameMenu({ save, onStartGame, onUpdateSave }: GameMenuProps) {
+export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor }: GameMenuProps) {
   const [view, setView] = useState<MenuView>('main');
 
   const buyUpgrade = (key: keyof Upgrades) => {
