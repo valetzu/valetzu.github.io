@@ -103,3 +103,26 @@ All colors MUST be HSL.
     @apply bg-background text-foreground;
   }
 }
+
+/* Game Design Tokens */
+:root {
+  --game-bg: #1A1A2E;
+  --game-title: #F0E6D3;
+  --game-subtitle: #8B8BA3;
+  --game-cash: #FFD700;
+  --game-accent: #FF6B35;
+  --game-card: #16213E;
+  --game-card-border: #2A2A5A;
+  --game-bar-bg: #333366;
+}
+
+.bg-game-bg { background-color: var(--game-bg); }
+.text-game-title { color: var(--game-title); }
+.text-game-subtitle { color: var(--game-subtitle); }
+.text-game-cash { color: var(--game-cash); }
+.bg-game-accent { background-color: var(--game-accent); }
+.text-game-bg { color: var(--game-bg); }
+.bg-game-card { background-color: var(--game-card); }
+.border-game-card-border { border-color: var(--game-card-border); }
+.border-game-accent { border-color: var(--game-accent); }
+.bg-game-bar-bg { background-color: var(--game-bar-bg); }
