@@ -61,6 +61,28 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       delete conns[key];
     }
   };
+
+  const rebuildConnectionsFromTiles = (tilesData: Record<string, TileType>) => {
+    const conns: Record<string, Set<string>> = {};
+    const isRailLike = (t: TileType | undefined) => t === 'rail' || t === 'rail_start' || t === 'rail_end';
+    const keys = Object.keys(tilesData).filter(k => isRailLike(tilesData[k]));
+    for (const key of keys) {
+      const [gx, gy] = parseTileKey(key);
+      // Only connect orthogonal neighbors (simple chain rebuild)
+      for (const [dx, dy] of [[1, 0], [0, 1]] as const) {
+        const nk = tileKey(gx + dx, gy + dy);
+        if (isRailLike(tilesData[nk])) {
+          if (!conns[key]) conns[key] = new Set();
+          if (!conns[nk]) conns[nk] = new Set();
+          if (conns[key].size < 2 && conns[nk].size < 2) {
+            conns[key].add(nk);
+            conns[nk].add(key);
+          }
+        }
+      }
+    }
+    railConnectionsRef.current = conns;
+  };
   const [camera, setCamera] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [isPanning, setIsPanning] = useState(false);
