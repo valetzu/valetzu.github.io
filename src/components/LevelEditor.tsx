@@ -554,6 +554,25 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         </button>
       </div>
 
+      {/* Zoom buttons */}
+      <div className="fixed bottom-12 right-4 flex gap-2 z-10">
+        <button
+          onClick={() => setZoom(z => Math.max(0.25, z - 0.25))}
+          className="w-10 h-10 rounded-lg bg-game-card text-game-title border border-game-card-border font-bold text-lg hover:border-game-accent"
+        >
+          −
+        </button>
+        <span className="w-14 h-10 rounded-lg bg-game-card text-game-title border border-game-card-border font-bold text-sm flex items-center justify-center">
+          {Math.round(zoom * 100)}%
+        </span>
+        <button
+          onClick={() => setZoom(z => Math.min(3, z + 0.25))}
+          className="w-10 h-10 rounded-lg bg-game-card text-game-title border border-game-card-border font-bold text-lg hover:border-game-accent"
+        >
+          +
+        </button>
+      </div>
+
       {/* Save Dialog */}
       {showSaveDialog && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-20">
