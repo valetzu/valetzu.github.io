@@ -2,8 +2,9 @@ import { useState, useCallback } from 'react';
 import { WorldType, SaveData, loadSave, saveSave } from '@/game/types';
 import GameCanvas from '@/components/GameCanvas';
 import GameMenu from '@/components/GameMenu';
+import LevelEditor from '@/components/LevelEditor';
 
-type Phase = 'menu' | 'playing';
+type Phase = 'menu' | 'playing' | 'editor';
 
 const Index = () => {
   const [phase, setPhase] = useState<Phase>('menu');
