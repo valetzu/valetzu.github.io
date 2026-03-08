@@ -353,7 +353,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     resize();
     window.addEventListener('resize', resize);
 
-    // Convert tiles to engine-compatible format
+    // Convert tiles to engine-compatible format (already resampled at RAIL_SPACING)
     const { railPoints, obstacles: obsData } = convertLevelToGameData(tiles);
 
     // Create a custom engine with pre-built rail
@@ -361,8 +361,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       onGameOver: () => { gameOverRef.current = true; },
     });
 
-    // Override the rail with our custom one
-    engine.rail = railPoints.map(p => ({ x: p.x * GRID_SIZE, y: p.y * GRID_SIZE }));
+    // Override the rail with our resampled one (already in world coordinates)
+    engine.rail = railPoints;
     engine.ground = engine.rail.map(p => p.y + 150);
     engine.obstacles = [];
 
