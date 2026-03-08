@@ -9,6 +9,7 @@ interface GameMenuProps {
   save: SaveData;
   onStartGame: (world: WorldType) => void;
   onUpdateSave: (save: SaveData) => void;
+  onOpenEditor: () => void;
 }
 
 type MenuView = 'main' | 'shop';
