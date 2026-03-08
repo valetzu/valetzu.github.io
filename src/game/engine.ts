@@ -112,9 +112,9 @@ export class GameEngine {
       const r = Math.random();
 
       let obs: Obstacle;
-      if (r < 0.4) {
+      if (r < 0.5) {
         // Spinner
-        const armLen = 50 + Math.random() * 40;
+        const armLen = (50 + Math.random() * 40) * 3;
         obs = {
           type: 'spinner',
           x, y: railY - 10 - Math.random() * 40,
@@ -123,7 +123,7 @@ export class GameEngine {
           baseY: 0, amplitude: 0, bounceSpeed: 0,
           armLength: armLen, hit: false,
         };
-      } else if (r < 0.7) {
+      } else {
         // Bouncer
         obs = {
           type: 'bouncer',
@@ -132,16 +132,6 @@ export class GameEngine {
           rotSpeed: 0,
           baseY: railY - 20, amplitude: 100 + Math.random() * 80,
           bounceSpeed: 0.6 + Math.random() * 0.8,
-          armLength: 0, hit: false,
-        };
-      } else {
-        // Static
-        const offsetY = (Math.random() - 0.5) * 60;
-        obs = {
-          type: 'static',
-          x, y: railY + offsetY,
-          radius: 22 + Math.random() * 10, angle: 0,
-          rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: 0,
           armLength: 0, hit: false,
         };
       }
