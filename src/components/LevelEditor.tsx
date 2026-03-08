@@ -32,6 +32,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const [tool, setTool] = useState<EditorTool>('rail');
   const [tiles, setTiles] = useState<Record<string, TileType>>({});
   const [camera, setCamera] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [isDrawing, setIsDrawing] = useState(false);
