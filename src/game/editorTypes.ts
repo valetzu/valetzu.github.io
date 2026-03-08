@@ -53,7 +53,7 @@ export function convertLevelToGameData(tiles: Record<string, TileType>) {
 
   for (const [key, type] of Object.entries(tiles)) {
     const [gx, gy] = parseTileKey(key);
-    if (type === 'rail') {
+    if (type === 'rail' || type === 'rail_start' || type === 'rail_end') {
       rawRail.push({ x: gx * GRID_SIZE, y: gy * GRID_SIZE });
     } else if (type === 'spinner' || type === 'bouncer') {
       obstacles.push({ type, gx, gy });
