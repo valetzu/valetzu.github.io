@@ -212,15 +212,6 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     // Reset transform for HUD overlays
     ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-    // Tool indicator top-left
-    ctx.fillStyle = 'rgba(0,0,0,0.7)';
-    ctx.fillRect(0, 0, 200, 40);
-    ctx.fillStyle = '#FFF';
-    ctx.font = 'bold 16px system-ui';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    const toolInfo = TOOLS.find(t => t.tool === tool);
-    ctx.fillText(`${toolInfo?.emoji} ${toolInfo?.label}${tool === 'arc' && arcCenter ? ' (click radius)' : ''}`, 10, 12);
 
     // Instructions
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
