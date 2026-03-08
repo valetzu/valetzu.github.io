@@ -353,7 +353,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     resize();
     window.addEventListener('resize', resize);
 
-    // Convert tiles to engine-compatible format
+    // Convert tiles to engine-compatible format (already resampled at RAIL_SPACING)
     const { railPoints, obstacles: obsData } = convertLevelToGameData(tiles);
 
     // Create a custom engine with pre-built rail
@@ -361,19 +361,26 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       onGameOver: () => { gameOverRef.current = true; },
     });
 
-    // Override the rail with our custom one
-    engine.rail = railPoints.map(p => ({ x: p.x * GRID_SIZE, y: p.y * GRID_SIZE }));
+    // Override the rail with our resampled one (already in world coordinates)
+    engine.rail = railPoints;
     engine.ground = engine.rail.map(p => p.y + 150);
     engine.obstacles = [];
 
-    // Add obstacles
+    // Add obstacles - convert grid coords to world coords matching the resampled rail
     for (const obs of obsData) {
       const wx = obs.gx * GRID_SIZE;
       const wy = obs.gy * GRID_SIZE;
+      // Find closest rail x to determine the correct world-x in the resampled space
+      // Since resampled rail maps linearly from editor x, we can use the same x offset
+      const minRailX = railPoints.length > 0 ? railPoints[0].x : 0;
+      const maxRailX = railPoints.length > 0 ? railPoints[railPoints.length - 1].x : 0;
+      // Scale obstacle x relative to rail range
+      const obsWorldX = Math.max(minRailX, Math.min(maxRailX, wx));
+      
       if (obs.type === 'spinner') {
         engine.obstacles.push({
           type: 'spinner',
-          x: wx, y: wy,
+          x: obsWorldX, y: wy,
           radius: 12, angle: 0,
           rotSpeed: -0.5,
           baseY: 0, amplitude: 0, bounceSpeed: 0,
@@ -382,7 +389,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       } else {
         engine.obstacles.push({
           type: 'bouncer',
-          x: wx, y: wy,
+          x: obsWorldX, y: wy,
           radius: 18, angle: 0,
           rotSpeed: 0,
           baseY: wy - 20, amplitude: 80,
