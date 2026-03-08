@@ -373,7 +373,6 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         if (!arcCenter) {
           setArcCenter({ gx, gy });
         } else {
-          // Place arc
           const points = generateArc(arcCenter.gx, arcCenter.gy, gx, gy);
           setTiles(prev => {
             const next = { ...prev };
@@ -384,6 +383,24 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           });
           setArcCenter(null);
           setArcPreview([]);
+        }
+        return;
+      }
+
+      if (tool === 'curve') {
+        if (!curveStart) {
+          setCurveStart({ gx, gy });
+        } else if (!curveEnd) {
+          setCurveEnd({ gx, gy });
+          // Default control point at midpoint
+          const mid = { gx: Math.round((curveStart.gx + gx) / 2), gy: Math.round((curveStart.gy + gy) / 2) };
+          setCurveControl(mid);
+          setCurvePreview(generateBezierCurve(curveStart, { gx, gy }, mid));
+        } else {
+          // Start dragging control point
+          setIsDraggingCurve(true);
+          setCurveControl({ gx, gy });
+          setCurvePreview(generateBezierCurve(curveStart, curveEnd, { gx, gy }));
         }
         return;
       }
