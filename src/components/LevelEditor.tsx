@@ -712,7 +712,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           </div>
 
           {/* Standalone tools */}
-          {TOOLS.filter(t => ['eraser', 'arc'].includes(t.tool)).map(t => (
+          {TOOLS.filter(t => ['eraser', 'arc', 'curve'].includes(t.tool)).map(t => (
             <button
               key={t.tool}
               onClick={() => {
