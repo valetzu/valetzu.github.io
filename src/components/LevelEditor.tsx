@@ -489,8 +489,14 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   };
 
   const openLoadDialog = () => {
+    if (hasUnsavedChanges() && !confirm('You have unsaved changes. Load a different level?')) return;
     setSavedLevels(loadCustomLevels());
     setShowLoadDialog(true);
+  };
+
+  const handleBack = () => {
+    if (hasUnsavedChanges() && !confirm('You have unsaved changes. Leave the editor?')) return;
+    onBack();
   };
 
   const clearAll = () => {
