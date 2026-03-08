@@ -41,6 +41,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [isDrawing, setIsDrawing] = useState(false);
   const [levelName, setLevelName] = useState('');
+  const [currentLevelName, setCurrentLevelName] = useState('');
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [showLoadDialog, setShowLoadDialog] = useState(false);
   const [savedLevels, setSavedLevels] = useState<EditorLevel[]>([]);
