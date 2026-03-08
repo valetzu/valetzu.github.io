@@ -301,8 +301,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const handleMouseMove = (e: React.MouseEvent) => {
     if (isPanning) {
       setCamera({
-        x: panStart.x - e.clientX,
-        y: panStart.y - e.clientY,
+        x: panStart.x - e.clientX / zoom,
+        y: panStart.y - e.clientY / zoom,
       });
       return;
     }
