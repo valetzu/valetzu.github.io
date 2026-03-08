@@ -695,23 +695,63 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       {/* Save Dialog */}
       {showSaveDialog && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-20">
-          <div className="bg-game-card border-2 border-game-card-border rounded-2xl p-6 w-80">
-            <h3 className="text-game-title text-xl font-bold mb-4">Save Level</h3>
+          <div className="bg-game-card border-2 border-game-card-border rounded-2xl p-6 w-96 max-h-[70vh] flex flex-col">
+            <h3 className="text-game-title text-xl font-bold mb-4">Save Level As</h3>
             <input
               type="text"
               value={levelName}
               onChange={e => setLevelName(e.target.value)}
-              placeholder="Level name..."
+              placeholder="Enter new level name..."
               className="w-full px-3 py-2 rounded-lg bg-game-bg text-game-title border border-game-card-border mb-4 outline-none focus:border-game-accent"
               autoFocus
               onKeyDown={e => e.key === 'Enter' && handleSave()}
             />
+            {/* Existing levels to overwrite */}
+            {(() => {
+              const existing = loadCustomLevels();
+              if (existing.length === 0) return null;
+              return (
+                <div className="mb-4">
+                  <p className="text-game-subtitle text-xs mb-2">Or overwrite an existing level:</p>
+                  <div className="max-h-[30vh] overflow-y-auto space-y-1">
+                    {existing.map(level => (
+                      <button
+                        key={level.name}
+                        onClick={() => {
+                          if (confirm(`Overwrite level "${level.name}"?`)) {
+                            const newLevel: EditorLevel = {
+                              name: level.name,
+                              tiles,
+                              createdAt: Date.now(),
+                            };
+                            saveCustomLevel(newLevel);
+                            lastSavedTilesRef.current = JSON.stringify(tiles);
+                            setCurrentLevelName(level.name);
+                            setShowSaveDialog(false);
+                            setLevelName('');
+                          }
+                        }}
+                        className="w-full flex items-center justify-between p-2 rounded-lg bg-game-bg border border-game-card-border hover:border-game-accent text-left"
+                      >
+                        <div>
+                          <div className="text-game-title font-bold text-sm">{level.name}</div>
+                          <div className="text-game-subtitle text-xs">
+                            {Object.keys(level.tiles).length} tiles • {new Date(level.createdAt).toLocaleDateString()}
+                          </div>
+                        </div>
+                        <span className="text-game-subtitle text-xs">Overwrite</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
             <div className="flex gap-2">
               <button
                 onClick={handleSave}
                 className="flex-1 py-2 rounded-lg bg-game-accent text-game-bg font-bold hover:brightness-110"
               >
-                Save
+                Save New
               </button>
               <button
                 onClick={() => setShowSaveDialog(false)}
