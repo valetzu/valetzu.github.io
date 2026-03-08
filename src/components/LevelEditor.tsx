@@ -826,7 +826,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
                   <button
                     key={t.tool}
                     onClick={() => {
-                      setTool(t.tool);
+                      setTool(t.tool); lastPlacedRailRef.current = null;
                       if (t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); }
                       if (t.tool !== 'curve') { setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); }
                       setShowTilesMenu(false);
