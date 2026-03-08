@@ -58,12 +58,18 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     const ctx = canvas.getContext('2d')!;
     const w = canvas.width;
     const h = canvas.height;
-    const cx = camera.x;
-    const cy = camera.y;
 
-    // Background
+    // Clear
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#1A1A2E';
     ctx.fillRect(0, 0, w, h);
+
+    // Apply zoom transform
+    ctx.setTransform(zoom, 0, 0, zoom, 0, 0);
+    const cx = camera.x;
+    const cy = camera.y;
+    const vw = w / zoom;
+    const vh = h / zoom;
 
     // Grid
     const startGX = Math.floor(cx / GRID_SIZE);
