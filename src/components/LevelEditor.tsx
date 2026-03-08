@@ -13,6 +13,8 @@ interface LevelEditorProps {
 }
 
 const TOOLS: { tool: EditorTool; label: string; emoji: string }[] = [
+  { tool: 'rail_start', label: 'Start', emoji: '🟢' },
+  { tool: 'rail_end', label: 'End', emoji: '🏁' },
   { tool: 'rail', label: 'Rail', emoji: '🛤️' },
   { tool: 'spinner', label: 'Spinner', emoji: '🌀' },
   { tool: 'bouncer', label: 'Bouncer', emoji: '🔴' },
@@ -23,6 +25,8 @@ const TOOLS: { tool: EditorTool; label: string; emoji: string }[] = [
 const TILE_COLORS: Record<TileType, string> = {
   empty: 'transparent',
   rail: '#FFD700',
+  rail_start: '#00E676',
+  rail_end: '#FF4081',
   spinner: '#FF6B35',
   bouncer: '#E53935',
 };
