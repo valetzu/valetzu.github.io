@@ -13,6 +13,8 @@ interface LevelEditorProps {
 }
 
 const TOOLS: { tool: EditorTool; label: string; emoji: string }[] = [
+  { tool: 'rail_start', label: 'Start', emoji: '🟢' },
+  { tool: 'rail_end', label: 'End', emoji: '🏁' },
   { tool: 'rail', label: 'Rail', emoji: '🛤️' },
   { tool: 'spinner', label: 'Spinner', emoji: '🌀' },
   { tool: 'bouncer', label: 'Bouncer', emoji: '🔴' },
@@ -23,6 +25,8 @@ const TOOLS: { tool: EditorTool; label: string; emoji: string }[] = [
 const TILE_COLORS: Record<TileType, string> = {
   empty: 'transparent',
   rail: '#FFD700',
+  rail_start: '#00E676',
+  rail_end: '#FF4081',
   spinner: '#FF6B35',
   bouncer: '#E53935',
 };
@@ -112,23 +116,26 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       const sy = gy * GRID_SIZE - cy;
       if (sx < -GRID_SIZE || sx > vw + GRID_SIZE || sy < -GRID_SIZE || sy > vh + GRID_SIZE) continue;
 
-      if (type === 'rail') {
-        ctx.fillStyle = '#FFD700';
+      const isRailLike = (t: TileType | undefined) => t === 'rail' || t === 'rail_start' || t === 'rail_end';
+
+      if (type === 'rail' || type === 'rail_start' || type === 'rail_end') {
+        // Background color
+        ctx.fillStyle = type === 'rail_start' ? '#00E676' : type === 'rail_end' ? '#FF4081' : '#FFD700';
         ctx.fillRect(sx + 2, sy + 2, GRID_SIZE - 4, GRID_SIZE - 4);
-        // Draw rail line through center connecting to neighbors
+
+        // Draw rail connections
         ctx.strokeStyle = '#333';
         ctx.lineWidth = 4;
         const centerX = sx + GRID_SIZE / 2;
         const centerY = sy + GRID_SIZE / 2;
-        // Check neighbors
-        const hasLeft = tiles[tileKey(gx - 1, gy)] === 'rail';
-        const hasRight = tiles[tileKey(gx + 1, gy)] === 'rail';
-        const hasUp = tiles[tileKey(gx, gy - 1)] === 'rail';
-        const hasDown = tiles[tileKey(gx, gy + 1)] === 'rail';
-        const hasUL = tiles[tileKey(gx - 1, gy - 1)] === 'rail';
-        const hasUR = tiles[tileKey(gx + 1, gy - 1)] === 'rail';
-        const hasDL = tiles[tileKey(gx - 1, gy + 1)] === 'rail';
-        const hasDR = tiles[tileKey(gx + 1, gy + 1)] === 'rail';
+        const hasLeft = isRailLike(tiles[tileKey(gx - 1, gy)]);
+        const hasRight = isRailLike(tiles[tileKey(gx + 1, gy)]);
+        const hasUp = isRailLike(tiles[tileKey(gx, gy - 1)]);
+        const hasDown = isRailLike(tiles[tileKey(gx, gy + 1)]);
+        const hasUL = isRailLike(tiles[tileKey(gx - 1, gy - 1)]);
+        const hasUR = isRailLike(tiles[tileKey(gx + 1, gy - 1)]);
+        const hasDL = isRailLike(tiles[tileKey(gx - 1, gy + 1)]);
+        const hasDR = isRailLike(tiles[tileKey(gx + 1, gy + 1)]);
 
         ctx.beginPath();
         if (hasLeft) { ctx.moveTo(sx, centerY); ctx.lineTo(centerX, centerY); }
@@ -141,11 +148,19 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         if (hasDR) { ctx.moveTo(sx + GRID_SIZE, sy + GRID_SIZE); ctx.lineTo(centerX, centerY); }
         ctx.stroke();
 
-        // Dot at center
-        ctx.fillStyle = '#333';
-        ctx.beginPath();
-        ctx.arc(centerX, centerY, 4, 0, Math.PI * 2);
-        ctx.fill();
+        // Label for start/end
+        if (type === 'rail_start' || type === 'rail_end') {
+          ctx.font = `bold ${GRID_SIZE * 0.3}px system-ui`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillStyle = '#000';
+          ctx.fillText(type === 'rail_start' ? 'START' : 'END', centerX, centerY);
+        } else {
+          ctx.fillStyle = '#333';
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, 4, 0, Math.PI * 2);
+          ctx.fill();
+        }
       } else if (type === 'spinner') {
         ctx.fillStyle = 'rgba(255,107,53,0.3)';
         ctx.fillRect(sx + 2, sy + 2, GRID_SIZE - 4, GRID_SIZE - 4);
@@ -334,6 +349,16 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       });
     } else if (tool === 'rail' || tool === 'spinner' || tool === 'bouncer') {
       setTiles(prev => ({ ...prev, [key]: tool as TileType }));
+    } else if (tool === 'rail_start' || tool === 'rail_end') {
+      setTiles(prev => {
+        const next = { ...prev };
+        // Remove any existing start/end marker of the same type
+        for (const [k, v] of Object.entries(next)) {
+          if (v === tool) delete next[k];
+        }
+        next[key] = tool as TileType;
+        return next;
+      });
     }
   };
 

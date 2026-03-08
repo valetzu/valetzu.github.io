@@ -2,8 +2,8 @@ export const GRID_SIZE = 50;
 export const EDITOR_WIDTH = 200; // grid cells wide
 export const EDITOR_HEIGHT = 16; // grid cells tall
 
-export type TileType = 'empty' | 'rail' | 'spinner' | 'bouncer';
-export type EditorTool = 'rail' | 'spinner' | 'bouncer' | 'eraser' | 'arc';
+export type TileType = 'empty' | 'rail' | 'rail_start' | 'rail_end' | 'spinner' | 'bouncer';
+export type EditorTool = 'rail' | 'rail_start' | 'rail_end' | 'spinner' | 'bouncer' | 'eraser' | 'arc';
 
 export interface EditorTile {
   type: TileType;
@@ -53,7 +53,7 @@ export function convertLevelToGameData(tiles: Record<string, TileType>) {
 
   for (const [key, type] of Object.entries(tiles)) {
     const [gx, gy] = parseTileKey(key);
-    if (type === 'rail') {
+    if (type === 'rail' || type === 'rail_start' || type === 'rail_end') {
       rawRail.push({ x: gx * GRID_SIZE, y: gy * GRID_SIZE });
     } else if (type === 'spinner' || type === 'bouncer') {
       obstacles.push({ type, gx, gy });
