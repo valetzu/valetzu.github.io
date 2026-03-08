@@ -534,8 +534,6 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const handleMouseUp = () => {
     setIsPanning(false);
     setIsDrawing(false);
-    // Reset last placed rail so separate clicks don't auto-connect
-    lastPlacedRailRef.current = null;
 
     // Commit curve on mouse up if dragging control point
     if (isDraggingCurve && curveStart && curveEnd && curveControl) {
@@ -828,7 +826,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
                   <button
                     key={t.tool}
                     onClick={() => {
-                      setTool(t.tool);
+                      setTool(t.tool); lastPlacedRailRef.current = null;
                       if (t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); }
                       if (t.tool !== 'curve') { setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); }
                       setShowTilesMenu(false);
@@ -851,7 +849,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
             <button
               key={t.tool}
               onClick={() => {
-                setTool(t.tool);
+                setTool(t.tool); lastPlacedRailRef.current = null;
                 if (t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); }
                 if (t.tool !== 'curve') { setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); }
                 setShowTilesMenu(false);
