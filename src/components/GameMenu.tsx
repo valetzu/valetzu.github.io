@@ -127,12 +127,20 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
         })}
       </div>
 
-      <button
-        onClick={() => setView('shop')}
-        className="w-full max-w-md py-4 rounded-xl bg-game-accent text-game-bg font-bold text-xl hover:brightness-110 active:scale-[0.98] transition-all"
-      >
-        🔧 Upgrade Shop
-      </button>
+      <div className="flex gap-3 w-full max-w-md">
+        <button
+          onClick={() => setView('shop')}
+          className="flex-1 py-4 rounded-xl bg-game-accent text-game-bg font-bold text-xl hover:brightness-110 active:scale-[0.98] transition-all"
+        >
+          🔧 Upgrades
+        </button>
+        <button
+          onClick={onOpenEditor}
+          className="flex-1 py-4 rounded-xl bg-game-bar-bg text-game-title font-bold text-xl border-2 border-game-card-border hover:border-game-accent active:scale-[0.98] transition-all"
+        >
+          🗺️ Editor
+        </button>
+      </div>
 
       <div className="mt-8 text-game-subtitle text-sm text-center space-y-1">
         <p>⬆️ Arrow Up = Throttle &nbsp; ⬇️ Arrow Down = Brake/Reverse</p>

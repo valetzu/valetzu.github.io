@@ -46,7 +46,11 @@ const Index = () => {
     );
   }
 
-  return <GameMenu save={save} onStartGame={startGame} onUpdateSave={setSave} />;
+  if (phase === 'editor') {
+    return <LevelEditor onBack={backToMenu} />;
+  }
+
+  return <GameMenu save={save} onStartGame={startGame} onUpdateSave={setSave} onOpenEditor={() => setPhase('editor')} />;
 };
 
 export default Index;
