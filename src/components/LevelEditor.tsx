@@ -584,10 +584,17 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           ▶ Test
         </button>
         <button
+          onClick={handleQuickSave}
+          className="px-4 py-2 rounded-lg bg-blue-700 text-white font-bold text-sm hover:bg-blue-600"
+          title={currentLevelName ? `Quick save "${currentLevelName}"` : 'Save as...'}
+        >
+          ⚡ {currentLevelName ? 'Quick Save' : 'Save'}
+        </button>
+        <button
           onClick={() => setShowSaveDialog(true)}
           className="px-4 py-2 rounded-lg bg-blue-600 text-white font-bold text-sm hover:bg-blue-500"
         >
-          💾 Save
+          💾 Save As
         </button>
         <button
           onClick={openLoadDialog}
