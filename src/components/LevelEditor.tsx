@@ -46,6 +46,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const [showLoadDialog, setShowLoadDialog] = useState(false);
   const [savedLevels, setSavedLevels] = useState<EditorLevel[]>([]);
   const [testing, setTesting] = useState(false);
+  const [showTilesMenu, setShowTilesMenu] = useState(false);
+  const [showFileMenu, setShowFileMenu] = useState(false);
   const testCanvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
   const gameOverRef = useRef(false);
@@ -555,65 +557,116 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         onMouseLeave={handleMouseUp}
       />
 
-      {/* Toolbar */}
-      <div className="fixed top-4 left-4 flex gap-2 z-10">
-        {TOOLS.map(t => (
-          <button
-            key={t.tool}
-            onClick={() => {
-              setTool(t.tool);
-              if (t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); }
-            }}
-            className={`px-3 py-2 rounded-lg font-bold text-sm transition-all ${
-              tool === t.tool
-                ? 'bg-game-accent text-game-bg scale-105'
-                : 'bg-game-card text-game-title border border-game-card-border hover:border-game-accent'
-            }`}
-          >
-            {t.emoji} {t.label}
-          </button>
-        ))}
-      </div>
+      {/* Top bar */}
+      <div className="fixed top-4 left-4 right-4 flex items-start justify-between z-10">
+        {/* Left: Tiles menu + Eraser + Arc */}
+        <div className="flex gap-2 items-start">
+          {/* Tiles dropdown */}
+          <div className="relative">
+            <button
+              onClick={() => { setShowTilesMenu(!showTilesMenu); setShowFileMenu(false); }}
+              className="px-3 py-2 rounded-lg font-bold text-sm bg-game-card text-game-title border border-game-card-border hover:border-game-accent"
+            >
+              🧱 Tiles ▾
+            </button>
+            {showTilesMenu && (
+              <div className="absolute top-full left-0 mt-1 bg-game-card border border-game-card-border rounded-lg p-1 min-w-[140px] shadow-lg">
+                {TOOLS.filter(t => ['rail', 'rail_start', 'rail_end', 'spinner', 'bouncer'].includes(t.tool)).map(t => (
+                  <button
+                    key={t.tool}
+                    onClick={() => {
+                      setTool(t.tool);
+                      if (t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); }
+                      setShowTilesMenu(false);
+                    }}
+                    className={`w-full text-left px-3 py-2 rounded font-bold text-sm transition-all ${
+                      tool === t.tool
+                        ? 'bg-game-accent text-game-bg'
+                        : 'text-game-title hover:bg-game-bar-bg'
+                    }`}
+                  >
+                    {t.emoji} {t.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
-      {/* Action buttons */}
-      <div className="fixed top-4 right-4 flex gap-2 z-10">
-        <button
-          onClick={startTest}
-          className="px-4 py-2 rounded-lg bg-green-600 text-white font-bold text-sm hover:bg-green-500"
-        >
-          ▶ Test
-        </button>
-        <button
-          onClick={handleQuickSave}
-          className="px-4 py-2 rounded-lg bg-blue-700 text-white font-bold text-sm hover:bg-blue-600"
-          title={currentLevelName ? `Quick save "${currentLevelName}"` : 'Save as...'}
-        >
-          ⚡ {currentLevelName ? 'Quick Save' : 'Save'}
-        </button>
-        <button
-          onClick={() => setShowSaveDialog(true)}
-          className="px-4 py-2 rounded-lg bg-blue-600 text-white font-bold text-sm hover:bg-blue-500"
-        >
-          💾 Save As
-        </button>
-        <button
-          onClick={openLoadDialog}
-          className="px-4 py-2 rounded-lg bg-purple-600 text-white font-bold text-sm hover:bg-purple-500"
-        >
-          📂 Load
-        </button>
-        <button
-          onClick={clearAll}
-          className="px-4 py-2 rounded-lg bg-red-700 text-white font-bold text-sm hover:bg-red-600"
-        >
-          🗑️ Clear
-        </button>
-        <button
-          onClick={handleBack}
-          className="px-4 py-2 rounded-lg bg-game-card text-game-title border border-game-card-border font-bold text-sm hover:border-game-accent"
-        >
-          ← Menu
-        </button>
+          {/* Standalone tools */}
+          {TOOLS.filter(t => ['eraser', 'arc'].includes(t.tool)).map(t => (
+            <button
+              key={t.tool}
+              onClick={() => {
+                setTool(t.tool);
+                if (t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); }
+                setShowTilesMenu(false);
+              }}
+              className={`px-3 py-2 rounded-lg font-bold text-sm transition-all ${
+                tool === t.tool
+                  ? 'bg-game-accent text-game-bg scale-105'
+                  : 'bg-game-card text-game-title border border-game-card-border hover:border-game-accent'
+              }`}
+            >
+              {t.emoji} {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Right: Action buttons */}
+        <div className="flex gap-2 items-start">
+          <button
+            onClick={startTest}
+            className="px-4 py-2 rounded-lg bg-green-600 text-white font-bold text-sm hover:bg-green-500"
+          >
+            ▶ Test
+          </button>
+          <button
+            onClick={handleQuickSave}
+            className="px-4 py-2 rounded-lg bg-blue-700 text-white font-bold text-sm hover:bg-blue-600"
+            title={currentLevelName ? `Quick save "${currentLevelName}"` : 'Save as...'}
+          >
+            ⚡ {currentLevelName ? 'Quick Save' : 'Save'}
+          </button>
+
+          {/* File dropdown */}
+          <div className="relative">
+            <button
+              onClick={() => { setShowFileMenu(!showFileMenu); setShowTilesMenu(false); }}
+              className="px-3 py-2 rounded-lg font-bold text-sm bg-game-card text-game-title border border-game-card-border hover:border-game-accent"
+            >
+              📁 File ▾
+            </button>
+            {showFileMenu && (
+              <div className="absolute top-full right-0 mt-1 bg-game-card border border-game-card-border rounded-lg p-1 min-w-[140px] shadow-lg">
+                <button
+                  onClick={() => { setShowSaveDialog(true); setShowFileMenu(false); }}
+                  className="w-full text-left px-3 py-2 rounded font-bold text-sm text-game-title hover:bg-game-bar-bg"
+                >
+                  💾 Save As
+                </button>
+                <button
+                  onClick={() => { openLoadDialog(); setShowFileMenu(false); }}
+                  className="w-full text-left px-3 py-2 rounded font-bold text-sm text-game-title hover:bg-game-bar-bg"
+                >
+                  📂 Load
+                </button>
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={clearAll}
+            className="px-4 py-2 rounded-lg bg-red-700 text-white font-bold text-sm hover:bg-red-600"
+          >
+            🗑️ Clear
+          </button>
+          <button
+            onClick={handleBack}
+            className="px-4 py-2 rounded-lg bg-game-card text-game-title border border-game-card-border font-bold text-sm hover:border-game-accent"
+          >
+            ← Menu
+          </button>
+        </div>
       </div>
 
       {/* Zoom buttons */}
