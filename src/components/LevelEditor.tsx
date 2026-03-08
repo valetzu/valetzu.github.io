@@ -83,14 +83,14 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       const sx = gx * GRID_SIZE - cx;
       ctx.beginPath();
       ctx.moveTo(sx, 0);
-      ctx.lineTo(sx, h);
+      ctx.lineTo(sx, vh);
       ctx.stroke();
     }
     for (let gy = startGY; gy <= endGY; gy++) {
       const sy = gy * GRID_SIZE - cy;
       ctx.beginPath();
       ctx.moveTo(0, sy);
-      ctx.lineTo(w, sy);
+      ctx.lineTo(vw, sy);
       ctx.stroke();
     }
 
