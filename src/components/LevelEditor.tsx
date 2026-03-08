@@ -529,23 +529,52 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const placeTile = (gx: number, gy: number) => {
     const key = tileKey(gx, gy);
     if (tool === 'eraser') {
+      removeRailConnections(key);
+      if (lastPlacedRailRef.current === key) lastPlacedRailRef.current = null;
       setTiles(prev => {
         const next = { ...prev };
         delete next[key];
         return next;
       });
     } else if (tool === 'rail' || tool === 'spinner' || tool === 'bouncer') {
+      const isRail = tool === 'rail';
+      if (isRail) {
+        // Connect to last placed rail if adjacent
+        const last = lastPlacedRailRef.current;
+        if (last && last !== key) {
+          const [lx, ly] = parseTileKey(last);
+          const dx = Math.abs(gx - lx);
+          const dy = Math.abs(gy - ly);
+          if (dx <= 1 && dy <= 1 && (dx + dy > 0)) {
+            addRailConnection(last, key);
+          }
+        }
+        lastPlacedRailRef.current = key;
+      }
       setTiles(prev => ({ ...prev, [key]: tool as TileType }));
     } else if (tool === 'rail_start' || tool === 'rail_end') {
       setTiles(prev => {
         const next = { ...prev };
-        // Remove any existing start/end marker of the same type
         for (const [k, v] of Object.entries(next)) {
-          if (v === tool) delete next[k];
+          if (v === tool) {
+            removeRailConnections(k);
+            delete next[k];
+          }
         }
         next[key] = tool as TileType;
         return next;
       });
+      // Connect to last placed rail if adjacent
+      const last = lastPlacedRailRef.current;
+      if (last && last !== key) {
+        const [lx, ly] = parseTileKey(last);
+        const dx = Math.abs(gx - lx);
+        const dy = Math.abs(gy - ly);
+        if (dx <= 1 && dy <= 1 && (dx + dy > 0)) {
+          addRailConnection(last, key);
+        }
+      }
+      lastPlacedRailRef.current = key;
     }
   };
 
