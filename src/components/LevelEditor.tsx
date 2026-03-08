@@ -472,6 +472,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       createdAt: Date.now(),
     };
     saveCustomLevel(level);
+    lastSavedTilesRef.current = JSON.stringify(tiles);
     setShowSaveDialog(false);
     setLevelName('');
   };
