@@ -433,7 +433,7 @@ export class GameEngine {
     this.renderHUD(w, h);
   }
 
-  renderGround(cx: number, cy: number, w: number, h: number, cfg: typeof WORLD_CONFIG.overworld) {
+  renderGround(cx: number, cy: number, w: number, h: number, cfg: { grassColor: string; dirtColor: string }) {
     const { ctx, rail, ground } = this;
 
     // Find visible range
