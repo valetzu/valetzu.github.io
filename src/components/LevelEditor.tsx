@@ -38,6 +38,29 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const [tiles, setTiles] = useState<Record<string, TileType>>({});
   // Track explicit connections between rail tiles: key -> Set of connected keys
   const railConnectionsRef = useRef<Record<string, Set<string>>>({});
+  const lastPlacedRailRef = useRef<string | null>(null);
+
+  const addRailConnection = (keyA: string, keyB: string) => {
+    const conns = railConnectionsRef.current;
+    if (!conns[keyA]) conns[keyA] = new Set();
+    if (!conns[keyB]) conns[keyB] = new Set();
+    // Only connect if each has fewer than 2 connections
+    if (conns[keyA].size < 2 && conns[keyB].size < 2) {
+      conns[keyA].add(keyB);
+      conns[keyB].add(keyA);
+    }
+  };
+
+  const removeRailConnections = (key: string) => {
+    const conns = railConnectionsRef.current;
+    const myConns = conns[key];
+    if (myConns) {
+      for (const other of myConns) {
+        conns[other]?.delete(key);
+      }
+      delete conns[key];
+    }
+  };
   const [camera, setCamera] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [isPanning, setIsPanning] = useState(false);
