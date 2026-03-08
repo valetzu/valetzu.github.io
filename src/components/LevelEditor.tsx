@@ -188,6 +188,9 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       ctx.fill();
     }
 
+    // Reset transform for HUD overlays
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
     // Tool indicator top-left
     ctx.fillStyle = 'rgba(0,0,0,0.7)';
     ctx.fillRect(0, 0, 200, 40);
@@ -205,8 +208,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     ctx.font = '12px system-ui';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('Middle-click / Right-click drag to pan • Scroll to zoom • Click to place tiles', w / 2, h - 15);
-  }, [camera, tiles, tool, arcCenter, arcPreview]);
+    ctx.fillText(`Middle-click / Right-click drag to pan • +/- to zoom (${Math.round(zoom * 100)}%) • Click to place tiles`, w / 2, h - 15);
+  }, [camera, tiles, tool, arcCenter, arcPreview, zoom]);
 
   // Resize & render loop
   useEffect(() => {
