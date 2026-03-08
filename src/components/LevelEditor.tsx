@@ -516,6 +516,11 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     // Commit curve on mouse up if dragging control point
     if (isDraggingCurve && curveStart && curveEnd && curveControl) {
       const points = generateBezierCurve(curveStart, curveEnd, curveControl);
+      // Add connections between consecutive curve points
+      for (let i = 1; i < points.length; i++) {
+        addRailConnection(tileKey(points[i - 1].gx, points[i - 1].gy), tileKey(points[i].gx, points[i].gy));
+      }
+      if (points.length > 0) lastPlacedRailRef.current = tileKey(points[points.length - 1].gx, points[points.length - 1].gy);
       setTiles(prev => {
         const next = { ...prev };
         for (const p of points) {
