@@ -60,6 +60,13 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const [arcCenter, setArcCenter] = useState<{ gx: number; gy: number } | null>(null);
   const [arcPreview, setArcPreview] = useState<{ gx: number; gy: number }[]>([]);
 
+  // Curve tool state: click start, click end, then drag control point
+  const [curveStart, setCurveStart] = useState<{ gx: number; gy: number } | null>(null);
+  const [curveEnd, setCurveEnd] = useState<{ gx: number; gy: number } | null>(null);
+  const [curveControl, setCurveControl] = useState<{ gx: number; gy: number } | null>(null);
+  const [curvePreview, setCurvePreview] = useState<{ gx: number; gy: number }[]>([]);
+  const [isDraggingCurve, setIsDraggingCurve] = useState(false);
+
   const worldHeight = EDITOR_HEIGHT * GRID_SIZE;
 
   // Draw the editor grid
