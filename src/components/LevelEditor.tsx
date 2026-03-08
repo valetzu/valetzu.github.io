@@ -41,6 +41,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [isDrawing, setIsDrawing] = useState(false);
   const [levelName, setLevelName] = useState('');
+  const [currentLevelName, setCurrentLevelName] = useState('');
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [showLoadDialog, setShowLoadDialog] = useState(false);
   const [savedLevels, setSavedLevels] = useState<EditorLevel[]>([]);
@@ -475,13 +476,29 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     };
     saveCustomLevel(level);
     lastSavedTilesRef.current = JSON.stringify(tiles);
+    setCurrentLevelName(levelName.trim());
     setShowSaveDialog(false);
     setLevelName('');
+  };
+
+  const handleQuickSave = () => {
+    if (!currentLevelName) {
+      setShowSaveDialog(true);
+      return;
+    }
+    const level: EditorLevel = {
+      name: currentLevelName,
+      tiles,
+      createdAt: Date.now(),
+    };
+    saveCustomLevel(level);
+    lastSavedTilesRef.current = JSON.stringify(tiles);
   };
 
   const handleLoad = (level: EditorLevel) => {
     setTiles(level.tiles);
     lastSavedTilesRef.current = JSON.stringify(level.tiles);
+    setCurrentLevelName(level.name);
     setShowLoadDialog(false);
   };
 
@@ -567,10 +584,17 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           ▶ Test
         </button>
         <button
+          onClick={handleQuickSave}
+          className="px-4 py-2 rounded-lg bg-blue-700 text-white font-bold text-sm hover:bg-blue-600"
+          title={currentLevelName ? `Quick save "${currentLevelName}"` : 'Save as...'}
+        >
+          ⚡ {currentLevelName ? 'Quick Save' : 'Save'}
+        </button>
+        <button
           onClick={() => setShowSaveDialog(true)}
           className="px-4 py-2 rounded-lg bg-blue-600 text-white font-bold text-sm hover:bg-blue-500"
         >
-          💾 Save
+          💾 Save As
         </button>
         <button
           onClick={openLoadDialog}
