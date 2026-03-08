@@ -441,6 +441,23 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const handleMouseUp = () => {
     setIsPanning(false);
     setIsDrawing(false);
+
+    // Commit curve on mouse up if dragging control point
+    if (isDraggingCurve && curveStart && curveEnd && curveControl) {
+      const points = generateBezierCurve(curveStart, curveEnd, curveControl);
+      setTiles(prev => {
+        const next = { ...prev };
+        for (const p of points) {
+          next[tileKey(p.gx, p.gy)] = 'rail';
+        }
+        return next;
+      });
+      setCurveStart(null);
+      setCurveEnd(null);
+      setCurveControl(null);
+      setCurvePreview([]);
+      setIsDraggingCurve(false);
+    }
   };
 
   const placeTile = (gx: number, gy: number) => {
