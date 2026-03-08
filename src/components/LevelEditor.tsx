@@ -36,6 +36,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [tool, setTool] = useState<EditorTool>('rail');
   const [tiles, setTiles] = useState<Record<string, TileType>>({});
+  // Track explicit connections between rail tiles: key -> Set of connected keys
+  const railConnectionsRef = useRef<Record<string, Set<string>>>({});
   const [camera, setCamera] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [isPanning, setIsPanning] = useState(false);
