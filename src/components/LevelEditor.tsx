@@ -48,6 +48,9 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const testCanvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
   const gameOverRef = useRef(false);
+  const lastSavedTilesRef = useRef<string>('{}');
+
+  const hasUnsavedChanges = () => JSON.stringify(tiles) !== lastSavedTilesRef.current;
 
   // Arc tool state
   const [arcCenter, setArcCenter] = useState<{ gx: number; gy: number } | null>(null);
