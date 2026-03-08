@@ -466,6 +466,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   // Save dialog
   const handleSave = () => {
     if (!levelName.trim()) return;
+    const existing = loadCustomLevels().find(l => l.name === levelName.trim());
+    if (existing && !confirm(`A level named "${levelName.trim()}" already exists. Overwrite it?`)) return;
     const level: EditorLevel = {
       name: levelName.trim(),
       tiles,
