@@ -505,6 +505,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   };
 
   const handleDelete = (name: string) => {
+    if (!confirm(`Delete level "${name}"? This cannot be undone.`)) return;
     deleteCustomLevel(name);
     setSavedLevels(loadCustomLevels());
   };
