@@ -48,6 +48,9 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const testCanvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
   const gameOverRef = useRef(false);
+  const lastSavedTilesRef = useRef<string>('{}');
+
+  const hasUnsavedChanges = () => JSON.stringify(tiles) !== lastSavedTilesRef.current;
 
   // Arc tool state
   const [arcCenter, setArcCenter] = useState<{ gx: number; gy: number } | null>(null);
@@ -469,12 +472,14 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       createdAt: Date.now(),
     };
     saveCustomLevel(level);
+    lastSavedTilesRef.current = JSON.stringify(tiles);
     setShowSaveDialog(false);
     setLevelName('');
   };
 
   const handleLoad = (level: EditorLevel) => {
     setTiles(level.tiles);
+    lastSavedTilesRef.current = JSON.stringify(level.tiles);
     setShowLoadDialog(false);
   };
 
@@ -484,8 +489,14 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   };
 
   const openLoadDialog = () => {
+    if (hasUnsavedChanges() && !confirm('You have unsaved changes. Load a different level?')) return;
     setSavedLevels(loadCustomLevels());
     setShowLoadDialog(true);
+  };
+
+  const handleBack = () => {
+    if (hasUnsavedChanges() && !confirm('You have unsaved changes. Leave the editor?')) return;
+    onBack();
   };
 
   const clearAll = () => {
@@ -572,7 +583,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           🗑️ Clear
         </button>
         <button
-          onClick={onBack}
+          onClick={handleBack}
           className="px-4 py-2 rounded-lg bg-game-card text-game-title border border-game-card-border font-bold text-sm hover:border-game-accent"
         >
           ← Menu
