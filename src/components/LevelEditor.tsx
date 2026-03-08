@@ -110,7 +110,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       const [gx, gy] = parseTileKey(key);
       const sx = gx * GRID_SIZE - cx;
       const sy = gy * GRID_SIZE - cy;
-      if (sx < -GRID_SIZE || sx > w + GRID_SIZE || sy < -GRID_SIZE || sy > h + GRID_SIZE) continue;
+      if (sx < -GRID_SIZE || sx > vw + GRID_SIZE || sy < -GRID_SIZE || sy > vh + GRID_SIZE) continue;
 
       if (type === 'rail') {
         ctx.fillStyle = '#FFD700';
