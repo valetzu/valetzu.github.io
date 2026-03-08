@@ -284,6 +284,28 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     return points;
   };
 
+  const generateBezierCurve = (
+    start: { gx: number; gy: number },
+    end: { gx: number; gy: number },
+    control: { gx: number; gy: number }
+  ) => {
+    const points: { gx: number; gy: number }[] = [];
+    const dist = Math.sqrt((end.gx - start.gx) ** 2 + (end.gy - start.gy) ** 2);
+    const steps = Math.max(10, Math.round(dist * 3));
+
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const mt = 1 - t;
+      // Quadratic bezier: B(t) = (1-t)²·P0 + 2(1-t)t·P1 + t²·P2
+      const gx = Math.round(mt * mt * start.gx + 2 * mt * t * control.gx + t * t * end.gx);
+      const gy = Math.round(mt * mt * start.gy + 2 * mt * t * control.gy + t * t * end.gy);
+      if (points.length === 0 || points[points.length - 1].gx !== gx || points[points.length - 1].gy !== gy) {
+        points.push({ gx, gy });
+      }
+    }
+    return points;
+  };
+
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button === 1 || e.button === 2) {
       setIsPanning(true);
