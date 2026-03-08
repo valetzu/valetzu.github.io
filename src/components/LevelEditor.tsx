@@ -32,6 +32,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const [tool, setTool] = useState<EditorTool>('rail');
   const [tiles, setTiles] = useState<Record<string, TileType>>({});
   const [camera, setCamera] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [isDrawing, setIsDrawing] = useState(false);
@@ -57,18 +58,24 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     const ctx = canvas.getContext('2d')!;
     const w = canvas.width;
     const h = canvas.height;
-    const cx = camera.x;
-    const cy = camera.y;
 
-    // Background
+    // Clear
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#1A1A2E';
     ctx.fillRect(0, 0, w, h);
+
+    // Apply zoom transform
+    ctx.setTransform(zoom, 0, 0, zoom, 0, 0);
+    const cx = camera.x;
+    const cy = camera.y;
+    const vw = w / zoom;
+    const vh = h / zoom;
 
     // Grid
     const startGX = Math.floor(cx / GRID_SIZE);
     const startGY = Math.floor(cy / GRID_SIZE);
-    const endGX = Math.ceil((cx + w) / GRID_SIZE);
-    const endGY = Math.ceil((cy + h) / GRID_SIZE);
+    const endGX = Math.ceil((cx + vw) / GRID_SIZE);
+    const endGY = Math.ceil((cy + vh) / GRID_SIZE);
 
     ctx.strokeStyle = 'rgba(255,255,255,0.08)';
     ctx.lineWidth = 1;
@@ -76,14 +83,14 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       const sx = gx * GRID_SIZE - cx;
       ctx.beginPath();
       ctx.moveTo(sx, 0);
-      ctx.lineTo(sx, h);
+      ctx.lineTo(sx, vh);
       ctx.stroke();
     }
     for (let gy = startGY; gy <= endGY; gy++) {
       const sy = gy * GRID_SIZE - cy;
       ctx.beginPath();
       ctx.moveTo(0, sy);
-      ctx.lineTo(w, sy);
+      ctx.lineTo(vw, sy);
       ctx.stroke();
     }
 
@@ -93,7 +100,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     ctx.setLineDash([5, 5]);
     ctx.beginPath();
     ctx.moveTo(0, refY);
-    ctx.lineTo(w, refY);
+    ctx.lineTo(vw, refY);
     ctx.stroke();
     ctx.setLineDash([]);
 
@@ -103,7 +110,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       const [gx, gy] = parseTileKey(key);
       const sx = gx * GRID_SIZE - cx;
       const sy = gy * GRID_SIZE - cy;
-      if (sx < -GRID_SIZE || sx > w + GRID_SIZE || sy < -GRID_SIZE || sy > h + GRID_SIZE) continue;
+      if (sx < -GRID_SIZE || sx > vw + GRID_SIZE || sy < -GRID_SIZE || sy > vh + GRID_SIZE) continue;
 
       if (type === 'rail') {
         ctx.fillStyle = '#FFD700';
@@ -181,6 +188,9 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       ctx.fill();
     }
 
+    // Reset transform for HUD overlays
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
     // Tool indicator top-left
     ctx.fillStyle = 'rgba(0,0,0,0.7)';
     ctx.fillRect(0, 0, 200, 40);
@@ -198,8 +208,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     ctx.font = '12px system-ui';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('Middle-click / Right-click drag to pan • Scroll to zoom • Click to place tiles', w / 2, h - 15);
-  }, [camera, tiles, tool, arcCenter, arcPreview]);
+    ctx.fillText(`Middle-click / Right-click drag to pan • +/- to zoom (${Math.round(zoom * 100)}%) • Click to place tiles`, w / 2, h - 15);
+  }, [camera, tiles, tool, arcCenter, arcPreview, zoom]);
 
   // Resize & render loop
   useEffect(() => {
@@ -227,8 +237,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   }, [render, testing]);
 
   const screenToGrid = (clientX: number, clientY: number) => {
-    const gx = Math.floor((clientX + camera.x) / GRID_SIZE);
-    const gy = Math.floor((clientY + camera.y) / GRID_SIZE);
+    const gx = Math.floor((clientX / zoom + camera.x) / GRID_SIZE);
+    const gy = Math.floor((clientY / zoom + camera.y) / GRID_SIZE);
     return { gx, gy };
   };
 
@@ -257,7 +267,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button === 1 || e.button === 2) {
       setIsPanning(true);
-      setPanStart({ x: e.clientX + camera.x, y: e.clientY + camera.y });
+      setPanStart({ x: e.clientX / zoom + camera.x, y: e.clientY / zoom + camera.y });
       return;
     }
 
@@ -291,8 +301,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const handleMouseMove = (e: React.MouseEvent) => {
     if (isPanning) {
       setCamera({
-        x: panStart.x - e.clientX,
-        y: panStart.y - e.clientY,
+        x: panStart.x - e.clientX / zoom,
+        y: panStart.y - e.clientY / zoom,
       });
       return;
     }
@@ -541,6 +551,25 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           className="px-4 py-2 rounded-lg bg-game-card text-game-title border border-game-card-border font-bold text-sm hover:border-game-accent"
         >
           ← Menu
+        </button>
+      </div>
+
+      {/* Zoom buttons */}
+      <div className="fixed bottom-12 right-4 flex gap-2 z-10">
+        <button
+          onClick={() => setZoom(z => Math.max(0.25, z - 0.25))}
+          className="w-10 h-10 rounded-lg bg-game-card text-game-title border border-game-card-border font-bold text-lg hover:border-game-accent"
+        >
+          −
+        </button>
+        <span className="w-14 h-10 rounded-lg bg-game-card text-game-title border border-game-card-border font-bold text-sm flex items-center justify-center">
+          {Math.round(zoom * 100)}%
+        </span>
+        <button
+          onClick={() => setZoom(z => Math.min(3, z + 0.25))}
+          className="w-10 h-10 rounded-lg bg-game-card text-game-title border border-game-card-border font-bold text-lg hover:border-game-accent"
+        >
+          +
         </button>
       </div>
 
