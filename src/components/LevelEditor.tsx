@@ -583,7 +583,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           🗑️ Clear
         </button>
         <button
-          onClick={onBack}
+          onClick={handleBack}
           className="px-4 py-2 rounded-lg bg-game-card text-game-title border border-game-card-border font-bold text-sm hover:border-game-accent"
         >
           ← Menu
