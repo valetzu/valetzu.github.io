@@ -125,6 +125,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     ctx.setLineDash([]);
 
     // Tiles
+    const connections = railConnectionsRef.current;
     for (const [key, type] of Object.entries(tiles)) {
       if (type === 'empty') continue;
       const [gx, gy] = parseTileKey(key);
@@ -132,52 +133,31 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       const sy = gy * GRID_SIZE - cy;
       if (sx < -GRID_SIZE || sx > vw + GRID_SIZE || sy < -GRID_SIZE || sy > vh + GRID_SIZE) continue;
 
-      const isRailLike = (t: TileType | undefined) => t === 'rail' || t === 'rail_start' || t === 'rail_end';
-
       if (type === 'rail' || type === 'rail_start' || type === 'rail_end') {
         // Background color
         ctx.fillStyle = type === 'rail_start' ? '#00E676' : type === 'rail_end' ? '#FF4081' : '#FFD700';
         ctx.fillRect(sx + 2, sy + 2, GRID_SIZE - 4, GRID_SIZE - 4);
 
-        // Draw rail connections - limit to max 2 to form a path, not a mesh
+        // Draw rail connections using explicit connection map
         ctx.strokeStyle = '#333';
         ctx.lineWidth = 4;
         const centerX = sx + GRID_SIZE / 2;
         const centerY = sy + GRID_SIZE / 2;
 
-        // Collect all neighbors with their draw info
-        type Neighbor = { dx: number; dy: number; has: boolean; drawX: number; drawY: number };
-        const neighbors: Neighbor[] = [
-          { dx: -1, dy: 0, has: isRailLike(tiles[tileKey(gx - 1, gy)]), drawX: sx, drawY: centerY },
-          { dx: 1, dy: 0, has: isRailLike(tiles[tileKey(gx + 1, gy)]), drawX: sx + GRID_SIZE, drawY: centerY },
-          { dx: 0, dy: -1, has: isRailLike(tiles[tileKey(gx, gy - 1)]), drawX: centerX, drawY: sy },
-          { dx: 0, dy: 1, has: isRailLike(tiles[tileKey(gx, gy + 1)]), drawX: centerX, drawY: sy + GRID_SIZE },
-        ];
-
-        // Add diagonals only if neither adjacent orthogonal exists
-        const hasLeft = isRailLike(tiles[tileKey(gx - 1, gy)]);
-        const hasRight = isRailLike(tiles[tileKey(gx + 1, gy)]);
-        const hasUp = isRailLike(tiles[tileKey(gx, gy - 1)]);
-        const hasDown = isRailLike(tiles[tileKey(gx, gy + 1)]);
-        if (isRailLike(tiles[tileKey(gx - 1, gy - 1)]) && !hasUp && !hasLeft)
-          neighbors.push({ dx: -1, dy: -1, has: true, drawX: sx, drawY: sy });
-        if (isRailLike(tiles[tileKey(gx + 1, gy - 1)]) && !hasUp && !hasRight)
-          neighbors.push({ dx: 1, dy: -1, has: true, drawX: sx + GRID_SIZE, drawY: sy });
-        if (isRailLike(tiles[tileKey(gx - 1, gy + 1)]) && !hasDown && !hasLeft)
-          neighbors.push({ dx: -1, dy: 1, has: true, drawX: sx, drawY: sy + GRID_SIZE });
-        if (isRailLike(tiles[tileKey(gx + 1, gy + 1)]) && !hasDown && !hasRight)
-          neighbors.push({ dx: 1, dy: 1, has: true, drawX: sx + GRID_SIZE, drawY: sy + GRID_SIZE });
-
-        // Filter to present neighbors, limit to 2 (path, not junction)
-        const present = neighbors.filter(n => n.has);
-        const connected = present.slice(0, 2);
-
-        ctx.beginPath();
-        for (const n of connected) {
-          ctx.moveTo(n.drawX, n.drawY);
-          ctx.lineTo(centerX, centerY);
+        const myConnections = connections[key];
+        if (myConnections) {
+          ctx.beginPath();
+          for (const connKey of myConnections) {
+            const [cgx, cgy] = parseTileKey(connKey);
+            const dx = cgx - gx;
+            const dy = cgy - gy;
+            const drawX = sx + GRID_SIZE / 2 + dx * (GRID_SIZE / 2);
+            const drawY = sy + GRID_SIZE / 2 + dy * (GRID_SIZE / 2);
+            ctx.moveTo(drawX, drawY);
+            ctx.lineTo(centerX, centerY);
+          }
+          ctx.stroke();
         }
-        ctx.stroke();
 
         // Label for start/end
         if (type === 'rail_start' || type === 'rail_end') {
