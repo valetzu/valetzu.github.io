@@ -216,6 +216,59 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       ctx.arc(acx, acy, 4, 0, Math.PI * 2);
       ctx.fill();
     }
+    // Curve preview
+    if (curvePreview.length > 0) {
+      ctx.fillStyle = 'rgba(100,200,255,0.4)';
+      for (const p of curvePreview) {
+        const sx2 = p.gx * GRID_SIZE - cx;
+        const sy2 = p.gy * GRID_SIZE - cy;
+        ctx.fillRect(sx2 + 2, sy2 + 2, GRID_SIZE - 4, GRID_SIZE - 4);
+      }
+    }
+
+    // Curve start/end markers
+    if (curveStart) {
+      const csx = curveStart.gx * GRID_SIZE + GRID_SIZE / 2 - cx;
+      const csy = curveStart.gy * GRID_SIZE + GRID_SIZE / 2 - cy;
+      ctx.strokeStyle = '#64C8FF';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(curveStart.gx * GRID_SIZE - cx + 1, curveStart.gy * GRID_SIZE - cy + 1, GRID_SIZE - 2, GRID_SIZE - 2);
+      ctx.fillStyle = '#64C8FF';
+      ctx.font = 'bold 10px system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('A', csx, csy);
+    }
+    if (curveEnd) {
+      const cex = curveEnd.gx * GRID_SIZE + GRID_SIZE / 2 - cx;
+      const cey = curveEnd.gy * GRID_SIZE + GRID_SIZE / 2 - cy;
+      ctx.strokeStyle = '#FF64C8';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(curveEnd.gx * GRID_SIZE - cx + 1, curveEnd.gy * GRID_SIZE - cy + 1, GRID_SIZE - 2, GRID_SIZE - 2);
+      ctx.fillStyle = '#FF64C8';
+      ctx.font = 'bold 10px system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('B', cex, cey);
+    }
+    // Curve control point marker
+    if (curveControl && curveStart && curveEnd) {
+      const ccx = curveControl.gx * GRID_SIZE + GRID_SIZE / 2 - cx;
+      const ccy = curveControl.gy * GRID_SIZE + GRID_SIZE / 2 - cy;
+      ctx.strokeStyle = '#FFFF00';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(curveStart.gx * GRID_SIZE + GRID_SIZE / 2 - cx, curveStart.gy * GRID_SIZE + GRID_SIZE / 2 - cy);
+      ctx.lineTo(ccx, ccy);
+      ctx.lineTo(curveEnd.gx * GRID_SIZE + GRID_SIZE / 2 - cx, curveEnd.gy * GRID_SIZE + GRID_SIZE / 2 - cy);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.arc(ccx, ccy, 6, 0, Math.PI * 2);
+      ctx.fillStyle = '#FFFF00';
+      ctx.fill();
+    }
 
     // Reset transform for HUD overlays
     ctx.setTransform(1, 0, 0, 1, 0, 0);
