@@ -904,8 +904,9 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
                     key={t.tool}
                     onClick={() => {
                       setTool(t.tool); lastPlacedRailRef.current = null;
-                      if (t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); }
-                      if (t.tool !== 'curve') { setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); }
+                       if (t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); }
+                       if (t.tool !== 'curve') { setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); }
+                       if (t.tool !== 'line') { setLineStart(null); setLinePreview([]); }
                       setShowTilesMenu(false);
                     }}
                     className={`w-full text-left px-3 py-2 rounded font-bold text-sm transition-all ${
