@@ -691,7 +691,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
 
   // Test the level
   const startTest = () => {
-    const { railPoints, obstacles: obsData } = convertLevelToGameData(tiles);
+    const { railPoints, obstacles: obsData } = convertLevelToGameData(tiles, railConnectionsRef.current);
     if (railPoints.length < 3) {
       alert('Place at least 3 rail tiles to test!');
       return;
@@ -714,7 +714,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     window.addEventListener('resize', resize);
 
     // Convert tiles to engine-compatible format (already resampled at RAIL_SPACING)
-    const { railPoints, obstacles: obsData } = convertLevelToGameData(tiles);
+    const { railPoints, obstacles: obsData } = convertLevelToGameData(tiles, railConnectionsRef.current);
 
     // Create a custom engine with pre-built rail
     const engine = new GameEngine(canvas, 'overworld', { motor: 0, health: 0, grip: 0, rocket: 0, shield: 0 }, {
