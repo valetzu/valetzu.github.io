@@ -923,13 +923,14 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           </div>
 
           {/* Standalone tools */}
-          {TOOLS.filter(t => ['eraser', 'arc', 'curve'].includes(t.tool)).map(t => (
+          {TOOLS.filter(t => ['eraser', 'arc', 'curve', 'line'].includes(t.tool)).map(t => (
             <button
               key={t.tool}
               onClick={() => {
                 setTool(t.tool); lastPlacedRailRef.current = null;
                 if (t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); }
                 if (t.tool !== 'curve') { setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); }
+                if (t.tool !== 'line') { setLineStart(null); setLinePreview([]); }
                 setShowTilesMenu(false);
               }}
               className={`px-3 py-2 rounded-lg font-bold text-sm transition-all ${
