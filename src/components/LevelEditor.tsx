@@ -320,6 +320,28 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     // Reset transform for HUD overlays
     ctx.setTransform(1, 0, 0, 1, 0, 0);
 
+      if (tool === 'line') {
+        if (!lineStart) {
+          setLineStart({ gx, gy });
+        } else {
+          // Commit the line
+          const points = generateLine(lineStart, { gx, gy });
+          for (let i = 1; i < points.length; i++) {
+            addRailConnection(tileKey(points[i - 1].gx, points[i - 1].gy), tileKey(points[i].gx, points[i].gy));
+          }
+          if (points.length > 0) lastPlacedRailRef.current = tileKey(points[points.length - 1].gx, points[points.length - 1].gy);
+          setTiles(prev => {
+            const next = { ...prev };
+            for (const p of points) {
+              next[tileKey(p.gx, p.gy)] = 'rail';
+            }
+            return next;
+          });
+          setLineStart(null);
+          setLinePreview([]);
+        }
+        return;
+      }
 
     // Instructions
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
