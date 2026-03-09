@@ -452,6 +452,26 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     return result;
   };
 
+  const generateLine = (
+    start: { gx: number; gy: number },
+    end: { gx: number; gy: number }
+  ) => {
+    const points: { gx: number; gy: number }[] = [];
+    let x0 = start.gx, y0 = start.gy;
+    const x1 = end.gx, y1 = end.gy;
+    const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+    let err = dx - dy;
+    while (true) {
+      points.push({ gx: x0, gy: y0 });
+      if (x0 === x1 && y0 === y1) break;
+      const e2 = 2 * err;
+      if (e2 > -dy) { err -= dy; x0 += sx; }
+      if (e2 < dx) { err += dx; y0 += sy; }
+    }
+    return points;
+  };
+
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button === 1 || e.button === 2) {
       setIsPanning(true);
