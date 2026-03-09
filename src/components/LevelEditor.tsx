@@ -691,7 +691,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
 
   // Test the level
   const startTest = () => {
-    const { railPoints, obstacles: obsData } = convertLevelToGameData(tiles);
+    const { railPoints, obstacles: obsData } = convertLevelToGameData(tiles, railConnectionsRef.current);
     if (railPoints.length < 3) {
       alert('Place at least 3 rail tiles to test!');
       return;
