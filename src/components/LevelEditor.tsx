@@ -576,6 +576,12 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       setCurveControl({ gx, gy });
       setCurvePreview(generateBezierCurve(curveStart, curveEnd, { gx, gy }));
     }
+
+    // Line preview
+    if (tool === 'line' && lineStart) {
+      const { gx, gy } = screenToGrid(e.clientX, e.clientY);
+      setLinePreview(generateLine(lineStart, { gx, gy }));
+    }
   };
 
   const handleMouseUp = () => {
