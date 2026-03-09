@@ -115,6 +115,10 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const [curvePreview, setCurvePreview] = useState<{ gx: number; gy: number }[]>([]);
   const [isDraggingCurve, setIsDraggingCurve] = useState(false);
 
+  // Line tool state
+  const [lineStart, setLineStart] = useState<{ gx: number; gy: number } | null>(null);
+  const [linePreview, setLinePreview] = useState<{ gx: number; gy: number }[]>([]);
+
   const worldHeight = EDITOR_HEIGHT * GRID_SIZE;
 
   // Draw the editor grid
