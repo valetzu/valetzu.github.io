@@ -317,6 +317,30 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       ctx.fill();
     }
 
+    // Line preview
+    if (linePreview.length > 0) {
+      ctx.fillStyle = 'rgba(0,200,100,0.4)';
+      for (const p of linePreview) {
+        const sx2 = p.gx * GRID_SIZE - cx;
+        const sy2 = p.gy * GRID_SIZE - cy;
+        ctx.fillRect(sx2 + 2, sy2 + 2, GRID_SIZE - 4, GRID_SIZE - 4);
+      }
+    }
+
+    // Line start marker
+    if (lineStart) {
+      const lsx = lineStart.gx * GRID_SIZE + GRID_SIZE / 2 - cx;
+      const lsy = lineStart.gy * GRID_SIZE + GRID_SIZE / 2 - cy;
+      ctx.strokeStyle = '#00CC66';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(lineStart.gx * GRID_SIZE - cx + 1, lineStart.gy * GRID_SIZE - cy + 1, GRID_SIZE - 2, GRID_SIZE - 2);
+      ctx.fillStyle = '#00CC66';
+      ctx.font = 'bold 10px system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('A', lsx, lsy);
+    }
+
     // Reset transform for HUD overlays
     ctx.setTransform(1, 0, 0, 1, 0, 0);
 
