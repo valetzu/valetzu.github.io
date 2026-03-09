@@ -46,60 +46,116 @@ export function deleteCustomLevel(name: string) {
 }
 
 // Convert editor tiles to game-compatible rail + obstacles
-// Resamples rail to uniform RAIL_SPACING (100px) intervals for engine compatibility
-export function convertLevelToGameData(tiles: Record<string, TileType>) {
-  const rawRail: { x: number; y: number }[] = [];
+// Uses explicit connection graph to preserve intended rail order
+export function convertLevelToGameData(
+  tiles: Record<string, TileType>,
+  connections?: Record<string, Set<string>>
+) {
   const obstacles: { type: 'spinner' | 'bouncer'; gx: number; gy: number }[] = [];
+  const railKeys: string[] = [];
 
   for (const [key, type] of Object.entries(tiles)) {
-    const [gx, gy] = parseTileKey(key);
     if (type === 'rail' || type === 'rail_start' || type === 'rail_end') {
-      rawRail.push({ x: gx * GRID_SIZE, y: gy * GRID_SIZE });
+      railKeys.push(key);
     } else if (type === 'spinner' || type === 'bouncer') {
+      const [gx, gy] = parseTileKey(key);
       obstacles.push({ type, gx, gy });
     }
   }
 
-  // Sort by x then y
-  rawRail.sort((a, b) => a.x - b.x || a.y - b.y);
-
-  if (rawRail.length < 2) {
+  if (railKeys.length < 2) {
+    const rawRail = railKeys.map(k => {
+      const [gx, gy] = parseTileKey(k);
+      return { x: gx * GRID_SIZE, y: gy * GRID_SIZE };
+    });
     return { railPoints: rawRail, obstacles };
   }
 
-  // Resample the rail path at uniform RAIL_SPACING (100px) intervals
-  const RAIL_SPACING = 100;
-  const resampled: { x: number; y: number }[] = [];
-  
-  // Build cumulative distances along the polyline
-  const totalDist: number[] = [0];
-  for (let i = 1; i < rawRail.length; i++) {
-    const dx = rawRail[i].x - rawRail[i - 1].x;
-    const dy = rawRail[i].y - rawRail[i - 1].y;
-    totalDist.push(totalDist[i - 1] + Math.sqrt(dx * dx + dy * dy));
+  // Build ordered rail by walking the connection graph
+  let orderedRail: { x: number; y: number }[] = [];
+
+  if (connections && Object.keys(connections).length > 0) {
+    // Find start tile (rail_start, or a tile with only 1 connection, or first rail)
+    let startKey = railKeys.find(k => tiles[k] === 'rail_start');
+    if (!startKey) {
+      startKey = railKeys.find(k => connections[k] && connections[k].size === 1);
+    }
+    if (!startKey) startKey = railKeys[0];
+
+    // Walk the graph
+    const visited = new Set<string>();
+    const ordered: string[] = [];
+    let current: string | null = startKey;
+
+    while (current && !visited.has(current)) {
+      visited.add(current);
+      ordered.push(current);
+      const neighbors = connections[current];
+      if (!neighbors) break;
+      let next: string | null = null;
+      for (const n of neighbors) {
+        if (!visited.has(n)) {
+          next = n;
+          break;
+        }
+      }
+      current = next;
+    }
+
+    orderedRail = ordered.map(k => {
+      const [gx, gy] = parseTileKey(k);
+      return { x: gx * GRID_SIZE, y: gy * GRID_SIZE };
+    });
+  } else {
+    // Fallback: sort by x then y (legacy behavior)
+    orderedRail = railKeys.map(k => {
+      const [gx, gy] = parseTileKey(k);
+      return { x: gx * GRID_SIZE, y: gy * GRID_SIZE };
+    });
+    orderedRail.sort((a, b) => a.x - b.x || a.y - b.y);
   }
 
-  // Walk through at RAIL_SPACING intervals using x-coordinate
-  const minX = rawRail[0].x;
-  const maxX = rawRail[rawRail.length - 1].x;
-  
-  for (let x = minX; x <= maxX; x += RAIL_SPACING) {
-    // Find the two raw points that bracket this x
-    let idx = 0;
-    while (idx < rawRail.length - 1 && rawRail[idx + 1].x < x) idx++;
-    
-    if (idx >= rawRail.length - 1) {
-      resampled.push({ x, y: rawRail[rawRail.length - 1].y });
-    } else if (rawRail[idx].x === rawRail[idx + 1].x) {
-      resampled.push({ x, y: rawRail[idx].y });
+  if (orderedRail.length < 2) {
+    return { railPoints: orderedRail, obstacles };
+  }
+
+  // Resample the path at uniform RAIL_SPACING intervals along arc-length
+  const RAIL_SPACING = 100;
+
+  const cumDist: number[] = [0];
+  for (let i = 1; i < orderedRail.length; i++) {
+    const dx = orderedRail[i].x - orderedRail[i - 1].x;
+    const dy = orderedRail[i].y - orderedRail[i - 1].y;
+    cumDist.push(cumDist[i - 1] + Math.sqrt(dx * dx + dy * dy));
+  }
+  const totalLength = cumDist[cumDist.length - 1];
+
+  const resampled: { x: number; y: number }[] = [];
+  let segIdx = 0;
+
+  for (let d = 0; d <= totalLength; d += RAIL_SPACING) {
+    while (segIdx < cumDist.length - 2 && cumDist[segIdx + 1] < d) segIdx++;
+
+    const segLen = cumDist[segIdx + 1] - cumDist[segIdx];
+    if (segLen === 0) {
+      resampled.push({ ...orderedRail[segIdx] });
     } else {
-      const t = (x - rawRail[idx].x) / (rawRail[idx + 1].x - rawRail[idx].x);
-      const y = rawRail[idx].y + t * (rawRail[idx + 1].y - rawRail[idx].y);
-      resampled.push({ x, y });
+      const t = (d - cumDist[segIdx]) / segLen;
+      resampled.push({
+        x: orderedRail[segIdx].x + t * (orderedRail[segIdx + 1].x - orderedRail[segIdx].x),
+        y: orderedRail[segIdx].y + t * (orderedRail[segIdx + 1].y - orderedRail[segIdx].y),
+      });
     }
   }
 
-  // Remap to engine format: rail[i].x = i * RAIL_SPACING
+  // Always include the last point
+  const last = orderedRail[orderedRail.length - 1];
+  const lastResampled = resampled[resampled.length - 1];
+  if (!lastResampled || Math.abs(lastResampled.x - last.x) > 1 || Math.abs(lastResampled.y - last.y) > 1) {
+    resampled.push({ ...last });
+  }
+
+  // Remap x to sequential spacing for engine
   const railPoints = resampled.map((p, i) => ({ x: i * RAIL_SPACING, y: p.y }));
 
   return { railPoints, obstacles };
