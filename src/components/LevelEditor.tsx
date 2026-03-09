@@ -21,6 +21,7 @@ const TOOLS: { tool: EditorTool; label: string; emoji: string }[] = [
   { tool: 'eraser', label: 'Eraser', emoji: '🧹' },
   { tool: 'arc', label: 'Arc Tool', emoji: '⭕' },
   { tool: 'curve', label: 'Curve', emoji: '〰️' },
+  { tool: 'line', label: 'Line', emoji: '📏' },
 ];
 
 const TILE_COLORS: Record<TileType, string> = {
