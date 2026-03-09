@@ -523,6 +523,28 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         return;
       }
 
+      if (tool === 'line') {
+        if (!lineStart) {
+          setLineStart({ gx, gy });
+        } else {
+          const points = generateLine(lineStart, { gx, gy });
+          for (let i = 1; i < points.length; i++) {
+            addRailConnection(tileKey(points[i - 1].gx, points[i - 1].gy), tileKey(points[i].gx, points[i].gy));
+          }
+          if (points.length > 0) lastPlacedRailRef.current = tileKey(points[points.length - 1].gx, points[points.length - 1].gy);
+          setTiles(prev => {
+            const next = { ...prev };
+            for (const p of points) {
+              next[tileKey(p.gx, p.gy)] = 'rail';
+            }
+            return next;
+          });
+          setLineStart(null);
+          setLinePreview([]);
+        }
+        return;
+      }
+
       setIsDrawing(true);
       placeTile(gx, gy);
     }
