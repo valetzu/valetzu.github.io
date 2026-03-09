@@ -236,7 +236,7 @@ export class GameEngine {
     if (this.keys.down) throttle = -THROTTLE_BASE * motorMult * 0.7;
     if (this.rocketTimer > 0) throttle += THROTTLE_BASE * 1.5;
 
-    const gravity = cfg.gravity * Math.sin(angle);
+    const gravity = cfg.gravity * Math.sin(angle) * 0.15;
     const friction = -this.speed * cfg.friction * gripMult;
     const drag = -this.speed * Math.abs(this.speed) * 0.0003;
 
