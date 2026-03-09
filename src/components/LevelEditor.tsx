@@ -21,6 +21,7 @@ const TOOLS: { tool: EditorTool; label: string; emoji: string }[] = [
   { tool: 'eraser', label: 'Eraser', emoji: '🧹' },
   { tool: 'arc', label: 'Arc Tool', emoji: '⭕' },
   { tool: 'curve', label: 'Curve', emoji: '〰️' },
+  { tool: 'line', label: 'Line', emoji: '📏' },
 ];
 
 const TILE_COLORS: Record<TileType, string> = {
@@ -113,6 +114,10 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const [curveControl, setCurveControl] = useState<{ gx: number; gy: number } | null>(null);
   const [curvePreview, setCurvePreview] = useState<{ gx: number; gy: number }[]>([]);
   const [isDraggingCurve, setIsDraggingCurve] = useState(false);
+
+  // Line tool state
+  const [lineStart, setLineStart] = useState<{ gx: number; gy: number } | null>(null);
+  const [linePreview, setLinePreview] = useState<{ gx: number; gy: number }[]>([]);
 
   const worldHeight = EDITOR_HEIGHT * GRID_SIZE;
 
@@ -312,6 +317,30 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       ctx.fill();
     }
 
+    // Line preview
+    if (linePreview.length > 0) {
+      ctx.fillStyle = 'rgba(0,200,100,0.4)';
+      for (const p of linePreview) {
+        const sx2 = p.gx * GRID_SIZE - cx;
+        const sy2 = p.gy * GRID_SIZE - cy;
+        ctx.fillRect(sx2 + 2, sy2 + 2, GRID_SIZE - 4, GRID_SIZE - 4);
+      }
+    }
+
+    // Line start marker
+    if (lineStart) {
+      const lsx = lineStart.gx * GRID_SIZE + GRID_SIZE / 2 - cx;
+      const lsy = lineStart.gy * GRID_SIZE + GRID_SIZE / 2 - cy;
+      ctx.strokeStyle = '#00CC66';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(lineStart.gx * GRID_SIZE - cx + 1, lineStart.gy * GRID_SIZE - cy + 1, GRID_SIZE - 2, GRID_SIZE - 2);
+      ctx.fillStyle = '#00CC66';
+      ctx.font = 'bold 10px system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('A', lsx, lsy);
+    }
+
     // Reset transform for HUD overlays
     ctx.setTransform(1, 0, 0, 1, 0, 0);
 
@@ -324,7 +353,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(`Middle-click / Right-click drag to pan • +/- to zoom (${Math.round(zoom * 100)}%) • Click to place tiles`, w / 2, h - 15);
-  }, [camera, tiles, tool, arcCenter, arcPreview, zoom, curveStart, curveEnd, curveControl, curvePreview]);
+  }, [camera, tiles, tool, arcCenter, arcPreview, zoom, curveStart, curveEnd, curveControl, curvePreview, lineStart, linePreview]);
 
   // Resize & render loop
   useEffect(() => {
@@ -447,6 +476,26 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     return result;
   };
 
+  const generateLine = (
+    start: { gx: number; gy: number },
+    end: { gx: number; gy: number }
+  ) => {
+    const points: { gx: number; gy: number }[] = [];
+    let x0 = start.gx, y0 = start.gy;
+    const x1 = end.gx, y1 = end.gy;
+    const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+    let err = dx - dy;
+    while (true) {
+      points.push({ gx: x0, gy: y0 });
+      if (x0 === x1 && y0 === y1) break;
+      const e2 = 2 * err;
+      if (e2 > -dy) { err -= dy; x0 += sx; }
+      if (e2 < dx) { err += dx; y0 += sy; }
+    }
+    return points;
+  };
+
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button === 1 || e.button === 2) {
       setIsPanning(true);
@@ -498,6 +547,28 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         return;
       }
 
+      if (tool === 'line') {
+        if (!lineStart) {
+          setLineStart({ gx, gy });
+        } else {
+          const points = generateLine(lineStart, { gx, gy });
+          for (let i = 1; i < points.length; i++) {
+            addRailConnection(tileKey(points[i - 1].gx, points[i - 1].gy), tileKey(points[i].gx, points[i].gy));
+          }
+          if (points.length > 0) lastPlacedRailRef.current = tileKey(points[points.length - 1].gx, points[points.length - 1].gy);
+          setTiles(prev => {
+            const next = { ...prev };
+            for (const p of points) {
+              next[tileKey(p.gx, p.gy)] = 'rail';
+            }
+            return next;
+          });
+          setLineStart(null);
+          setLinePreview([]);
+        }
+        return;
+      }
+
       setIsDrawing(true);
       placeTile(gx, gy);
     }
@@ -528,6 +599,12 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       const { gx, gy } = screenToGrid(e.clientX, e.clientY);
       setCurveControl({ gx, gy });
       setCurvePreview(generateBezierCurve(curveStart, curveEnd, { gx, gy }));
+    }
+
+    // Line preview
+    if (tool === 'line' && lineStart) {
+      const { gx, gy } = screenToGrid(e.clientX, e.clientY);
+      setLinePreview(generateLine(lineStart, { gx, gy }));
     }
   };
 
@@ -827,8 +904,9 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
                     key={t.tool}
                     onClick={() => {
                       setTool(t.tool); lastPlacedRailRef.current = null;
-                      if (t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); }
-                      if (t.tool !== 'curve') { setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); }
+                       if (t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); }
+                       if (t.tool !== 'curve') { setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); }
+                       if (t.tool !== 'line') { setLineStart(null); setLinePreview([]); }
                       setShowTilesMenu(false);
                     }}
                     className={`w-full text-left px-3 py-2 rounded font-bold text-sm transition-all ${
@@ -845,13 +923,14 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           </div>
 
           {/* Standalone tools */}
-          {TOOLS.filter(t => ['eraser', 'arc', 'curve'].includes(t.tool)).map(t => (
+          {TOOLS.filter(t => ['eraser', 'arc', 'curve', 'line'].includes(t.tool)).map(t => (
             <button
               key={t.tool}
               onClick={() => {
                 setTool(t.tool); lastPlacedRailRef.current = null;
                 if (t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); }
                 if (t.tool !== 'curve') { setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); }
+                if (t.tool !== 'line') { setLineStart(null); setLinePreview([]); }
                 setShowTilesMenu(false);
               }}
               className={`px-3 py-2 rounded-lg font-bold text-sm transition-all ${
