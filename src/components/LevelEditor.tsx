@@ -110,6 +110,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const engineRef = useRef<GameEngine | null>(null);
   const gameOverRef = useRef(false);
   const lastSavedTilesRef = useRef<string>('{}');
+  const [testError, setTestError] = useState<string | null>(null);
 
   const hasUnsavedChanges = () => JSON.stringify(tiles) !== lastSavedTilesRef.current;
 
@@ -703,12 +704,14 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     const hasStart = Object.values(tiles).some(t => t === 'rail_start');
     const hasEnd = Object.values(tiles).some(t => t === 'rail_end');
     if (!hasStart || !hasEnd) {
-      alert('Place both a Start (🟢) and End (🏁) tile before testing!');
+      setTestError('Place both a Start (🟢) and End (🏁) tile before testing.');
+      setTimeout(() => setTestError(null), 3000);
       return;
     }
     const { railPoints } = convertLevelToGameData(tiles, railConnectionsRef.current);
     if (railPoints.length < 3) {
-      alert('Place at least 3 rail tiles to test!');
+      setTestError('Place at least 3 rail tiles before testing.');
+      setTimeout(() => setTestError(null), 3000);
       return;
     }
     setLevelComplete(null);
@@ -940,6 +943,13 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
       />
+
+      {/* Test validation alert */}
+      {testError && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-20 px-4 py-2 rounded-lg bg-red-700 text-white text-sm font-bold shadow-lg border border-red-400">
+          {testError}
+        </div>
+      )}
 
       {/* Top bar */}
       <div className="fixed top-4 left-4 right-4 flex items-start justify-between z-10">
