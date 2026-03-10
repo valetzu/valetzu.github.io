@@ -473,8 +473,7 @@ export class GameEngine {
 
   renderRail(cx: number, cy: number, w: number) {
     const { ctx, rail } = this;
-    const startIdx = Math.max(0, Math.floor(cx / RAIL_SPACING) - 2);
-    const endIdx = Math.min(rail.length - 1, Math.ceil((cx + w) / RAIL_SPACING) + 2);
+    const [startIdx, endIdx] = this.findVisibleRange(cx, w);
 
     // Cable
     ctx.strokeStyle = '#333';
