@@ -32,6 +32,9 @@ export class GameEngine {
   obstacles: Obstacle[] = [];
   keys = { up: false, down: false, space: false, shift: false };
   noBackground = false;
+  hasFinitePath = false;
+  elapsedTime = 0;
+  levelCompleted = false;
   camera = { x: 0, y: 0 };
 
   invulnTimer = 0;
@@ -53,6 +56,7 @@ export class GameEngine {
 
   onUpdate?: (dist: number, passengers: number, speed: number) => void;
   onGameOver?: (dist: number, cash: number) => void;
+  onLevelComplete?: (time: number) => void;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -61,6 +65,7 @@ export class GameEngine {
     callbacks: {
       onUpdate?: (d: number, p: number, s: number) => void;
       onGameOver?: (d: number, c: number) => void;
+      onLevelComplete?: (time: number) => void;
     }
   ) {
     this.canvas = canvas;
@@ -69,6 +74,7 @@ export class GameEngine {
     this.upgrades = upgrades;
     this.onUpdate = callbacks.onUpdate;
     this.onGameOver = callbacks.onGameOver;
+    this.onLevelComplete = callbacks.onLevelComplete;
     this.passengers = 3 + upgrades.health;
     this.rocketCharges = upgrades.rocket > 0 ? 1 + upgrades.rocket : 0;
     this.shieldCharges = upgrades.shield > 0 ? 1 + upgrades.shield : 0;
@@ -207,7 +213,7 @@ export class GameEngine {
     const dt = Math.min((now - this.lastTime) / 1000, 0.05);
     this.lastTime = now;
 
-    if (!this.gameOver) {
+    if (!this.gameOver && !this.levelCompleted) {
       this.update(dt);
     }
     this.render();
@@ -249,6 +255,16 @@ export class GameEngine {
     this.pos = Math.max(0, this.pos);
 
     this.distance += Math.abs(this.speed * dt) * 0.1; // px to meters
+    this.elapsedTime += dt;
+
+    // Check level completion (finite path - reached near the end)
+    if (this.hasFinitePath && this.pos >= this.rail.length - 2) {
+      this.pos = this.rail.length - 2;
+      this.speed = 0;
+      this.levelCompleted = true;
+      this.onLevelComplete?.(this.elapsedTime);
+      return;
+    }
 
     // Timers
     if (this.invulnTimer > 0) this.invulnTimer -= dt;
@@ -257,7 +273,7 @@ export class GameEngine {
     if (this.flashTimer > 0) this.flashTimer -= dt;
 
     // Generate more rail
-    if (this.pos > this.rail.length - 80) {
+    if (!this.hasFinitePath && this.pos > this.rail.length - 80) {
       this.generateRail(100);
     }
 
