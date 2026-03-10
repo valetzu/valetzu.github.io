@@ -56,6 +56,7 @@ export class GameEngine {
 
   onUpdate?: (dist: number, passengers: number, speed: number) => void;
   onGameOver?: (dist: number, cash: number) => void;
+  onLevelComplete?: (time: number) => void;
 
   constructor(
     canvas: HTMLCanvasElement,
