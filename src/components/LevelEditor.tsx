@@ -733,7 +733,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     window.addEventListener('resize', resize);
 
     // Convert tiles to engine-compatible format (already resampled at RAIL_SPACING)
-    const { railPoints, obstacles: obsData } = convertLevelToGameData(tiles, railConnectionsRef.current);
+    const { railPoints, allSegments, obstacles: obsData, endSegmentIndex, endPointIndex } = convertLevelToGameData(tiles, railConnectionsRef.current);
 
     // Create a custom engine with pre-built rail
     const engine = new GameEngine(canvas, 'overworld', { motor: 0, health: 0, grip: 0, rocket: 0, shield: 0 }, {
@@ -743,6 +743,10 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
 
     // Override the rail with our resampled one (already in world coordinates)
     engine.rail = railPoints;
+    engine.allRailSegments = allSegments;
+    (engine as any).hasFinitePath = true;
+    (engine as any).endSegmentIndex = endSegmentIndex;
+    (engine as any).endPointIndex = endPointIndex;
     engine.ground = engine.rail.map(p => p.y + 150);
     engine.noBackground = skyOnly;
     engine.obstacles = [];
@@ -878,8 +882,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     return (
       <div className="fixed inset-0">
         <canvas ref={testCanvasRef} className="w-full h-full" />
-        {/* Place the test-mode back button in the top-left to avoid overlapping the in-canvas HUD (speed/timer) in the top-right */}
-        <div className="fixed top-4 left-4 z-10">
+        {/* Place the test-mode back button in the bottom-left to avoid overlapping in-canvas HUD (distance/hearts/speed) */}
+        <div className="fixed bottom-4 left-4 z-10">
           <button
             onClick={() => {
               engineRef.current?.stop();
