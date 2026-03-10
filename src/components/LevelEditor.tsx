@@ -98,6 +98,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const [testing, setTesting] = useState(false);
   const [showTilesMenu, setShowTilesMenu] = useState(false);
   const [showFileMenu, setShowFileMenu] = useState(false);
+  const [levelComplete, setLevelComplete] = useState<{ time: number } | null>(null);
   const testCanvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
   const gameOverRef = useRef(false);
