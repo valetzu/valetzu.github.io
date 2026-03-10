@@ -65,6 +65,7 @@ export class GameEngine {
     callbacks: {
       onUpdate?: (d: number, p: number, s: number) => void;
       onGameOver?: (d: number, c: number) => void;
+      onLevelComplete?: (time: number) => void;
     }
   ) {
     this.canvas = canvas;
