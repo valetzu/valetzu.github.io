@@ -30,6 +30,7 @@ export class GameEngine {
   passengers: number = 3;
   distance: number = 0;
   obstacles: Obstacle[] = [];
+  keys = { up: false, down: false, space: false, shift: false };
   noBackground = false;
   camera = { x: 0, y: 0 };
 
