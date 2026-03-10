@@ -74,6 +74,7 @@ export class GameEngine {
     this.upgrades = upgrades;
     this.onUpdate = callbacks.onUpdate;
     this.onGameOver = callbacks.onGameOver;
+    this.onLevelComplete = callbacks.onLevelComplete;
     this.passengers = 3 + upgrades.health;
     this.rocketCharges = upgrades.rocket > 0 ? 1 + upgrades.rocket : 0;
     this.shieldCharges = upgrades.shield > 0 ? 1 + upgrades.shield : 0;
