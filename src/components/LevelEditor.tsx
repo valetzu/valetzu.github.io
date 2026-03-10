@@ -770,9 +770,10 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       }
     }
 
-    // Prevent auto-generation of more rail
+    // Prevent auto-generation of more rail; mark as finite path
     engine.generateRail = () => {};
     engine.spawnObstacles = () => {};
+    engine.hasFinitePath = true;
     engine.pos = 0;
     engineRef.current = engine;
     engine.start();
