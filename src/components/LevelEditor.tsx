@@ -40,6 +40,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   // Track explicit connections between rail tiles: key -> Set of connected keys
   const railConnectionsRef = useRef<Record<string, Set<string>>>({});
   const lastPlacedRailRef = useRef<string | null>(null);
+  const [skyOnly, setSkyOnly] = useState(true);
 
   const addRailConnection = (keyA: string, keyB: string) => {
     const conns = railConnectionsRef.current;
@@ -724,6 +725,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     // Override the rail with our resampled one (already in world coordinates)
     engine.rail = railPoints;
     engine.ground = engine.rail.map(p => p.y + 150);
+    engine.noBackground = skyOnly;
     engine.obstacles = [];
 
     // Add obstacles - convert grid coords to world coords matching the resampled rail
@@ -946,6 +948,17 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
 
         {/* Right: Action buttons */}
         <div className="flex gap-2 items-start">
+          <button
+            onClick={() => setSkyOnly(!skyOnly)}
+            className={`px-3 py-2 rounded-lg font-bold text-sm transition-all ${
+              skyOnly
+                ? 'bg-game-accent text-game-bg'
+                : 'bg-game-card text-game-title border border-game-card-border hover:border-game-accent'
+            }`}
+            title={skyOnly ? 'Background: Sky only' : 'Background: Full scenery'}
+          >
+            {skyOnly ? '☁️ Sky Only' : '🏔️ Scenery'}
+          </button>
           <button
             onClick={startTest}
             className="px-4 py-2 rounded-lg bg-green-600 text-white font-bold text-sm hover:bg-green-500"
