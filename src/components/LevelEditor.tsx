@@ -70,8 +70,15 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     const keys = Object.keys(tilesData).filter(k => isRailLike(tilesData[k]));
     for (const key of keys) {
       const [gx, gy] = parseTileKey(key);
-      // Only connect orthogonal neighbors (simple chain rebuild)
-      for (const [dx, dy] of [[1, 0], [0, 1]] as const) {
+      // Rebuild connections between neighboring rail tiles (orthogonal + direct diagonals)
+      // Only use a subset of neighbor directions to avoid duplicate pairs.
+      const neighborOffsets: [number, number][] = [
+        [1, 0],   // right
+        [0, 1],   // down
+        [1, 1],   // down-right diagonal
+        [1, -1],  // up-right diagonal
+      ];
+      for (const [dx, dy] of neighborOffsets) {
         const nk = tileKey(gx + dx, gy + dy);
         if (isRailLike(tilesData[nk])) {
           if (!conns[key]) conns[key] = new Set();
@@ -103,6 +110,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const engineRef = useRef<GameEngine | null>(null);
   const gameOverRef = useRef(false);
   const lastSavedTilesRef = useRef<string>('{}');
+  const [testError, setTestError] = useState<string | null>(null);
 
   const hasUnsavedChanges = () => JSON.stringify(tiles) !== lastSavedTilesRef.current;
 
@@ -696,12 +704,14 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     const hasStart = Object.values(tiles).some(t => t === 'rail_start');
     const hasEnd = Object.values(tiles).some(t => t === 'rail_end');
     if (!hasStart || !hasEnd) {
-      alert('Place both a Start (🟢) and End (🏁) tile before testing!');
+      setTestError('Place both a Start (🟢) and End (🏁) tile before testing.');
+      setTimeout(() => setTestError(null), 3000);
       return;
     }
     const { railPoints } = convertLevelToGameData(tiles, railConnectionsRef.current);
     if (railPoints.length < 3) {
-      alert('Place at least 3 rail tiles to test!');
+      setTestError('Place at least 3 rail tiles before testing.');
+      setTimeout(() => setTestError(null), 3000);
       return;
     }
     setLevelComplete(null);
@@ -723,7 +733,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     window.addEventListener('resize', resize);
 
     // Convert tiles to engine-compatible format (already resampled at RAIL_SPACING)
-    const { railPoints, obstacles: obsData } = convertLevelToGameData(tiles, railConnectionsRef.current);
+    const { railPoints, allSegments, obstacles: obsData, endSegmentIndex, endPointIndex } = convertLevelToGameData(tiles, railConnectionsRef.current);
 
     // Create a custom engine with pre-built rail
     const engine = new GameEngine(canvas, 'overworld', { motor: 0, health: 0, grip: 0, rocket: 0, shield: 0 }, {
@@ -733,6 +743,10 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
 
     // Override the rail with our resampled one (already in world coordinates)
     engine.rail = railPoints;
+    engine.allRailSegments = allSegments;
+    (engine as any).hasFinitePath = true;
+    (engine as any).endSegmentIndex = endSegmentIndex;
+    (engine as any).endPointIndex = endPointIndex;
     engine.ground = engine.rail.map(p => p.y + 150);
     engine.noBackground = skyOnly;
     engine.obstacles = [];
@@ -868,7 +882,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     return (
       <div className="fixed inset-0">
         <canvas ref={testCanvasRef} className="w-full h-full" />
-        <div className="fixed top-4 right-4 z-10">
+        {/* Place the test-mode back button in the bottom-left to avoid overlapping in-canvas HUD (distance/hearts/speed) */}
+        <div className="fixed bottom-4 left-4 z-10">
           <button
             onClick={() => {
               engineRef.current?.stop();
@@ -932,6 +947,13 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
       />
+
+      {/* Test validation alert */}
+      {testError && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-20 px-4 py-2 rounded-lg bg-red-700 text-white text-sm font-bold shadow-lg border border-red-400">
+          {testError}
+        </div>
+      )}
 
       {/* Top bar */}
       <div className="fixed top-4 left-4 right-4 flex items-start justify-between z-10">

@@ -24,15 +24,30 @@ export class GameEngine {
   upgrades: Upgrades;
 
   rail: Point[] = [];
+  /** All rail segments for finite levels (for rendering + snap). Index 0 = start segment. */
+  allRailSegments: Point[][] = [];
   ground: number[] = []; // groundY for each rail point
   pos: number = 0;
   speed: number = 0;
   passengers: number = 3;
   distance: number = 0;
   obstacles: Obstacle[] = [];
-  keys = { up: false, down: false, space: false, shift: false };
+  keys = { up: false, down: false, left: false, right: false, space: false, shift: false };
   noBackground = false;
   hasFinitePath = false;
+  // For editor-defined finite levels: which segment + point is the end tile (complete when touching it)
+  endSegmentIndex: number | null = null;
+  endPointIndex: number | null = null;
+  onRail = true;
+
+  // Airborne state (when the player leaves the rail)
+  airX = 0;
+  airY = 0;
+  airVX = 0;
+  airVY = 0;
+  airRotation = 0;
+  airRotVel = 0;
+
   elapsedTime = 0;
   levelCompleted = false;
   camera = { x: 0, y: 0 };
@@ -174,6 +189,8 @@ export class GameEngine {
   handleKeyDown = (e: KeyboardEvent) => {
     if (e.code === 'ArrowUp') { this.keys.up = true; e.preventDefault(); }
     if (e.code === 'ArrowDown') { this.keys.down = true; e.preventDefault(); }
+    if (e.code === 'ArrowLeft') { this.keys.left = true; e.preventDefault(); }
+    if (e.code === 'ArrowRight') { this.keys.right = true; e.preventDefault(); }
     if (e.code === 'Space' && this.rocketTimer <= 0 && this.rocketCharges > 0) {
       this.rocketTimer = ROCKET_DURATION;
       this.rocketCharges--;
@@ -189,6 +206,8 @@ export class GameEngine {
   handleKeyUp = (e: KeyboardEvent) => {
     if (e.code === 'ArrowUp') this.keys.up = false;
     if (e.code === 'ArrowDown') this.keys.down = false;
+    if (e.code === 'ArrowLeft') this.keys.left = false;
+    if (e.code === 'ArrowRight') this.keys.right = false;
   };
 
   // --- Lifecycle ---
@@ -223,8 +242,137 @@ export class GameEngine {
   // --- Physics ---
   update(dt: number) {
     const cfg = WORLD_CONFIG[this.world];
+
+    // Airborne physics for finite, editor-defined levels
+    if (this.hasFinitePath && !this.onRail) {
+      // Basic mid-air motion with gravity and rotation control
+      const g = cfg.gravity * 0.9;
+      this.airVY += g * dt;
+
+      // Simple air drag
+      const drag = 0.0006;
+      const vMag = Math.sqrt(this.airVX * this.airVX + this.airVY * this.airVY);
+      if (vMag > 0) {
+        const dragForce = drag * vMag * vMag;
+        const dragX = (this.airVX / vMag) * dragForce;
+        const dragY = (this.airVY / vMag) * dragForce;
+        this.airVX -= dragX * dt;
+        this.airVY -= dragY * dt;
+      }
+
+      // Mid-air rotation via left/right keys
+      const rotAccel = 4;
+      if (this.keys.left) this.airRotVel -= rotAccel * dt;
+      if (this.keys.right) this.airRotVel += rotAccel * dt;
+
+      // Rotation damping
+      this.airRotVel *= Math.exp(-2 * dt);
+      this.airRotation += this.airRotVel * dt;
+
+      // Integrate position
+      this.airX += this.airVX * dt;
+      this.airY += this.airVY * dt;
+
+      // Update distance for HUD (approximate)
+      this.distance += vMag * dt * 0.1;
+      this.elapsedTime += dt;
+
+      // Try to snap back to any rail segment if we pass near it
+      const snapRadius = 40;
+      const segmentsToSearch = this.allRailSegments.length > 0 ? this.allRailSegments : [this.rail];
+      let bestSeg: Point[] | null = null;
+      let bestIdx = -1;
+      let bestDist = snapRadius;
+      for (const seg of segmentsToSearch) {
+        if (seg.length < 2) continue;
+        for (let i = 0; i < seg.length; i++) {
+          const p = seg[i];
+          const dx = p.x - this.airX;
+          const dy = p.y - this.airY;
+          const d = Math.sqrt(dx * dx + dy * dy);
+          if (d < bestDist) {
+            bestDist = d;
+            bestSeg = seg;
+            bestIdx = i;
+          }
+        }
+      }
+
+      if (bestSeg != null && bestIdx >= 0 && bestIdx < bestSeg.length - 1) {
+        const p0 = bestSeg[bestIdx];
+        const p1 = bestSeg[bestIdx + 1];
+        const segDx = p1.x - p0.x;
+        const segDy = p1.y - p0.y;
+        const segLen = Math.sqrt(segDx * segDx + segDy * segDy) || 1;
+        const tx = segDx / segLen;
+        const ty = segDy / segLen;
+        const tangentialSpeed = this.airVX * tx + this.airVY * ty;
+
+        this.onRail = true;
+        this.rail = bestSeg;
+        this.pos = bestIdx;
+        this.speed = tangentialSpeed;
+        this.airVX = this.airVY = 0;
+
+        // Level complete when we snapped onto the end tile (any segment)
+        if (this.touchedEndTile() && !this.levelCompleted) {
+          this.pos = this.endPointIndex!;
+          this.speed = 0;
+          this.levelCompleted = true;
+          this.onLevelComplete?.(this.elapsedTime);
+        }
+      }
+
+      // Camera follows airborne gondola
+      const gondolaWorld = this.getGondolaPos();
+      this.camera.x += (gondolaWorld.x - this.canvas.width * 0.35 - this.camera.x) * 0.08;
+      this.camera.y += (gondolaWorld.y - this.canvas.height * 0.45 - this.camera.y) * 0.06;
+
+      // Timers
+      if (this.invulnTimer > 0) this.invulnTimer -= dt;
+      if (this.rocketTimer > 0) this.rocketTimer -= dt;
+      if (this.shieldTimer > 0) this.shieldTimer -= dt;
+      if (this.flashTimer > 0) this.flashTimer -= dt;
+
+      // No rail generation or obstacle collisions while off-track
+      this.onUpdate?.(this.distance, this.passengers, Math.abs(this.speed) * 0.1);
+      return;
+    }
+
     const i = Math.floor(this.pos);
-    if (i < 0 || i >= this.rail.length - 1) return;
+    if (i < 0) return;
+    if (i >= this.rail.length - 1) {
+      // Reached or passed the end of this segment. Complete if we touched the end tile (on any segment).
+      if (this.hasFinitePath && this.touchedEndTile() && !this.levelCompleted) {
+        this.pos = this.endPointIndex!;
+        this.speed = 0;
+        this.levelCompleted = true;
+        this.onLevelComplete?.(this.elapsedTime);
+        return;
+      }
+      // Otherwise ran off the end: launch into airborne mode.
+      if (this.hasFinitePath && this.onRail && !this.levelCompleted && this.rail.length >= 2) {
+        const lastIdx = this.rail.length - 2;
+        const p0 = this.rail[lastIdx];
+        const p1 = this.rail[lastIdx + 1];
+        const dx = p1.x - p0.x;
+        const dy = p1.y - p0.y;
+        const segLen = Math.sqrt(dx * dx + dy * dy) || 1;
+        const dir = this.speed >= 0 ? 1 : -1;
+        const tx = (dx / segLen) * dir;
+        const ty = (dy / segLen) * dir;
+
+        this.onRail = false;
+        const launchPoint = dir >= 0 ? p1 : p0;
+        this.airX = launchPoint.x;
+        this.airY = launchPoint.y;
+        this.airVX = tx * Math.abs(this.speed);
+        this.airVY = ty * Math.abs(this.speed);
+        this.airRotation = Math.atan2(dy, dx);
+        this.airRotVel = 0;
+      }
+      return;
+    }
 
     const p0 = this.rail[i];
     const p1 = this.rail[i + 1];
@@ -257,9 +405,9 @@ export class GameEngine {
     this.distance += Math.abs(this.speed * dt) * 0.1; // px to meters
     this.elapsedTime += dt;
 
-    // Check level completion (finite path - reached near the end)
-    if (this.hasFinitePath && this.pos >= this.rail.length - 2) {
-      this.pos = this.rail.length - 2;
+    // Check level completion: touched the end tile (on any segment)
+    if (this.hasFinitePath && this.touchedEndTile() && !this.levelCompleted) {
+      this.pos = this.endPointIndex!;
       this.speed = 0;
       this.levelCompleted = true;
       this.onLevelComplete?.(this.elapsedTime);
@@ -290,12 +438,24 @@ export class GameEngine {
   }
 
   getGondolaPos(): Point {
+    if (this.hasFinitePath && !this.onRail) {
+      return { x: this.airX, y: this.airY };
+    }
+
     const i = Math.floor(this.pos);
     const f = this.pos - i;
     if (i < 0 || i >= this.rail.length - 1) return { x: 0, y: 300 };
     const p0 = this.rail[i];
     const p1 = this.rail[i + 1];
     return { x: p0.x + (p1.x - p0.x) * f, y: p0.y + (p1.y - p0.y) * f };
+  }
+
+  /** True if the player is on the segment that has the end tile and has reached that point (any segment). */
+  touchedEndTile(): boolean {
+    if (this.endSegmentIndex == null || this.endPointIndex == null || this.allRailSegments.length === 0) return false;
+    const endSeg = this.allRailSegments[this.endSegmentIndex];
+    if (!endSeg || this.rail !== endSeg) return false;
+    return this.pos >= this.endPointIndex - 0.01;
   }
 
   checkCollisions() {
@@ -493,21 +653,35 @@ export class GameEngine {
   }
 
   renderRail(cx: number, cy: number, w: number) {
-    const { ctx, rail } = this;
-    const [startIdx, endIdx] = this.findVisibleRange(cx, w);
-
-    // Cable
+    const { ctx } = this;
     ctx.strokeStyle = '#333';
     ctx.lineWidth = 4;
-    ctx.beginPath();
-    for (let i = startIdx; i <= endIdx; i++) {
-      const sx = rail[i].x - cx;
-      const sy = rail[i].y - cy;
-      if (i === startIdx) ctx.moveTo(sx, sy);
-      else ctx.lineTo(sx, sy);
-    }
-    ctx.stroke();
 
+    const segmentsToDraw = this.allRailSegments.length > 0 ? this.allRailSegments : [this.rail];
+    for (const seg of segmentsToDraw) {
+      if (seg.length < 2) continue;
+      const [startIdx, endIdx] = this.findVisibleRangeForRail(seg, cx, w);
+      ctx.beginPath();
+      for (let i = startIdx; i <= endIdx; i++) {
+        const sx = seg[i].x - cx;
+        const sy = seg[i].y - cy;
+        if (i === startIdx) ctx.moveTo(sx, sy);
+        else ctx.lineTo(sx, sy);
+      }
+      ctx.stroke();
+    }
+  }
+
+  findVisibleRangeForRail(rail: Point[], cx: number, w: number): [number, number] {
+    let startIdx = 0;
+    let endIdx = rail.length - 1;
+    for (let i = 0; i < rail.length; i++) {
+      if (rail[i].x >= cx - 200) { startIdx = Math.max(0, i - 1); break; }
+    }
+    for (let i = startIdx; i < rail.length; i++) {
+      if (rail[i].x > cx + w + 200) { endIdx = i; break; }
+    }
+    return [startIdx, endIdx];
   }
 
   renderObstacles(cx: number, cy: number) {
@@ -643,6 +817,16 @@ export class GameEngine {
     // Flash effect when hit
     if (this.invulnTimer > 0 && Math.floor(this.invulnTimer * 8) % 2 === 0) return;
 
+    // Apply rotation around gondola center when airborne
+    ctx.save();
+    const pivotX = sx;
+    const pivotY = sy + GONDOLA_HANG;
+    if (this.hasFinitePath && !this.onRail) {
+      ctx.translate(pivotX, pivotY);
+      ctx.rotate(this.airRotation);
+      ctx.translate(-pivotX, -pivotY);
+    }
+
     // Shield glow
     if (this.shieldTimer > 0) {
       ctx.strokeStyle = 'rgba(100, 200, 255, 0.6)';
@@ -738,6 +922,7 @@ export class GameEngine {
       ctx.arc(px + 2.5, py - 1, 0.8, 0, Math.PI * 2);
       ctx.fill();
     }
+    ctx.restore();
   }
 
   roundRect(x: number, y: number, w: number, h: number, r: number) {
@@ -767,13 +952,22 @@ export class GameEngine {
     ctx.textAlign = 'left';
     ctx.fillText(`📏 ${Math.floor(this.distance)}m`, 20, 34);
 
-    // Speed
+    // Speed + timer panel (top-right)
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    this.roundRect(w - 190, 10, 180, 36, 6);
+    this.roundRect(w - 190, 10, 180, 52, 6);
     ctx.fill();
     ctx.fillStyle = '#FFF';
     ctx.textAlign = 'right';
     ctx.fillText(`⚡ ${Math.floor(Math.abs(this.speed) * 0.36)} km/h`, w - 20, 34);
+
+    // Elapsed time (visible game timer in top-right section)
+    const totalSeconds = Math.floor(this.elapsedTime);
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    const timeLabel = `${mins}:${secs.toString().padStart(2, '0')}`;
+    ctx.fillStyle = '#FFD54F';
+    ctx.font = 'bold 14px system-ui, sans-serif';
+    ctx.fillText(`⏱ ${timeLabel}`, w - 20, 50);
 
     // Passengers
     ctx.textAlign = 'left';
@@ -793,13 +987,17 @@ export class GameEngine {
     this.roundRect(barX - 80, barY - 2, barW + 160, barH + 4, 8);
     ctx.fill();
 
-    // Labels
-    ctx.fillStyle = '#4CAF50';
+    // Labels (highlight when key is actively pressed)
+    const throttleActive = this.keys.up;
+    const brakeActive = this.keys.down;
+
     ctx.font = 'bold 13px system-ui';
     ctx.textAlign = 'right';
+    ctx.fillStyle = throttleActive ? '#A5D6A7' : '#4CAF50';
     ctx.fillText('THROTTLE ▶', barX - 8, barY + 20);
-    ctx.fillStyle = '#E53935';
+
     ctx.textAlign = 'left';
+    ctx.fillStyle = brakeActive ? '#FFCDD2' : '#E53935';
     ctx.fillText('◀ BRAKE', barX + barW + 8, barY + 20);
 
     // Bar background
@@ -863,5 +1061,7 @@ export class GameEngine {
       ctx.fillStyle = '#AAA';
       ctx.fillText('Press ENTER to continue', w / 2, h / 2 + 90);
     }
+
+    ctx.restore();
   }
 }
