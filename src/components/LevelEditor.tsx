@@ -725,6 +725,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     // Override the rail with our resampled one (already in world coordinates)
     engine.rail = railPoints;
     engine.ground = engine.rail.map(p => p.y + 150);
+    engine.noBackground = skyOnly;
     engine.obstacles = [];
 
     // Add obstacles - convert grid coords to world coords matching the resampled rail
