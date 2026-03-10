@@ -70,8 +70,15 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     const keys = Object.keys(tilesData).filter(k => isRailLike(tilesData[k]));
     for (const key of keys) {
       const [gx, gy] = parseTileKey(key);
-      // Only connect orthogonal neighbors (simple chain rebuild)
-      for (const [dx, dy] of [[1, 0], [0, 1]] as const) {
+      // Rebuild connections between neighboring rail tiles (orthogonal + direct diagonals)
+      // Only use a subset of neighbor directions to avoid duplicate pairs.
+      const neighborOffsets: [number, number][] = [
+        [1, 0],   // right
+        [0, 1],   // down
+        [1, 1],   // down-right diagonal
+        [1, -1],  // up-right diagonal
+      ];
+      for (const [dx, dy] of neighborOffsets) {
         const nk = tileKey(gx + dx, gy + dy);
         if (isRailLike(tilesData[nk])) {
           if (!conns[key]) conns[key] = new Set();
@@ -868,7 +875,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     return (
       <div className="fixed inset-0">
         <canvas ref={testCanvasRef} className="w-full h-full" />
-        <div className="fixed top-4 right-4 z-10">
+        {/* Place the test-mode back button in the top-left to avoid overlapping the in-canvas HUD (speed/timer) in the top-right */}
+        <div className="fixed top-4 left-4 z-10">
           <button
             onClick={() => {
               engineRef.current?.stop();

@@ -767,13 +767,22 @@ export class GameEngine {
     ctx.textAlign = 'left';
     ctx.fillText(`📏 ${Math.floor(this.distance)}m`, 20, 34);
 
-    // Speed
+    // Speed + timer panel (top-right)
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    this.roundRect(w - 190, 10, 180, 36, 6);
+    this.roundRect(w - 190, 10, 180, 52, 6);
     ctx.fill();
     ctx.fillStyle = '#FFF';
     ctx.textAlign = 'right';
     ctx.fillText(`⚡ ${Math.floor(Math.abs(this.speed) * 0.36)} km/h`, w - 20, 34);
+
+    // Elapsed time (visible game timer in top-right section)
+    const totalSeconds = Math.floor(this.elapsedTime);
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    const timeLabel = `${mins}:${secs.toString().padStart(2, '0')}`;
+    ctx.fillStyle = '#FFD54F';
+    ctx.font = 'bold 14px system-ui, sans-serif';
+    ctx.fillText(`⏱ ${timeLabel}`, w - 20, 50);
 
     // Passengers
     ctx.textAlign = 'left';
@@ -793,13 +802,17 @@ export class GameEngine {
     this.roundRect(barX - 80, barY - 2, barW + 160, barH + 4, 8);
     ctx.fill();
 
-    // Labels
-    ctx.fillStyle = '#4CAF50';
+    // Labels (highlight when key is actively pressed)
+    const throttleActive = this.keys.up;
+    const brakeActive = this.keys.down;
+
     ctx.font = 'bold 13px system-ui';
     ctx.textAlign = 'right';
+    ctx.fillStyle = throttleActive ? '#A5D6A7' : '#4CAF50';
     ctx.fillText('THROTTLE ▶', barX - 8, barY + 20);
-    ctx.fillStyle = '#E53935';
+
     ctx.textAlign = 'left';
+    ctx.fillStyle = brakeActive ? '#FFCDD2' : '#E53935';
     ctx.fillText('◀ BRAKE', barX + barW + 8, barY + 20);
 
     // Bar background
