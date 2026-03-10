@@ -255,6 +255,16 @@ export class GameEngine {
     this.pos = Math.max(0, this.pos);
 
     this.distance += Math.abs(this.speed * dt) * 0.1; // px to meters
+    this.elapsedTime += dt;
+
+    // Check level completion (finite path - reached near the end)
+    if (this.hasFinitePath && this.pos >= this.rail.length - 2) {
+      this.pos = this.rail.length - 2;
+      this.speed = 0;
+      this.levelCompleted = true;
+      this.onLevelComplete?.(this.elapsedTime);
+      return;
+    }
 
     // Timers
     if (this.invulnTimer > 0) this.invulnTimer -= dt;
@@ -263,7 +273,7 @@ export class GameEngine {
     if (this.flashTimer > 0) this.flashTimer -= dt;
 
     // Generate more rail
-    if (this.pos > this.rail.length - 80) {
+    if (!this.hasFinitePath && this.pos > this.rail.length - 80) {
       this.generateRail(100);
     }
 
