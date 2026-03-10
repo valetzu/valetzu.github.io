@@ -728,6 +728,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     // Create a custom engine with pre-built rail
     const engine = new GameEngine(canvas, 'overworld', { motor: 0, health: 0, grip: 0, rocket: 0, shield: 0 }, {
       onGameOver: () => { gameOverRef.current = true; },
+      onLevelComplete: (time: number) => { setLevelComplete({ time }); },
     });
 
     // Override the rail with our resampled one (already in world coordinates)
