@@ -423,12 +423,25 @@ export class GameEngine {
     this.renderHUD(w, h);
   }
 
+  findVisibleRange(cx: number, w: number): [number, number] {
+    const { rail } = this;
+    let startIdx = 0;
+    let endIdx = rail.length - 1;
+    // Find first rail point visible (with margin)
+    for (let i = 0; i < rail.length; i++) {
+      if (rail[i].x >= cx - 200) { startIdx = Math.max(0, i - 1); break; }
+    }
+    // Find last rail point visible
+    for (let i = startIdx; i < rail.length; i++) {
+      if (rail[i].x > cx + w + 200) { endIdx = i; break; }
+    }
+    return [startIdx, endIdx];
+  }
+
   renderGround(cx: number, cy: number, w: number, h: number, cfg: { grassColor: string; dirtColor: string }) {
     const { ctx, rail, ground } = this;
 
-    // Find visible range
-    const startIdx = Math.max(0, Math.floor(cx / RAIL_SPACING) - 2);
-    const endIdx = Math.min(rail.length - 1, Math.ceil((cx + w) / RAIL_SPACING) + 2);
+    const [startIdx, endIdx] = this.findVisibleRange(cx, w);
 
     if (endIdx <= startIdx) return;
 
@@ -460,8 +473,7 @@ export class GameEngine {
 
   renderRail(cx: number, cy: number, w: number) {
     const { ctx, rail } = this;
-    const startIdx = Math.max(0, Math.floor(cx / RAIL_SPACING) - 2);
-    const endIdx = Math.min(rail.length - 1, Math.ceil((cx + w) / RAIL_SPACING) + 2);
+    const [startIdx, endIdx] = this.findVisibleRange(cx, w);
 
     // Cable
     ctx.strokeStyle = '#333';
