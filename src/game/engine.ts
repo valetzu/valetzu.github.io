@@ -213,7 +213,7 @@ export class GameEngine {
     const dt = Math.min((now - this.lastTime) / 1000, 0.05);
     this.lastTime = now;
 
-    if (!this.gameOver) {
+    if (!this.gameOver && !this.levelCompleted) {
       this.update(dt);
     }
     this.render();
