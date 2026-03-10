@@ -949,6 +949,17 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         {/* Right: Action buttons */}
         <div className="flex gap-2 items-start">
           <button
+            onClick={() => setSkyOnly(!skyOnly)}
+            className={`px-3 py-2 rounded-lg font-bold text-sm transition-all ${
+              skyOnly
+                ? 'bg-game-accent text-game-bg'
+                : 'bg-game-card text-game-title border border-game-card-border hover:border-game-accent'
+            }`}
+            title={skyOnly ? 'Background: Sky only' : 'Background: Full scenery'}
+          >
+            {skyOnly ? '☁️ Sky Only' : '🏔️ Scenery'}
+          </button>
+          <button
             onClick={startTest}
             className="px-4 py-2 rounded-lg bg-green-600 text-white font-bold text-sm hover:bg-green-500"
           >
