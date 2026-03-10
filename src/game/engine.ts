@@ -32,6 +32,9 @@ export class GameEngine {
   obstacles: Obstacle[] = [];
   keys = { up: false, down: false, space: false, shift: false };
   noBackground = false;
+  hasFinitePath = false;
+  elapsedTime = 0;
+  levelCompleted = false;
   camera = { x: 0, y: 0 };
 
   invulnTimer = 0;
