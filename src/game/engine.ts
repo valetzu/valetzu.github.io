@@ -366,44 +366,46 @@ export class GameEngine {
       }
     }
 
-    // Mountains (parallax)
-    ctx.fillStyle = cfg.mountainColor;
-    for (const m of this.mountains) {
-      const mx = m.x - cx * 0.15;
-      const my = h * 0.55 + cy * 0.05 - m.h + m.y;
-      ctx.beginPath();
-      ctx.moveTo(mx, my + m.h);
-      ctx.lineTo(mx + m.w / 2, my);
-      ctx.lineTo(mx + m.w, my + m.h);
-      ctx.closePath();
-      ctx.fill();
-      // Snow cap
-      if (this.world !== 'moon') {
-        ctx.fillStyle = cfg.snowColor;
+    if (!this.noBackground) {
+      // Mountains (parallax)
+      ctx.fillStyle = cfg.mountainColor;
+      for (const m of this.mountains) {
+        const mx = m.x - cx * 0.15;
+        const my = h * 0.55 + cy * 0.05 - m.h + m.y;
         ctx.beginPath();
-        ctx.moveTo(mx + m.w * 0.35, my + m.h * 0.3);
+        ctx.moveTo(mx, my + m.h);
         ctx.lineTo(mx + m.w / 2, my);
-        ctx.lineTo(mx + m.w * 0.65, my + m.h * 0.3);
+        ctx.lineTo(mx + m.w, my + m.h);
         ctx.closePath();
         ctx.fill();
-        ctx.fillStyle = cfg.mountainColor;
+        // Snow cap
+        if (this.world !== 'moon') {
+          ctx.fillStyle = cfg.snowColor;
+          ctx.beginPath();
+          ctx.moveTo(mx + m.w * 0.35, my + m.h * 0.3);
+          ctx.lineTo(mx + m.w / 2, my);
+          ctx.lineTo(mx + m.w * 0.65, my + m.h * 0.3);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = cfg.mountainColor;
+        }
       }
-    }
 
-    // Clouds
-    if (this.world !== 'moon') {
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
-      for (const c of this.clouds) {
-        const cloudX = ((c.x - cx * 0.08 + performance.now() * 0.005) % (w + 300)) - 150;
-        ctx.beginPath();
-        ctx.ellipse(cloudX, c.y - cy * 0.02, c.w / 2, c.h / 2, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.ellipse(cloudX - c.w * 0.25, c.y - cy * 0.02 + 5, c.w * 0.3, c.h * 0.4, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.ellipse(cloudX + c.w * 0.3, c.y - cy * 0.02 + 3, c.w * 0.25, c.h * 0.35, 0, 0, Math.PI * 2);
-        ctx.fill();
+      // Clouds
+      if (this.world !== 'moon') {
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        for (const c of this.clouds) {
+          const cloudX = ((c.x - cx * 0.08 + performance.now() * 0.005) % (w + 300)) - 150;
+          ctx.beginPath();
+          ctx.ellipse(cloudX, c.y - cy * 0.02, c.w / 2, c.h / 2, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.ellipse(cloudX - c.w * 0.25, c.y - cy * 0.02 + 5, c.w * 0.3, c.h * 0.4, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.ellipse(cloudX + c.w * 0.3, c.y - cy * 0.02 + 3, c.w * 0.25, c.h * 0.35, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
     }
 
