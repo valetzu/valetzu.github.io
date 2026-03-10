@@ -40,6 +40,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   // Track explicit connections between rail tiles: key -> Set of connected keys
   const railConnectionsRef = useRef<Record<string, Set<string>>>({});
   const lastPlacedRailRef = useRef<string | null>(null);
+  const [skyOnly, setSkyOnly] = useState(true);
 
   const addRailConnection = (keyA: string, keyB: string) => {
     const conns = railConnectionsRef.current;
