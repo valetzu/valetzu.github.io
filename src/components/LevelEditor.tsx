@@ -872,12 +872,51 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
             onClick={() => {
               engineRef.current?.stop();
               setTesting(false);
+              setLevelComplete(null);
             }}
             className="px-4 py-2 rounded-lg bg-game-accent text-game-bg font-bold hover:brightness-110"
           >
             ✕ Back to Editor
           </button>
         </div>
+        {levelComplete && (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-20">
+            <div className="bg-game-card border-2 border-game-accent rounded-2xl p-8 w-96 text-center">
+              <h2 className="text-4xl font-bold text-game-accent mb-2">🎉 Congratulations!</h2>
+              <p className="text-game-subtitle text-lg mb-6">You reached the finish line!</p>
+              <div className="bg-game-bg rounded-xl p-4 mb-6">
+                <p className="text-game-subtitle text-sm">Completion Time</p>
+                <p className="text-game-title text-3xl font-bold">
+                  {Math.floor(levelComplete.time / 60)}:{(Math.floor(levelComplete.time) % 60).toString().padStart(2, '0')}.{Math.floor((levelComplete.time % 1) * 100).toString().padStart(2, '0')}
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    engineRef.current?.stop();
+                    setLevelComplete(null);
+                    setTesting(false);
+                    setTimeout(() => startTest(), 50);
+                  }}
+                  className="flex-1 py-3 rounded-lg bg-green-600 text-white font-bold text-lg hover:bg-green-500"
+                >
+                  🔄 Replay
+                </button>
+                <button
+                  onClick={() => {
+                    engineRef.current?.stop();
+                    setTesting(false);
+                    setLevelComplete(null);
+                    onBack();
+                  }}
+                  className="flex-1 py-3 rounded-lg bg-game-bar-bg text-game-subtitle font-bold text-lg hover:brightness-110"
+                >
+                  ← Menu
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
