@@ -410,7 +410,9 @@ export class GameEngine {
     }
 
     // Ground
-    this.renderGround(cx, cy, w, h, cfg);
+    if (!this.noBackground) {
+      this.renderGround(cx, cy, w, h, cfg);
+    }
 
     // Rail cable
     this.renderRail(cx, cy, w);
