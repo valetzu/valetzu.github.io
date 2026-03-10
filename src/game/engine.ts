@@ -487,24 +487,6 @@ export class GameEngine {
     }
     ctx.stroke();
 
-    // Support posts at intervals
-    ctx.strokeStyle = '#555';
-    ctx.lineWidth = 3;
-    for (let i = startIdx; i <= endIdx; i += 8) {
-      if (i >= this.ground.length) break;
-      const sx = rail[i].x - cx;
-      const sy = rail[i].y - cy;
-      const gy = this.ground[i] - cy;
-      ctx.beginPath();
-      ctx.moveTo(sx, sy);
-      ctx.lineTo(sx, gy);
-      ctx.stroke();
-      // Cross beam
-      ctx.beginPath();
-      ctx.moveTo(sx - 8, sy - 5);
-      ctx.lineTo(sx + 8, sy - 5);
-      ctx.stroke();
-    }
   }
 
   renderObstacles(cx: number, cy: number) {
