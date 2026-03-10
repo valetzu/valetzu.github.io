@@ -693,11 +693,18 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
 
   // Test the level
   const startTest = () => {
-    const { railPoints, obstacles: obsData } = convertLevelToGameData(tiles, railConnectionsRef.current);
+    const hasStart = Object.values(tiles).some(t => t === 'rail_start');
+    const hasEnd = Object.values(tiles).some(t => t === 'rail_end');
+    if (!hasStart || !hasEnd) {
+      alert('Place both a Start (🟢) and End (🏁) tile before testing!');
+      return;
+    }
+    const { railPoints } = convertLevelToGameData(tiles, railConnectionsRef.current);
     if (railPoints.length < 3) {
       alert('Place at least 3 rail tiles to test!');
       return;
     }
+    setLevelComplete(null);
     setTesting(true);
     gameOverRef.current = false;
   };
