@@ -19,7 +19,13 @@ export interface Point {
   y: number;
 }
 
+// Basic entity identity; more detail in entityTypes.ts
+export type EntityId = string;
+
 export interface Obstacle {
+  id: EntityId;
+  // Logical type identifier used by the sprite system
+  typeId: 'obstacle.spinner' | 'obstacle.bouncer' | 'obstacle.staticRock';
   type: 'spinner' | 'bouncer' | 'static';
   x: number;
   y: number;
