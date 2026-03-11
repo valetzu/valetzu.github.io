@@ -41,14 +41,14 @@
     {
       "id": "rail.startTile",
       "category": "rail",
-      "sprite": "rail/start_tile.png",
+      "sprite": "rail/startTile.png",
       "anchor": { "x": 0.5, "y": 0.5 },
       "enabled": true
     },
     {
       "id": "rail.endTile",
       "category": "rail",
-      "sprite": "rail/end_tile.png",
+      "sprite": "rail/endTile.jpg",
       "anchor": { "x": 0.5, "y": 0.5 },
       "enabled": true
     },

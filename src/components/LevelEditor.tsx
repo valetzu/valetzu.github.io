@@ -19,8 +19,9 @@ const TOOLS: { tool: EditorTool; label: string; emoji: string }[] = [
   { tool: 'spinner', label: 'Spinner', emoji: '🌀' },
   { tool: 'bouncer', label: 'Bouncer', emoji: '🔴' },
   { tool: 'eraser', label: 'Eraser', emoji: '🧹' },
-  { tool: 'arc', label: 'Arc Tool', emoji: '⭕' },
+  { tool: 'arc', label: 'Arc Tool', emoji: '🔄' },
   { tool: 'curve', label: 'Curve', emoji: '〰️' },
+  { tool: 'circle', label: 'Circle', emoji: '⭕' },
   { tool: 'line', label: 'Line', emoji: '📏' },
 ];
 
@@ -104,6 +105,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const [savedLevels, setSavedLevels] = useState<EditorLevel[]>([]);
   const [testing, setTesting] = useState(false);
   const [showTilesMenu, setShowTilesMenu] = useState(false);
+  const [showToolsMenu, setShowToolsMenu] = useState(false);
   const [showFileMenu, setShowFileMenu] = useState(false);
   const [levelComplete, setLevelComplete] = useState<{ time: number } | null>(null);
   const testCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -396,6 +398,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     return { gx, gy };
   };
 
+  // Generate an arc loop around a center by sampling a circle in continuous
+  // space and snapping to grid. Used by the Arc tool.
   const generateArc = (centerGX: number, centerGY: number, targetGX: number, targetGY: number) => {
     const dx = targetGX - centerGX;
     const dy = targetGY - centerGY;
@@ -410,12 +414,82 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       const angle = (i / steps) * Math.PI * 2;
       const gx = Math.round(centerGX + Math.cos(angle) * radius);
       const gy = Math.round(centerGY + Math.sin(angle) * radius);
-      // Avoid duplicates
       if (points.length === 0 || points[points.length - 1].gx !== gx || points[points.length - 1].gy !== gy) {
         points.push({ gx, gy });
       }
     }
     return points;
+  };
+
+  // Generate a discrete circle path around a center using only straight and
+  // diagonal steps on the grid.
+  const generateCircleRail = (centerGX: number, centerGY: number, edgeGX: number, edgeGY: number) => {
+    const dx = edgeGX - centerGX;
+    const dy = edgeGY - centerGY;
+    const radius = Math.round(Math.sqrt(dx * dx + dy * dy));
+    if (radius < 1) return [];
+
+    const perimeter: { gx: number; gy: number }[] = [];
+    const added = new Set<string>();
+    const add = (gx: number, gy: number) => {
+      const key = `${gx},${gy}`;
+      if (!added.has(key)) {
+        added.add(key);
+        perimeter.push({ gx, gy });
+      }
+    };
+
+    // Midpoint circle algorithm in grid space
+    let x = radius;
+    let y = 0;
+    let err = 1 - x;
+    while (x >= y) {
+      add(centerGX + x, centerGY + y);
+      add(centerGX + y, centerGY + x);
+      add(centerGX - y, centerGY + x);
+      add(centerGX - x, centerGY + y);
+      add(centerGX - x, centerGY - y);
+      add(centerGX - y, centerGY - x);
+      add(centerGX + y, centerGY - x);
+      add(centerGX + x, centerGY - y);
+      y++;
+      if (err < 0) {
+        err += 2 * y + 1;
+      } else {
+        x--;
+        err += 2 * (y - x + 1);
+      }
+    }
+
+    // Order points around the circle by angle
+    perimeter.sort((a, b) => {
+      const aa = Math.atan2(a.gy - centerGY, a.gx - centerGX);
+      const ba = Math.atan2(b.gy - centerGY, b.gx - centerGX);
+      return aa - ba;
+    });
+
+    // Connect neighboring perimeter points with line segments so we get
+    // a continuous one-tile-wide loop using only grid-adjacent steps.
+    const path: { gx: number; gy: number }[] = [];
+    const visitedPath = new Set<string>();
+    const pushPoint = (gx: number, gy: number) => {
+      const key = `${gx},${gy}`;
+      if (!visitedPath.has(key)) {
+        visitedPath.add(key);
+        path.push({ gx, gy });
+      }
+    };
+
+    for (let i = 0; i < perimeter.length; i++) {
+      const a = perimeter[i];
+      const b = perimeter[(i + 1) % perimeter.length];
+      const seg = generateLine(a, b);
+      for (const p of seg) {
+        pushPoint(p.gx, p.gy);
+      }
+    }
+
+    return path;
   };
 
   const generateBezierCurve = (
@@ -516,12 +590,13 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     if (e.button === 0) {
       const { gx, gy } = screenToGrid(e.clientX, e.clientY);
 
+      // Arc tool: first click sets center, second click uses current radius
+      // to generate a circular rail loop (grid-snapped).
       if (tool === 'arc') {
         if (!arcCenter) {
           setArcCenter({ gx, gy });
         } else {
           const points = generateArc(arcCenter.gx, arcCenter.gy, gx, gy);
-          // Add connections between consecutive arc points
           for (let i = 1; i < points.length; i++) {
             addRailConnection(tileKey(points[i - 1].gx, points[i - 1].gy), tileKey(points[i].gx, points[i].gy));
           }
@@ -539,20 +614,44 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         return;
       }
 
+      // Curve tool: click start, click end, then click/drag control point.
       if (tool === 'curve') {
         if (!curveStart) {
           setCurveStart({ gx, gy });
         } else if (!curveEnd) {
           setCurveEnd({ gx, gy });
-          // Default control point at midpoint
           const mid = { gx: Math.round((curveStart.gx + gx) / 2), gy: Math.round((curveStart.gy + gy) / 2) };
           setCurveControl(mid);
           setCurvePreview(generateBezierCurve(curveStart, { gx, gy }, mid));
         } else {
-          // Start dragging control point
           setIsDraggingCurve(true);
           setCurveControl({ gx, gy });
           setCurvePreview(generateBezierCurve(curveStart, curveEnd, { gx, gy }));
+        }
+        return;
+      }
+
+      // Circle tool: first click sets center, second click sets radius and
+      // creates a circular rail loop using only straight and diagonal steps.
+      if (tool === 'circle') {
+        if (!arcCenter) {
+          setArcCenter({ gx, gy });
+        } else {
+          const points = generateCircleRail(arcCenter.gx, arcCenter.gy, gx, gy);
+          // Add connections between consecutive arc points
+          for (let i = 1; i < points.length; i++) {
+            addRailConnection(tileKey(points[i - 1].gx, points[i - 1].gy), tileKey(points[i].gx, points[i].gy));
+          }
+          if (points.length > 0) lastPlacedRailRef.current = tileKey(points[points.length - 1].gx, points[points.length - 1].gy);
+          setTiles(prev => {
+            const next = { ...prev };
+            for (const p of points) {
+              next[tileKey(p.gx, p.gy)] = 'rail';
+            }
+            return next;
+          });
+          setArcCenter(null);
+          setArcPreview([]);
         }
         return;
       }
@@ -602,6 +701,12 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     if (tool === 'arc' && arcCenter) {
       const { gx, gy } = screenToGrid(e.clientX, e.clientY);
       setArcPreview(generateArc(arcCenter.gx, arcCenter.gy, gx, gy));
+    }
+
+    // Circle preview
+    if (tool === 'circle' && arcCenter) {
+      const { gx, gy } = screenToGrid(e.clientX, e.clientY);
+      setArcPreview(generateCircleRail(arcCenter.gx, arcCenter.gy, gx, gy));
     }
 
     // Curve control point dragging
@@ -969,12 +1074,12 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
 
       {/* Top bar */}
       <div className="fixed top-4 left-4 right-4 flex items-start justify-between z-10">
-        {/* Left: Tiles menu + Eraser + Arc */}
+        {/* Left: Tiles menu + Tools + Eraser/Line */}
         <div className="flex gap-2 items-start">
           {/* Tiles dropdown */}
           <div className="relative">
             <button
-              onClick={() => { setShowTilesMenu(!showTilesMenu); setShowFileMenu(false); }}
+              onClick={() => { setShowTilesMenu(!showTilesMenu); setShowToolsMenu(false); setShowFileMenu(false); }}
               className="px-3 py-2 rounded-lg font-bold text-sm bg-game-card text-game-title border border-game-card-border hover:border-game-accent"
             >
               {(() => {
@@ -989,9 +1094,10 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
                     key={t.tool}
                     onClick={() => {
                       setTool(t.tool); lastPlacedRailRef.current = null;
-                       if (t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); }
-                       if (t.tool !== 'curve') { setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); }
-                       if (t.tool !== 'line') { setLineStart(null); setLinePreview([]); }
+                      // Switching to a tile tool should leave only tile-related state active.
+                      setArcCenter(null); setArcPreview([]);
+                      setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false);
+                      setLineStart(null); setLinePreview([]);
                       setShowTilesMenu(false);
                     }}
                     className={`w-full text-left px-3 py-2 rounded font-bold text-sm transition-all ${
@@ -1007,13 +1113,46 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
             )}
           </div>
 
+          {/* Tools dropdown for rail-building helpers */}
+          <div className="relative">
+            <button
+              onClick={() => { setShowToolsMenu(!showToolsMenu); setShowTilesMenu(false); setShowFileMenu(false); }}
+              className="px-3 py-2 rounded-lg font-bold text-sm bg-game-card text-game-title border border-game-card-border hover:border-game-accent"
+            >
+              🛠 Tools ▾
+            </button>
+            {showToolsMenu && (
+              <div className="absolute top-full left-0 mt-1 bg-game-card border border-game-card-border rounded-lg p-1 min-w-[140px] shadow-lg">
+                {TOOLS.filter(t => ['circle', 'arc', 'curve'].includes(t.tool as EditorTool)).map(t => (
+                  <button
+                    key={t.tool}
+                    onClick={() => {
+                      setTool(t.tool); lastPlacedRailRef.current = null;
+                      if (t.tool !== 'circle' && t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); }
+                      if (t.tool !== 'curve') { setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); }
+                      setLineStart(null); setLinePreview([]);
+                      setShowToolsMenu(false);
+                    }}
+                    className={`w-full text-left px-3 py-2 rounded font-bold text-sm transition-all ${
+                      tool === t.tool
+                        ? 'bg-game-accent text-game-bg'
+                        : 'text-game-title hover:bg-game-bar-bg'
+                    }`}
+                  >
+                    {t.emoji} {t.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Standalone tools */}
-          {TOOLS.filter(t => ['eraser', 'arc', 'curve', 'line'].includes(t.tool)).map(t => (
+          {TOOLS.filter(t => ['eraser', 'line'].includes(t.tool)).map(t => (
             <button
               key={t.tool}
               onClick={() => {
-                setTool(t.tool); lastPlacedRailRef.current = null;
-                if (t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); }
+                setTool(t.tool as EditorTool); lastPlacedRailRef.current = null;
+                if (t.tool !== 'circle' && t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); }
                 if (t.tool !== 'curve') { setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); }
                 if (t.tool !== 'line') { setLineStart(null); setLinePreview([]); }
                 setShowTilesMenu(false);
