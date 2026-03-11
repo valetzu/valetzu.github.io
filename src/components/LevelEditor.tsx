@@ -752,6 +752,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     engine.obstacles = [];
 
     // Add obstacles - convert grid coords to world coords matching the resampled rail
+    let nextEditorObsId = 1;
     for (const obs of obsData) {
       const wx = obs.gx * GRID_SIZE;
       const wy = obs.gy * GRID_SIZE;
@@ -764,6 +765,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       
       if (obs.type === 'spinner') {
         engine.obstacles.push({
+          id: `editor_obs_${nextEditorObsId++}`,
+          typeId: 'obstacle.spinner',
           type: 'spinner',
           x: obsWorldX, y: wy,
           radius: 12, angle: 0,
@@ -773,6 +776,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         });
       } else {
         engine.obstacles.push({
+          id: `editor_obs_${nextEditorObsId++}`,
+          typeId: 'obstacle.bouncer',
           type: 'bouncer',
           x: obsWorldX, y: wy,
           radius: 18, angle: 0,

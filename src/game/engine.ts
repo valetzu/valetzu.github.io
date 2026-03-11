@@ -1,4 +1,5 @@
 import { WorldType, Upgrades, Point, Obstacle, WORLD_CONFIG } from './types';
+import { spriteManager } from './spriteManager';
 
 const RAIL_SPACING = 100;
 const THROTTLE_BASE = 350;
@@ -138,6 +139,8 @@ export class GameEngine {
         // Spinner
         const armLen = (50 + Math.random() * 40) * 3;
         obs = {
+          id: `obs_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          typeId: 'obstacle.spinner',
           type: 'spinner',
           x, y: railY - 10 - Math.random() * 40,
           radius: 12, angle: Math.random() * Math.PI * 2,
@@ -148,6 +151,8 @@ export class GameEngine {
       } else {
         // Bouncer
         obs = {
+          id: `obs_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          typeId: 'obstacle.bouncer',
           type: 'bouncer',
           x, y: railY,
           radius: 18, angle: Math.random() * Math.PI * 2,
@@ -692,6 +697,31 @@ export class GameEngine {
       if (obs.hit) continue;
       const screenX = obs.x - cx;
       if (screenX < -150 || screenX > this.canvas.width + 150) continue;
+
+      // Try sprite-based rendering first; if it succeeds, skip legacy vector drawing.
+      const usedSprite = spriteManager.drawSpriteOrFallback(
+        ctx,
+        obs.typeId,
+        screenX,
+        obs.type === 'bouncer'
+          ? obs.baseY + Math.sin(obs.angle) * obs.amplitude - cy
+          : obs.y - cy,
+        {
+          rotation: obs.type === 'spinner' ? obs.angle : 0,
+          hitboxRadius: obs.radius
+        }
+      );
+
+      if (usedSprite) {
+        // Sprite handled; continue to next obstacle.
+        if (obs.type === 'spinner') {
+          // Still update angle for next frame even if sprite-drawn.
+          obs.angle += obs.rotSpeed * 0.016;
+        } else if (obs.type === 'bouncer') {
+          obs.angle += obs.bounceSpeed * 0.016;
+        }
+        continue;
+      }
 
       if (obs.type === 'spinner') {
         // Update angle

@@ -1,0 +1,57 @@
+{
+  "basePath": "assets/sprites",
+  "types": [
+    {
+      "id": "player.gondola",
+      "category": "player",
+      "sprite": "player/gondola.png",
+      "anchor": { "x": 0.5, "y": 0.5 },
+      "enabled": false
+    },
+    {
+      "id": "obstacle.spinner",
+      "category": "obstacle",
+      "sprite": "obstacles/spinner.png",
+      "anchor": { "x": 0.5, "y": 0.5 },
+      "hitboxScale": 0.95,
+      "enabled": false
+    },
+    {
+      "id": "obstacle.bouncer",
+      "category": "obstacle",
+      "sprite": "obstacles/bouncer.png",
+      "anchor": { "x": 0.5, "y": 0.5 },
+      "hitboxScale": 0.95,
+      "enabled": true
+    },
+    {
+      "id": "obstacle.staticRock",
+      "category": "obstacle",
+      "sprite": "obstacles/static_rock.png",
+      "anchor": { "x": 0.5, "y": 0.5 },
+      "enabled": false
+    },
+    {
+      "id": "rail.segment",
+      "category": "rail",
+      "sprite": "rail/segment.png",
+      "anchor": { "x": 0.5, "y": 0.5 },
+      "enabled": false
+    },
+    {
+      "id": "background.mountain",
+      "category": "background",
+      "sprite": "background/mountain1.png",
+      "anchor": { "x": 0.5, "y": 1.0 },
+      "enabled": false
+    },
+    {
+      "id": "background.cloud",
+      "category": "background",
+      "sprite": "background/cloud1.png",
+      "anchor": { "x": 0.5, "y": 0.5 },
+      "enabled": false
+    }
+  ]
+}
+
