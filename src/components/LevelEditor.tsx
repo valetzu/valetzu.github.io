@@ -747,6 +747,13 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     (engine as any).hasFinitePath = true;
     (engine as any).endSegmentIndex = endSegmentIndex;
     (engine as any).endPointIndex = endPointIndex;
+    // Start tile is the beginning of the main rail path
+    (engine as any).startTilePos = railPoints.length > 0 ? railPoints[0] : null;
+    // End tile, if present on the main path, is at endPointIndex
+    (engine as any).endTilePos =
+      endPointIndex != null && endPointIndex >= 0 && endPointIndex < railPoints.length
+        ? railPoints[endPointIndex]
+        : null;
     engine.ground = engine.rail.map(p => p.y + 150);
     engine.noBackground = skyOnly;
     engine.obstacles = [];

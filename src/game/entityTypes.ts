@@ -7,6 +7,8 @@ export type EntityTypeId =
   | 'obstacle.bouncer'
   | 'obstacle.staticRock'
   | 'rail.segment'
+   | 'rail.startTile'
+   | 'rail.endTile'
   | 'background.mountain'
   | 'background.cloud';
 

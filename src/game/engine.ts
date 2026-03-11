@@ -41,6 +41,10 @@ export class GameEngine {
   endPointIndex: number | null = null;
   onRail = true;
 
+  // Optional world positions for explicit start/end tiles in finite/editor levels
+  startTilePos: Point | null = null;
+  endTilePos: Point | null = null;
+
   // Airborne state (when the player leaves the rail)
   airX = 0;
   airY = 0;
@@ -598,6 +602,28 @@ export class GameEngine {
 
     // Rail cable
     this.renderRail(cx, cy, w);
+
+    // Explicit start/end tiles for finite/editor levels, if configured
+    if (this.hasFinitePath) {
+      if (this.startTilePos) {
+        spriteManager.drawSpriteOrFallback(
+          ctx,
+          'rail.startTile',
+          this.startTilePos.x - cx,
+          this.startTilePos.y - cy,
+          { hitboxRadius: 20 }
+        );
+      }
+      if (this.endTilePos) {
+        spriteManager.drawSpriteOrFallback(
+          ctx,
+          'rail.endTile',
+          this.endTilePos.x - cx,
+          this.endTilePos.y - cy,
+          { hitboxRadius: 20 }
+        );
+      }
+    }
 
     // Obstacles
     this.renderObstacles(cx, cy);

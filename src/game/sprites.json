@@ -39,6 +39,20 @@
       "enabled": false
     },
     {
+      "id": "rail.startTile",
+      "category": "rail",
+      "sprite": "rail/start_tile.png",
+      "anchor": { "x": 0.5, "y": 0.5 },
+      "enabled": true
+    },
+    {
+      "id": "rail.endTile",
+      "category": "rail",
+      "sprite": "rail/end_tile.png",
+      "anchor": { "x": 0.5, "y": 0.5 },
+      "enabled": true
+    },
+    {
       "id": "background.mountain",
       "category": "background",
       "sprite": "background/mountain1.png",
