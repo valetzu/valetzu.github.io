@@ -23,6 +23,9 @@ export interface EditorLevel {
   name: string;
   tiles: Record<string, TileType>; // "x,y" -> type
   createdAt: number;
+  // Optional explicit rail connection graph: tileKey -> array of connected tileKeys.
+  // When present, this is used to restore the exact rail ordering when loading.
+  connections?: Record<string, string[]>;
 }
 
 export function tileKey(gx: number, gy: number): string {

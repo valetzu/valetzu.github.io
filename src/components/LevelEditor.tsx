@@ -116,6 +116,17 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
 
   const hasUnsavedChanges = () => JSON.stringify(tiles) !== lastSavedTilesRef.current;
 
+  const serializeConnections = (): Record<string, string[]> => {
+    const conns = railConnectionsRef.current;
+    const out: Record<string, string[]> = {};
+    for (const [key, set] of Object.entries(conns)) {
+      if (set && set.size > 0) {
+        out[key] = Array.from(set);
+      }
+    }
+    return out;
+  };
+
   // Arc tool state
   const [arcCenter, setArcCenter] = useState<{ gx: number; gy: number } | null>(null);
   const [arcPreview, setArcPreview] = useState<{ gx: number; gy: number }[]>([]);
@@ -950,6 +961,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       name: levelName.trim(),
       tiles,
       createdAt: Date.now(),
+      connections: serializeConnections(),
     };
     saveCustomLevel(level);
     lastSavedTilesRef.current = JSON.stringify(tiles);
@@ -967,6 +979,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       name: currentLevelName,
       tiles,
       createdAt: Date.now(),
+      connections: serializeConnections(),
     };
     saveCustomLevel(level);
     lastSavedTilesRef.current = JSON.stringify(tiles);
@@ -977,8 +990,16 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     lastSavedTilesRef.current = JSON.stringify(level.tiles);
     setCurrentLevelName(level.name);
     setShowLoadDialog(false);
-    // Rebuild connections from adjacency for loaded levels
-    rebuildConnectionsFromTiles(level.tiles);
+    // Restore explicit connections if present; otherwise rebuild from adjacency.
+    if (level.connections) {
+      const restored: Record<string, Set<string>> = {};
+      for (const [key, arr] of Object.entries(level.connections)) {
+        restored[key] = new Set(arr);
+      }
+      railConnectionsRef.current = restored;
+    } else {
+      rebuildConnectionsFromTiles(level.tiles);
+    }
     lastPlacedRailRef.current = null;
   };
 
@@ -1300,6 +1321,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
                               name: level.name,
                               tiles,
                               createdAt: Date.now(),
+                              connections: serializeConnections(),
                             };
                             saveCustomLevel(newLevel);
                             lastSavedTilesRef.current = JSON.stringify(tiles);
