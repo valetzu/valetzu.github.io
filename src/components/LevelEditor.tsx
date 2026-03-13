@@ -683,6 +683,19 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     }
   };
 
+  const handleWheel = (e: React.WheelEvent) => {
+    // Zoom with mouse wheel: scroll up -> zoom in, scroll down -> zoom out
+    e.preventDefault();
+    const delta = e.deltaY;
+    if (delta < 0) {
+      // Zoom in
+      setZoom(z => Math.min(3, z + 0.25));
+    } else if (delta > 0) {
+      // Zoom out
+      setZoom(z => Math.max(0.25, z - 0.25));
+    }
+  };
+
   const handleMouseMove = (e: React.MouseEvent) => {
     if (isPanning) {
       setCamera({
@@ -1063,6 +1076,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        onWheel={handleWheel}
       />
 
       {/* Test validation alert */}
