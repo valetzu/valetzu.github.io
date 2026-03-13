@@ -688,15 +688,17 @@ export class GameEngine {
     ctx.strokeStyle = '#333';
     ctx.lineWidth = 4;
 
+    // Always render all rail segments, without relying on x-mono visibility
+    // assumptions. This ensures that any rail geometry that lands on screen
+    // is drawn, even for loops or tracks that double back.
     const segmentsToDraw = this.allRailSegments.length > 0 ? this.allRailSegments : [this.rail];
     for (const seg of segmentsToDraw) {
       if (seg.length < 2) continue;
-      const [startIdx, endIdx] = this.findVisibleRangeForRail(seg, cx, w);
       ctx.beginPath();
-      for (let i = startIdx; i <= endIdx; i++) {
+      for (let i = 0; i < seg.length; i++) {
         const sx = seg[i].x - cx;
         const sy = seg[i].y - cy;
-        if (i === startIdx) ctx.moveTo(sx, sy);
+        if (i === 0) ctx.moveTo(sx, sy);
         else ctx.lineTo(sx, sy);
       }
       ctx.stroke();
