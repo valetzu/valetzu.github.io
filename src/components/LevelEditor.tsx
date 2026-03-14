@@ -26,7 +26,7 @@ const TOOLS: { tool: EditorTool; label: string; emoji: string }[] = [
   { tool: 'circular_curve', label: 'Circular Curve', emoji: '🟠' },
   { tool: 'circle', label: 'Circle', emoji: '⭕' },
   { tool: 'line', label: 'Line', emoji: '📏' },
-  { tool: 'line2', label: 'Line 2', emoji: '📐' },
+  { tool: 'line2', label: 'Free Line', emoji: '📐' },
 ];
 
 const TILE_COLORS: Record<TileType, string> = {
@@ -417,6 +417,9 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       });
       for (const fl of freeLines) {
         hints.push({ attach: { segmentId: fl.attach.segmentId, atWorld: fl.end }, pt: fl.end });
+        if (fl.attachWorld) {
+          hints.push({ attach: { segmentId: fl.attach.segmentId, atWorld: fl.attachWorld }, pt: fl.attachWorld });
+        }
       }
 
       let hover: { x: number; y: number } | null = null;
@@ -950,6 +953,9 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           }
           for (const fl of freeLines) {
             hints.push({ attach: { segmentId: fl.attach.segmentId, atWorld: fl.end }, pt: fl.end, dist: Math.hypot(world.x - fl.end.x, world.y - fl.end.y) });
+            if (fl.attachWorld) {
+              hints.push({ attach: { segmentId: fl.attach.segmentId, atWorld: fl.attachWorld }, pt: fl.attachWorld, dist: Math.hypot(world.x - fl.attachWorld.x, world.y - fl.attachWorld.y) });
+            }
           }
           const best = hints.length === 0 ? null : hints.reduce((acc, h) => (h.dist < acc.dist ? h : acc), hints[0]);
           if (!best || best.dist > 45) return;

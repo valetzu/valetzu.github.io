@@ -403,7 +403,44 @@ export function convertLevelToGameData(
 
     for (const fl of freeLines) {
       const res = resolveChainOf(fl.attach.segmentId);
-      if (!res) continue;
+      if (!res) {
+        // Attach segment was erased. If we have a cached world position, create a floating chain
+        // so the segment still exists for in-game physics and its endpoints remain snap-able.
+        if (!fl.attachWorld) continue;
+        let floatEnd = fl.end;
+        let floatMergeChainId: string | null = null;
+        if (fl.target) {
+          const tgtRes = resolveChainOf(fl.target.segmentId);
+          if (tgtRes) {
+            const [tgtChainId, tgtPts] = tgtRes;
+            if (tgtPts.length > 0) {
+              floatEnd = fl.target.endpoint === 'end' ? tgtPts[tgtPts.length - 1] : tgtPts[0];
+              floatMergeChainId = tgtChainId;
+            }
+          }
+        }
+        const raw = sampleLineWorld(fl.attachWorld, floatEnd);
+        if (raw.length < 2) continue;
+        const floatPts = raw.slice();
+        floatPts[0] = fl.attachWorld;
+        floatPts[floatPts.length - 1] = floatEnd;
+        const floatId = `orphan_${fl.attachWorld.x.toFixed(0)}_${fl.attachWorld.y.toFixed(0)}`;
+        chainById[floatId] = floatPts;
+        if (floatMergeChainId) {
+          const mPts = chainById[floatMergeChainId];
+          if (mPts) {
+            const df = Math.hypot(floatEnd.x - mPts[0].x, floatEnd.y - mPts[0].y);
+            const dl = Math.hypot(floatEnd.x - mPts[mPts.length - 1].x, floatEnd.y - mPts[mPts.length - 1].y);
+            const oriented = df <= dl ? mPts : [...mPts].reverse();
+            for (let i = 1; i < oriented.length; i++) chainById[floatId].push(oriented[i]);
+            for (const [sid, cid] of Object.entries(segToChain)) {
+              if (cid === floatMergeChainId) segToChain[sid] = floatId;
+            }
+            delete chainById[floatMergeChainId];
+          }
+        }
+        continue;
+      }
       const [chainId, pts] = res;
 
       // Determine attach position and whether we extend from the chain's end or start
