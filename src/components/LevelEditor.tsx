@@ -1000,6 +1000,43 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         return;
       }
 
+      // Eraser: check if click is near a free line segment and delete it
+      if (tool === 'eraser') {
+        const { allSegments: baseSegs, segmentIdByIndex: baseIds } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, undefined);
+        const segIdToIdx: Record<string, number> = {};
+        baseIds.forEach((id, i) => { segIdToIdx[id] = i; });
+        const resolveAttach = (attach: import('@/game/editorTypes').FreeLineAttach) => {
+          if ('atWorld' in attach) return attach.atWorld;
+          const idx = segIdToIdx[attach.segmentId];
+          if (idx == null) return null;
+          const seg = baseSegs[idx];
+          if (!seg || seg.length < 1) return null;
+          const p = attach.endpoint === 'start' ? seg[0] : seg[seg.length - 1];
+          return { x: p.x, y: p.y };
+        };
+        const ptSegDist = (px: number, py: number, ax: number, ay: number, bx: number, by: number) => {
+          const dx = bx - ax, dy = by - ay;
+          const lenSq = dx * dx + dy * dy;
+          if (lenSq === 0) return Math.hypot(px - ax, py - ay);
+          const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+          return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+        };
+        let bestDist = 15;
+        let bestIdx = -1;
+        for (let i = 0; i < freeLines.length; i++) {
+          const fl = freeLines[i];
+          let start = resolveAttach(fl.attach);
+          if (!start && fl.attachWorld) start = fl.attachWorld;
+          if (!start) continue;
+          const d = ptSegDist(world.x, world.y, start.x, start.y, fl.end.x, fl.end.y);
+          if (d < bestDist) { bestDist = d; bestIdx = i; }
+        }
+        if (bestIdx >= 0) {
+          setFreeLines(prev => prev.filter((_, i) => i !== bestIdx));
+          return;
+        }
+      }
+
       setIsDrawing(true);
       placeTile(gx, gy);
     }
