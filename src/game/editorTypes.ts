@@ -312,10 +312,12 @@ export function convertLevelToGameData(
   const conns = connections && Object.keys(connections).length > 0 ? connections : ({} as Record<string, Set<string>>);
   const components = getRailComponents(railKeys, conns);
 
+  // Hoist endKey so it's available in the freeLine post-processing block
+  const endKey = railKeys.find(k => tiles[k] === 'rail_end');
+
   let railPoints: { x: number; y: number }[] = [];
   let endSegmentIndex: number | null = null;
   let endPointIndex: number | null = null;
-  let endComponentId: string | null = null;
   const allSegments: { x: number; y: number }[][] = [];
   const segmentIdByIndex: string[] = [];
 
@@ -323,7 +325,6 @@ export function convertLevelToGameData(
     const startKey = railKeys.find(k => tiles[k] === 'rail_start')
       || railKeys.find(k => conns[k] && conns[k].size === 1)
       || railKeys[0];
-    const endKey = railKeys.find(k => tiles[k] === 'rail_end');
 
     const startOrdered = walkRailComponent(startKey, conns);
     const expanded = expandPathWithSmoothSegments(startOrdered, smoothSegments);
@@ -331,7 +332,6 @@ export function convertLevelToGameData(
     if (endKey && expanded.keyToLastIndex[endKey] != null) {
       endSegmentIndex = 0;
       endPointIndex = expanded.keyToLastIndex[endKey];
-      endComponentId = componentId(startOrdered);
     }
 
     allSegments.push(railPoints);
@@ -347,7 +347,6 @@ export function convertLevelToGameData(
         if (endKey && endSegmentIndex === null && comp.includes(endKey)) {
           endSegmentIndex = segIdx;
           endPointIndex = compKeyToIdx[endKey] ?? comp.indexOf(endKey);
-          endComponentId = componentId(comp);
         }
         allSegments.push(pts);
         segmentIdByIndex.push(componentId(comp));
@@ -363,13 +362,10 @@ export function convertLevelToGameData(
     const expanded = expandPathWithSmoothSegments(sorted, smoothSegments);
     railPoints = expanded.points;
     allSegments.push(railPoints);
-    const cid = componentId(sorted);
-    segmentIdByIndex.push(cid);
-    const endKey = railKeys.find(k => tiles[k] === 'rail_end');
+    segmentIdByIndex.push(componentId(sorted));
     if (endKey && expanded.keyToLastIndex[endKey] != null) {
       endSegmentIndex = 0;
       endPointIndex = expanded.keyToLastIndex[endKey];
-      endComponentId = cid;
     }
   }
 
@@ -431,7 +427,7 @@ export function convertLevelToGameData(
       let endWorld = fl.end;
       let mergeChainId: string | null = null;
 
-      if (fl.target && (!endComponentId || fl.target.segmentId !== endComponentId)) {
+      if (fl.target) {
         const tgtRes = resolveChainOf(fl.target.segmentId);
         if (tgtRes) {
           const [tgtChainId, tgtPts] = tgtRes;
@@ -509,6 +505,32 @@ export function convertLevelToGameData(
     }
     railPoints = newAllSegs[0] ?? allSegments[0] ?? [];
     allSegments.splice(0, allSegments.length, ...newAllSegs);
+
+    // segmentIdByIndex must match the rebuilt allSegments order
+    const newSegIds: string[] = [];
+    if (mainChainId) newSegIds.push(mainChainId);
+    for (const cid of Object.keys(chainById)) {
+      if (cid !== mainChainId) newSegIds.push(cid);
+    }
+    segmentIdByIndex.splice(0, segmentIdByIndex.length, ...newSegIds);
+
+    // Recompute endSegmentIndex/endPointIndex against the rebuilt segments
+    // (a freeLine merge may have moved the end tile into a different segment)
+    if (endKey) {
+      const endWorld = keyToWorld(endKey);
+      endSegmentIndex = null;
+      endPointIndex = null;
+      outer: for (let si = 0; si < newAllSegs.length; si++) {
+        const seg = newAllSegs[si];
+        for (let pi = 0; pi < seg.length; pi++) {
+          if (Math.hypot(seg[pi].x - endWorld.x, seg[pi].y - endWorld.y) < GRID_SIZE * 0.6) {
+            endSegmentIndex = si;
+            endPointIndex = pi;
+            break outer;
+          }
+        }
+      }
+    }
   }
 
   return { railPoints, allSegments, segmentIdByIndex, obstacles, endSegmentIndex, endPointIndex };
