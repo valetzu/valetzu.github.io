@@ -957,7 +957,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
               hints.push({ attach: { segmentId: fl.attach.segmentId, atWorld: fl.attachWorld }, pt: fl.attachWorld, dist: Math.hypot(world.x - fl.attachWorld.x, world.y - fl.attachWorld.y) });
             }
           }
-          const best = hints.length === 0 ? null : hints.reduce((acc, h) => (h.dist < acc.dist ? h : acc), hints[0]);
+          const best = hints.length === 0 ? null : hints.reduce((acc, h) => (h.dist <= acc.dist ? h : acc), hints[0]);
           if (!best || best.dist > 45) return;
           setLine2Start({ attach: best.attach, start: best.pt });
         } else {
