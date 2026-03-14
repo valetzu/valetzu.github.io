@@ -5,6 +5,7 @@ import {
   saveCustomLevel, loadCustomLevels, deleteCustomLevel,
   convertLevelToGameData,
   SmoothSegment, sampleCircularArcWorld, sampleBezierWorld, keyToWorld,
+  FreeLineSegment, sampleLineWorld,
 } from '@/game/editorTypes';
 import { Point, Obstacle, WORLD_CONFIG } from '@/game/types';
 import { GameEngine } from '@/game/engine';
@@ -25,6 +26,7 @@ const TOOLS: { tool: EditorTool; label: string; emoji: string }[] = [
   { tool: 'circular_curve', label: 'Circular Curve', emoji: '🟠' },
   { tool: 'circle', label: 'Circle', emoji: '⭕' },
   { tool: 'line', label: 'Line', emoji: '📏' },
+  { tool: 'line2', label: 'Line 2', emoji: '📐' },
 ];
 
 const TILE_COLORS: Record<TileType, string> = {
@@ -115,13 +117,18 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const gameOverRef = useRef(false);
   const lastSavedTilesRef = useRef<string>('{}');
   const lastSavedSmoothRef = useRef<string>('[]');
+  const lastSavedFreeLinesRef = useRef<string>('[]');
   const [testError, setTestError] = useState<string | null>(null);
 
   const [smoothSegments, setSmoothSegments] = useState<SmoothSegment[]>([]);
+  const [freeLines, setFreeLines] = useState<FreeLineSegment[]>([]);
+  const [line2Start, setLine2Start] = useState<{ attach: { segmentIndex: number; endpoint: 'start' | 'end' }; start: { x: number; y: number } } | null>(null);
+  const [mouseWorld, setMouseWorld] = useState<{ x: number; y: number } | null>(null);
 
   const hasUnsavedChanges = () =>
     JSON.stringify(tiles) !== lastSavedTilesRef.current ||
-    JSON.stringify(smoothSegments) !== lastSavedSmoothRef.current;
+    JSON.stringify(smoothSegments) !== lastSavedSmoothRef.current ||
+    JSON.stringify(freeLines) !== lastSavedFreeLinesRef.current;
 
   const serializeConnections = (): Record<string, string[]> => {
     const conns = railConnectionsRef.current;
@@ -372,6 +379,68 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       ctx.stroke();
     }
 
+    // Free line extensions (derive current start from attached segment endpoints; ignore freeLines while deriving)
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 4;
+    const baseForLines = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, freeLines).allSegments;
+    const getAttachPoint = (attach: { segmentIndex: number; endpoint: 'start' | 'end' }) => {
+      const seg = baseForLines[attach.segmentIndex];
+      if (!seg || seg.length < 1) return null;
+      const p = attach.endpoint === 'start' ? seg[0] : seg[seg.length - 1];
+      return { x: p.x, y: p.y };
+    };
+    for (const fl of freeLines) {
+      const start = getAttachPoint(fl.attach);
+      if (!start) continue;
+      const pts = sampleLineWorld(start, fl.end);
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x - cx, pts[0].y - cy);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x - cx, pts[i].y - cy);
+      ctx.stroke();
+    }
+
+    // Line2 endpoint hints + hover highlight (subtle)
+    if (tool === 'line2') {
+      const hints = baseForLines.flatMap((seg, si) => {
+        if (!seg || seg.length < 1) return [];
+        return [
+          { segmentIndex: si, endpoint: 'start' as const, pt: seg[0] },
+          { segmentIndex: si, endpoint: 'end' as const, pt: seg[seg.length - 1] },
+        ];
+      });
+
+      let hover: { x: number; y: number } | null = null;
+      let bestD = Infinity;
+      if (mouseWorld) {
+        for (const h of hints) {
+          const d = Math.hypot(mouseWorld.x - h.pt.x, mouseWorld.y - h.pt.y);
+          if (d < bestD) { bestD = d; hover = { x: h.pt.x, y: h.pt.y }; }
+        }
+        if (bestD > 45) hover = null;
+      }
+
+      for (const h of hints) {
+        const isHover = !!hover && hover.x === h.pt.x && hover.y === h.pt.y;
+        ctx.strokeStyle = isHover ? 'rgba(0, 255, 136, 0.9)' : 'rgba(0, 255, 136, 0.35)';
+        ctx.lineWidth = isHover ? 3 : 2;
+        ctx.beginPath();
+        ctx.arc(h.pt.x - cx, h.pt.y - cy, isHover ? 9 : 7, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    // Line2 preview line (after picking start)
+    if (tool === 'line2' && line2Start && mouseWorld) {
+      ctx.strokeStyle = 'rgba(0, 204, 102, 0.9)';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([6, 6]);
+      ctx.beginPath();
+      ctx.moveTo(line2Start.start.x - cx, line2Start.start.y - cy);
+      ctx.lineTo(mouseWorld.x - cx, mouseWorld.y - cy);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
     // Line preview
     if (linePreview.length > 0) {
       ctx.fillStyle = 'rgba(0,200,100,0.4)';
@@ -408,7 +477,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(`Middle-click / Right-click drag to pan • +/- to zoom (${Math.round(zoom * 100)}%) • Click to place tiles`, w / 2, h - 15);
-  }, [camera, tiles, smoothSegments, tool, arcCenter, arcPreview, zoom, curveStart, curveEnd, curveControl, lineStart, linePreview]);
+  }, [camera, tiles, smoothSegments, freeLines, tool, arcCenter, arcPreview, zoom, curveStart, curveEnd, curveControl, lineStart, linePreview, line2Start]);
 
   // Resize & render loop
   useEffect(() => {
@@ -439,6 +508,10 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     const gx = Math.floor((clientX / zoom + camera.x) / GRID_SIZE);
     const gy = Math.floor((clientY / zoom + camera.y) / GRID_SIZE);
     return { gx, gy };
+  };
+
+  const screenToWorld = (clientX: number, clientY: number) => {
+    return { x: clientX / zoom + camera.x, y: clientY / zoom + camera.y };
   };
 
   // Generate an arc loop around a center by sampling a circle in continuous
@@ -754,6 +827,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
 
     if (e.button === 0) {
       const { gx, gy } = screenToGrid(e.clientX, e.clientY);
+      const world = screenToWorld(e.clientX, e.clientY);
 
       // Arc tool: first click sets center, second click uses current radius
       // to generate a circular rail loop (grid-snapped).
@@ -851,6 +925,34 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         return;
       }
 
+      if (tool === 'line2') {
+        // First click: pick nearest endpoint of ANY rail segment (ignore freeLines so they don't affect picking)
+        if (!line2Start) {
+          const { allSegments } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, freeLines);
+          if (allSegments.length === 0) return;
+          let best: { segmentIndex: number; endpoint: 'start' | 'end'; pt: { x: number; y: number }; dist: number } | null = null;
+          for (let si = 0; si < allSegments.length; si++) {
+            const seg = allSegments[si];
+            if (!seg || seg.length < 1) continue;
+            const a = seg[0];
+            const b = seg[seg.length - 1];
+            const da = Math.hypot(world.x - a.x, world.y - a.y);
+            const db = Math.hypot(world.x - b.x, world.y - b.y);
+            const candA = { segmentIndex: si, endpoint: 'start' as const, pt: { x: a.x, y: a.y }, dist: da };
+            const candB = { segmentIndex: si, endpoint: 'end' as const, pt: { x: b.x, y: b.y }, dist: db };
+            const cand = candA.dist <= candB.dist ? candA : candB;
+            if (!best || cand.dist < best.dist) best = cand;
+          }
+          if (!best || best.dist > 45) return;
+          setLine2Start({ attach: { segmentIndex: best.segmentIndex, endpoint: best.endpoint }, start: best.pt });
+        } else {
+          // Second click: free end point anywhere in world space
+          setFreeLines(prev => [...prev, { attach: line2Start.attach, end: { x: world.x, y: world.y } }]);
+          setLine2Start(null);
+        }
+        return;
+      }
+
       setIsDrawing(true);
       placeTile(gx, gy);
     }
@@ -870,6 +972,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
+    setMouseWorld(screenToWorld(e.clientX, e.clientY));
     if (isPanning) {
       setCamera({
         x: panStart.x - e.clientX / zoom,
@@ -1007,7 +1110,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       setTimeout(() => setTestError(null), 3000);
       return;
     }
-    const { railPoints } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments);
+    const { railPoints } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, freeLines);
     if (railPoints.length < 3) {
       setTestError('Place at least 3 rail tiles before testing.');
       setTimeout(() => setTestError(null), 3000);
@@ -1032,7 +1135,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     window.addEventListener('resize', resize);
 
     // Convert tiles to engine-compatible format (already resampled at RAIL_SPACING)
-    const { railPoints, allSegments, obstacles: obsData, endSegmentIndex, endPointIndex } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments);
+    const { railPoints, allSegments, obstacles: obsData, endSegmentIndex, endPointIndex } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, freeLines);
 
     // Create a custom engine with pre-built rail
     const engine = new GameEngine(canvas, 'overworld', { motor: 0, health: 0, grip: 0, rocket: 0, shield: 0 }, {
@@ -1120,7 +1223,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       window.removeEventListener('resize', resize);
       window.removeEventListener('keydown', handleKey);
     };
-  }, [testing, tiles, smoothSegments]);
+  }, [testing, tiles, smoothSegments, freeLines]);
 
   // Save dialog
   const handleSave = () => {
@@ -1133,10 +1236,12 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       createdAt: Date.now(),
       connections: serializeConnections(),
       smoothSegments,
+      freeLines,
     };
     saveCustomLevel(level);
     lastSavedTilesRef.current = JSON.stringify(tiles);
     lastSavedSmoothRef.current = JSON.stringify(smoothSegments);
+    lastSavedFreeLinesRef.current = JSON.stringify(freeLines);
     setCurrentLevelName(levelName.trim());
     setShowSaveDialog(false);
     setLevelName('');
@@ -1153,10 +1258,12 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       createdAt: Date.now(),
       connections: serializeConnections(),
       smoothSegments,
+      freeLines,
     };
     saveCustomLevel(level);
     lastSavedTilesRef.current = JSON.stringify(tiles);
     lastSavedSmoothRef.current = JSON.stringify(smoothSegments);
+    lastSavedFreeLinesRef.current = JSON.stringify(freeLines);
   };
 
   const handleLoad = (level: EditorLevel) => {
@@ -1164,6 +1271,20 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     lastSavedTilesRef.current = JSON.stringify(level.tiles);
     setSmoothSegments(level.smoothSegments ?? []);
     lastSavedSmoothRef.current = JSON.stringify(level.smoothSegments ?? []);
+    // Migrate legacy freeLines (attachTo/start/end) to new attach format if needed
+    const loadedFreeLines = (level.freeLines ?? []) as any[];
+    const migrated: FreeLineSegment[] = loadedFreeLines.map(fl => {
+      if (fl && fl.attach && fl.end) return fl as FreeLineSegment;
+      if (fl && fl.attachTo && fl.end) {
+        return {
+          attach: { segmentIndex: 0, endpoint: fl.attachTo === 'start' ? 'start' : 'end' },
+          end: fl.end,
+        } as FreeLineSegment;
+      }
+      return null;
+    }).filter(Boolean) as FreeLineSegment[];
+    setFreeLines(migrated);
+    lastSavedFreeLinesRef.current = JSON.stringify(migrated);
     setCurrentLevelName(level.name);
     setShowLoadDialog(false);
     // Restore explicit connections if present; otherwise rebuild from adjacency.
@@ -1200,8 +1321,10 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     if (Object.keys(tiles).length > 0 && !confirm('Clear all tiles?')) return;
     setTiles({});
     setSmoothSegments([]);
+    setFreeLines([]);
     railConnectionsRef.current = {};
     lastPlacedRailRef.current = null;
+    setLine2Start(null);
     setArcCenter(null);
     setArcPreview([]);
   };
@@ -1364,6 +1487,27 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
               key={t.tool}
               onClick={() => {
                 setTool(t.tool as EditorTool); lastPlacedRailRef.current = null;
+                if (t.tool !== 'circle' && t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); }
+                if (t.tool !== 'curve' && t.tool !== 'circular_curve') { setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); }
+                if (t.tool !== 'line') { setLineStart(null); setLinePreview([]); }
+                setShowTilesMenu(false);
+              }}
+              className={`px-3 py-2 rounded-lg font-bold text-sm transition-all ${
+                tool === t.tool
+                  ? 'bg-game-accent text-game-bg scale-105'
+                  : 'bg-game-card text-game-title border border-game-card-border hover:border-game-accent'
+              }`}
+            >
+              {t.emoji} {t.label}
+            </button>
+          ))}
+          {/* Line2 standalone */}
+          {TOOLS.filter(t => ['line2'].includes(t.tool)).map(t => (
+            <button
+              key={t.tool}
+              onClick={() => {
+                setTool(t.tool as EditorTool); lastPlacedRailRef.current = null;
+                setLine2Start(null);
                 if (t.tool !== 'circle' && t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); }
                 if (t.tool !== 'curve' && t.tool !== 'circular_curve') { setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); }
                 if (t.tool !== 'line') { setLineStart(null); setLinePreview([]); }

@@ -14,7 +14,8 @@ export type EditorTool =
   | 'curve'
   | 'circular_curve'
   | 'circle'
-  | 'line';
+  | 'line'
+  | 'line2';
 
 export interface EditorTile {
   type: TileType;
@@ -29,6 +30,11 @@ export interface SmoothSegment {
   pivotGy: number;
 }
 
+export interface FreeLineSegment {
+  attach: { segmentIndex: number; endpoint: 'start' | 'end' };
+  end: { x: number; y: number };
+}
+
 export interface EditorLevel {
   name: string;
   tiles: Record<string, TileType>; // "x,y" -> type
@@ -37,6 +43,8 @@ export interface EditorLevel {
   connections?: Record<string, string[]>;
   /** Smooth arcs/curves between tiles; expanded to dense world points for game rail */
   smoothSegments?: SmoothSegment[];
+  /** World-space line extensions attached to main rail */
+  freeLines?: FreeLineSegment[];
 }
 
 export function tileKey(gx: number, gy: number): string {
@@ -50,7 +58,7 @@ export function parseTileKey(key: string): [number, number] {
 
 export function keyToWorld(key: string): { x: number; y: number } {
   const [gx, gy] = parseTileKey(key);
-  return { x: gx * GRID_SIZE, y: gy * GRID_SIZE };
+  return { x: (gx + 0.5) * GRID_SIZE, y: (gy + 0.5) * GRID_SIZE };
 }
 
 /** Sample a circular arc in world space (start, end, pivot). Returns dense points along the arc. */
@@ -124,6 +132,24 @@ export function sampleBezierWorld(
       x: mt * mt * start.x + 2 * mt * t * control.x + t * t * end.x,
       y: mt * mt * start.y + 2 * mt * t * control.y + t * t * end.y,
     });
+  }
+  return out;
+}
+
+export function sampleLineWorld(
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+  stepPx: number = 25
+): { x: number; y: number }[] {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist <= stepPx) return [start, end];
+  const steps = Math.max(2, Math.ceil(dist / stepPx));
+  const out: { x: number; y: number }[] = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    out.push({ x: start.x + dx * t, y: start.y + dy * t });
   }
   return out;
 }
@@ -236,7 +262,8 @@ function getRailComponents(
 export function convertLevelToGameData(
   tiles: Record<string, TileType>,
   connections?: Record<string, Set<string>>,
-  smoothSegments?: SmoothSegment[]
+  smoothSegments?: SmoothSegment[],
+  freeLines?: FreeLineSegment[]
 ): {
   railPoints: { x: number; y: number }[];
   allSegments: { x: number; y: number }[][];
@@ -312,6 +339,25 @@ export function convertLevelToGameData(
       endSegmentIndex = 0;
       endPointIndex = expanded.keyToLastIndex[endKey];
     }
+  }
+
+  // Apply any attached free-line extensions to whichever segment endpoint they attach to.
+  if (freeLines && freeLines.length > 0) {
+    for (const fl of freeLines) {
+      const seg = allSegments[fl.attach.segmentIndex];
+      if (!seg || seg.length < 1) continue;
+      if (fl.attach.endpoint === 'end') {
+        const startPt = seg[seg.length - 1];
+        const segPts = sampleLineWorld(startPt, fl.end);
+        for (let i = 1; i < segPts.length; i++) seg.push(segPts[i]);
+      } else {
+        const startPt = seg[0];
+        const segPts = sampleLineWorld(fl.end, startPt);
+        allSegments[fl.attach.segmentIndex] = [...segPts.slice(0, -1), ...seg];
+      }
+    }
+    // Keep railPoints pointing at segment 0
+    railPoints = allSegments[0] ?? railPoints;
   }
 
   return { railPoints, allSegments, obstacles, endSegmentIndex, endPointIndex };
