@@ -1427,6 +1427,16 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
                     engineRef.current?.stop();
                     setTesting(false);
                     setLevelComplete(null);
+                  }}
+                  className="flex-1 py-3 rounded-lg bg-game-accent text-game-bg font-bold text-lg hover:brightness-110"
+                >
+                  ✕ Back to Editor
+                </button>
+                <button
+                  onClick={() => {
+                    engineRef.current?.stop();
+                    setTesting(false);
+                    setLevelComplete(null);
                     onBack();
                   }}
                   className="flex-1 py-3 rounded-lg bg-game-bar-bg text-game-subtitle font-bold text-lg hover:brightness-110"
