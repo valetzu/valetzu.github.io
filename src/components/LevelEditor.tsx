@@ -218,16 +218,19 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         ctx.fillStyle = type === 'rail_start' ? '#00E676' : type === 'rail_end' ? '#FF4081' : '#FFD700';
         ctx.fillRect(sx + 2, sy + 2, GRID_SIZE - 4, GRID_SIZE - 4);
 
-        // Draw rail connections using explicit connection map
+        // Draw rail connections using explicit connection map (skip straight line if smooth segment exists)
         ctx.strokeStyle = '#333';
         ctx.lineWidth = 4;
         const centerX = sx + GRID_SIZE / 2;
         const centerY = sy + GRID_SIZE / 2;
+        const isSmoothPair = (a: string, b: string) =>
+          smoothSegments.some(s => (s.startKey === a && s.endKey === b) || (s.startKey === b && s.endKey === a));
 
         const myConnections = connections[key];
         if (myConnections) {
           ctx.beginPath();
           for (const connKey of myConnections) {
+            if (isSmoothPair(key, connKey)) continue; // smooth segment drawn separately
             const [cgx, cgy] = parseTileKey(connKey);
             const dx = cgx - gx;
             const dy = cgy - gy;
