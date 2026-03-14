@@ -1000,7 +1000,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         return;
       }
 
-      // Eraser: check if click is near a free line segment and delete it
+      // Eraser: check if click is near a free line or smooth curve segment and delete it
       if (tool === 'eraser') {
         const { allSegments: baseSegs, segmentIdByIndex: baseIds } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, undefined);
         const segIdToIdx: Record<string, number> = {};
@@ -1021,18 +1021,48 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
           return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
         };
-        let bestDist = 15;
-        let bestIdx = -1;
+        const polylineDist = (px: number, py: number, pts: { x: number; y: number }[]) => {
+          let min = Infinity;
+          for (let i = 1; i < pts.length; i++) min = Math.min(min, ptSegDist(px, py, pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y));
+          return min;
+        };
+
+        const ERASE_THRESHOLD = 15;
+        let bestDist = ERASE_THRESHOLD;
+        let hitFreeLine = -1;
+        let hitSmooth = -1;
+
         for (let i = 0; i < freeLines.length; i++) {
           const fl = freeLines[i];
           let start = resolveAttach(fl.attach);
           if (!start && fl.attachWorld) start = fl.attachWorld;
           if (!start) continue;
           const d = ptSegDist(world.x, world.y, start.x, start.y, fl.end.x, fl.end.y);
-          if (d < bestDist) { bestDist = d; bestIdx = i; }
+          if (d < bestDist) { bestDist = d; hitFreeLine = i; hitSmooth = -1; }
         }
-        if (bestIdx >= 0) {
-          setFreeLines(prev => prev.filter((_, i) => i !== bestIdx));
+
+        for (let i = 0; i < smoothSegments.length; i++) {
+          const seg = smoothSegments[i];
+          const start = keyToWorld(seg.startKey);
+          const end = keyToWorld(seg.endKey);
+          const pivot = { x: seg.pivotGx * GRID_SIZE, y: seg.pivotGy * GRID_SIZE };
+          const pts = seg.type === 'circular'
+            ? sampleCircularArcWorld(start, end, pivot)
+            : sampleBezierWorld(start, end, pivot);
+          const d = polylineDist(world.x, world.y, pts);
+          if (d < bestDist) { bestDist = d; hitSmooth = i; hitFreeLine = -1; }
+        }
+
+        if (hitFreeLine >= 0) {
+          setFreeLines(prev => prev.filter((_, i) => i !== hitFreeLine));
+          return;
+        }
+        if (hitSmooth >= 0) {
+          const seg = smoothSegments[hitSmooth];
+          const conns = railConnectionsRef.current;
+          conns[seg.startKey]?.delete(seg.endKey);
+          conns[seg.endKey]?.delete(seg.startKey);
+          setSmoothSegments(prev => prev.filter((_, i) => i !== hitSmooth));
           return;
         }
       }
