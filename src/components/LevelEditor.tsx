@@ -4,6 +4,7 @@ import {
   EditorLevel, tileKey, parseTileKey,
   saveCustomLevel, loadCustomLevels, deleteCustomLevel,
   convertLevelToGameData,
+  SmoothSegment, sampleCircularArcWorld, sampleBezierWorld, keyToWorld,
 } from '@/game/editorTypes';
 import { Point, Obstacle, WORLD_CONFIG } from '@/game/types';
 import { GameEngine } from '@/game/engine';
@@ -21,6 +22,7 @@ const TOOLS: { tool: EditorTool; label: string; emoji: string }[] = [
   { tool: 'eraser', label: 'Eraser', emoji: '🧹' },
   { tool: 'arc', label: 'Arc Tool', emoji: '🔄' },
   { tool: 'curve', label: 'Curve', emoji: '〰️' },
+  { tool: 'circular_curve', label: 'Circular Curve', emoji: '🟠' },
   { tool: 'circle', label: 'Circle', emoji: '⭕' },
   { tool: 'line', label: 'Line', emoji: '📏' },
 ];
@@ -112,9 +114,14 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const engineRef = useRef<GameEngine | null>(null);
   const gameOverRef = useRef(false);
   const lastSavedTilesRef = useRef<string>('{}');
+  const lastSavedSmoothRef = useRef<string>('[]');
   const [testError, setTestError] = useState<string | null>(null);
 
-  const hasUnsavedChanges = () => JSON.stringify(tiles) !== lastSavedTilesRef.current;
+  const [smoothSegments, setSmoothSegments] = useState<SmoothSegment[]>([]);
+
+  const hasUnsavedChanges = () =>
+    JSON.stringify(tiles) !== lastSavedTilesRef.current ||
+    JSON.stringify(smoothSegments) !== lastSavedSmoothRef.current;
 
   const serializeConnections = (): Record<string, string[]> => {
     const conns = railConnectionsRef.current;
@@ -286,17 +293,23 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       ctx.arc(acx, acy, 4, 0, Math.PI * 2);
       ctx.fill();
     }
-    // Curve preview
-    if (curvePreview.length > 0) {
-      ctx.fillStyle = 'rgba(100,200,255,0.4)';
-      for (const p of curvePreview) {
-        const sx2 = p.gx * GRID_SIZE - cx;
-        const sy2 = p.gy * GRID_SIZE - cy;
-        ctx.fillRect(sx2 + 2, sy2 + 2, GRID_SIZE - 4, GRID_SIZE - 4);
-      }
+    // Curve / circular curve preview: draw smooth arc/bezier (no tiles)
+    if (curveStart && curveEnd && curveControl && (tool === 'curve' || tool === 'circular_curve')) {
+      const wStart = { x: curveStart.gx * GRID_SIZE, y: curveStart.gy * GRID_SIZE };
+      const wEnd = { x: curveEnd.gx * GRID_SIZE, y: curveEnd.gy * GRID_SIZE };
+      const wPivot = { x: curveControl.gx * GRID_SIZE, y: curveControl.gy * GRID_SIZE };
+      const pts = tool === 'circular_curve'
+        ? sampleCircularArcWorld(wStart, wEnd, wPivot)
+        : sampleBezierWorld(wStart, wEnd, wPivot);
+      ctx.strokeStyle = 'rgba(100,200,255,0.9)';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x - cx, pts[0].y - cy);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x - cx, pts[i].y - cy);
+      ctx.stroke();
     }
 
-    // Curve start/end markers
+    // Curve / circular curve start/end markers
     if (curveStart) {
       const csx = curveStart.gx * GRID_SIZE + GRID_SIZE / 2 - cx;
       const csy = curveStart.gy * GRID_SIZE + GRID_SIZE / 2 - cy;
@@ -321,7 +334,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       ctx.textBaseline = 'middle';
       ctx.fillText('B', cex, cey);
     }
-    // Curve control point marker
+    // Curve / circular curve control point marker
     if (curveControl && curveStart && curveEnd) {
       const ccx = curveControl.gx * GRID_SIZE + GRID_SIZE / 2 - cx;
       const ccy = curveControl.gy * GRID_SIZE + GRID_SIZE / 2 - cy;
@@ -338,6 +351,22 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       ctx.arc(ccx, ccy, 6, 0, Math.PI * 2);
       ctx.fillStyle = '#FFFF00';
       ctx.fill();
+    }
+
+    // Smooth segments (circular/bezier) as cable
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 4;
+    for (const seg of smoothSegments) {
+      const start = keyToWorld(seg.startKey);
+      const end = keyToWorld(seg.endKey);
+      const pivot = { x: seg.pivotGx * GRID_SIZE, y: seg.pivotGy * GRID_SIZE };
+      const pts = seg.type === 'circular'
+        ? sampleCircularArcWorld(start, end, pivot)
+        : sampleBezierWorld(start, end, pivot);
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x - cx, pts[0].y - cy);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x - cx, pts[i].y - cy);
+      ctx.stroke();
     }
 
     // Line preview
@@ -376,7 +405,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(`Middle-click / Right-click drag to pan • +/- to zoom (${Math.round(zoom * 100)}%) • Click to place tiles`, w / 2, h - 15);
-  }, [camera, tiles, tool, arcCenter, arcPreview, zoom, curveStart, curveEnd, curveControl, curvePreview, lineStart, linePreview]);
+  }, [camera, tiles, smoothSegments, tool, arcCenter, arcPreview, zoom, curveStart, curveEnd, curveControl, lineStart, linePreview]);
 
   // Resize & render loop
   useEffect(() => {
@@ -591,6 +620,128 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     return points;
   };
 
+  const generateCircularArc = (
+    start: { gx: number; gy: number },
+    end: { gx: number; gy: number },
+    pivot: { gx: number; gy: number }
+  ) => {
+    // Fallback to straight line if points are degenerate or nearly collinear.
+    if (
+      (start.gx === end.gx && start.gy === end.gy) ||
+      (start.gx === pivot.gx && start.gy === pivot.gy) ||
+      (end.gx === pivot.gx && end.gy === pivot.gy)
+    ) {
+      return generateLine(start, end);
+    }
+
+    const x1 = start.gx, y1 = start.gy;
+    const x2 = end.gx, y2 = end.gy;
+    const x3 = pivot.gx, y3 = pivot.gy;
+
+    const d = 2 * (x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2));
+    if (Math.abs(d) < 1e-3) {
+      return generateLine(start, end);
+    }
+
+    const ux =
+      ((x1 * x1 + y1 * y1) * (y2 - y3) +
+        (x2 * x2 + y2 * y2) * (y3 - y1) +
+        (x3 * x3 + y3 * y3) * (y1 - y2)) /
+      d;
+    const uy =
+      ((x1 * x1 + y1 * y1) * (x3 - x2) +
+        (x2 * x2 + y2 * y2) * (x1 - x3) +
+        (x3 * x3 + y3 * y3) * (x2 - x1)) /
+      d;
+
+    const radius = Math.sqrt((x1 - ux) * (x1 - ux) + (y1 - uy) * (y1 - uy));
+    if (!isFinite(radius) || radius < 0.5) {
+      return generateLine(start, end);
+    }
+
+    const a1 = Math.atan2(y1 - uy, x1 - ux);
+    const a2 = Math.atan2(y2 - uy, x2 - ux);
+    const a3 = Math.atan2(y3 - uy, x3 - ux);
+
+    const norm = (a: number) => {
+      let r = a;
+      const tau = Math.PI * 2;
+      while (r < 0) r += tau;
+      while (r >= tau) r -= tau;
+      return r;
+    };
+
+    const A1 = norm(a1);
+    const A2 = norm(a2);
+    const A3 = norm(a3);
+
+    const isBetweenCCW = (from: number, to: number, mid: number) => {
+      let f = from, t = to, m = mid;
+      const tau = Math.PI * 2;
+      if (t < f) t += tau;
+      if (m < f) m += tau;
+      return m >= f && m <= t;
+    };
+
+    const ccwContainsPivot = isBetweenCCW(A1, A2, A3);
+    let startAngle = A1;
+    let endAngle = A2;
+    let dir = 1;
+
+    if (!ccwContainsPivot) {
+      // Use clockwise direction instead.
+      dir = -1;
+    }
+
+    if (dir === 1 && endAngle < startAngle) {
+      endAngle += Math.PI * 2;
+    } else if (dir === -1 && startAngle < endAngle) {
+      startAngle += Math.PI * 2;
+    }
+
+    const angleSpan = endAngle - startAngle;
+    const arcLength = Math.abs(angleSpan) * radius;
+    const steps = Math.max(12, Math.round(arcLength * 2));
+
+    const rawPoints: { gx: number; gy: number }[] = [];
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const angle = startAngle + angleSpan * t;
+      const gx = Math.round(ux + Math.cos(angle) * radius);
+      const gy = Math.round(uy + Math.sin(angle) * radius);
+      if (
+        rawPoints.length === 0 ||
+        rawPoints[rawPoints.length - 1].gx !== gx ||
+        rawPoints[rawPoints.length - 1].gy !== gy
+      ) {
+        rawPoints.push({ gx, gy });
+      }
+    }
+
+    const result: { gx: number; gy: number }[] = [];
+    const visited = new Set<string>();
+    const addPoint = (gx: number, gy: number) => {
+      const key = `${gx},${gy}`;
+      if (!visited.has(key)) {
+        visited.add(key);
+        result.push({ gx, gy });
+      }
+    };
+
+    for (let i = 0; i < rawPoints.length; i++) {
+      if (i === 0) {
+        addPoint(rawPoints[0].gx, rawPoints[0].gy);
+        continue;
+      }
+      const seg = generateLine(rawPoints[i - 1], rawPoints[i]);
+      for (const p of seg) {
+        addPoint(p.gx, p.gy);
+      }
+    }
+
+    return result;
+  };
+
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button === 1 || e.button === 2) {
       setIsPanning(true);
@@ -625,19 +776,27 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         return;
       }
 
-      // Curve tool: click start, click end, then click/drag control point.
-      if (tool === 'curve') {
+    // Curve tools: click start, click end, then click/drag control point.
+    if (tool === 'curve' || tool === 'circular_curve') {
         if (!curveStart) {
           setCurveStart({ gx, gy });
         } else if (!curveEnd) {
           setCurveEnd({ gx, gy });
           const mid = { gx: Math.round((curveStart.gx + gx) / 2), gy: Math.round((curveStart.gy + gy) / 2) };
           setCurveControl(mid);
-          setCurvePreview(generateBezierCurve(curveStart, { gx, gy }, mid));
+        setCurvePreview(
+          tool === 'curve'
+            ? generateBezierCurve(curveStart, { gx, gy }, mid)
+            : generateCircularArc(curveStart, { gx, gy }, mid)
+        );
         } else {
           setIsDraggingCurve(true);
           setCurveControl({ gx, gy });
-          setCurvePreview(generateBezierCurve(curveStart, curveEnd, { gx, gy }));
+        setCurvePreview(
+          tool === 'curve'
+            ? generateBezierCurve(curveStart, curveEnd, { gx, gy })
+            : generateCircularArc(curveStart, curveEnd, { gx, gy })
+        );
         }
         return;
       }
@@ -733,11 +892,15 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       setArcPreview(generateCircleRail(arcCenter.gx, arcCenter.gy, gx, gy));
     }
 
-    // Curve control point dragging
-    if (tool === 'curve' && curveStart && curveEnd && isDraggingCurve) {
+    // Curve / circular curve control point dragging
+    if ((tool === 'curve' || tool === 'circular_curve') && curveStart && curveEnd && isDraggingCurve) {
       const { gx, gy } = screenToGrid(e.clientX, e.clientY);
       setCurveControl({ gx, gy });
-      setCurvePreview(generateBezierCurve(curveStart, curveEnd, { gx, gy }));
+      setCurvePreview(
+        tool === 'curve'
+          ? generateBezierCurve(curveStart, curveEnd, { gx, gy })
+          : generateCircularArc(curveStart, curveEnd, { gx, gy })
+      );
     }
 
     // Line preview
@@ -751,21 +914,25 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     setIsPanning(false);
     setIsDrawing(false);
 
-    // Commit curve on mouse up if dragging control point
+    // Commit curve / circular curve on mouse up: store as smooth segment, only place start/end tiles
     if (isDraggingCurve && curveStart && curveEnd && curveControl) {
-      const points = generateBezierCurve(curveStart, curveEnd, curveControl);
-      // Add connections between consecutive curve points
-      for (let i = 1; i < points.length; i++) {
-        addRailConnection(tileKey(points[i - 1].gx, points[i - 1].gy), tileKey(points[i].gx, points[i].gy));
-      }
-      if (points.length > 0) lastPlacedRailRef.current = tileKey(points[points.length - 1].gx, points[points.length - 1].gy);
+      const startKey = tileKey(curveStart.gx, curveStart.gy);
+      const endKey = tileKey(curveEnd.gx, curveEnd.gy);
+      addRailConnection(startKey, endKey);
+      setSmoothSegments(prev => [...prev, {
+        type: tool === 'circular_curve' ? 'circular' : 'bezier',
+        startKey,
+        endKey,
+        pivotGx: curveControl.gx,
+        pivotGy: curveControl.gy,
+      }]);
       setTiles(prev => {
         const next = { ...prev };
-        for (const p of points) {
-          next[tileKey(p.gx, p.gy)] = 'rail';
-        }
+        next[startKey] = prev[startKey] === 'rail_start' || prev[startKey] === 'rail_end' ? prev[startKey]! : 'rail';
+        next[endKey] = prev[endKey] === 'rail_start' || prev[endKey] === 'rail_end' ? prev[endKey]! : 'rail';
         return next;
       });
+      lastPlacedRailRef.current = endKey;
       setCurveStart(null);
       setCurveEnd(null);
       setCurveControl(null);
@@ -837,7 +1004,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       setTimeout(() => setTestError(null), 3000);
       return;
     }
-    const { railPoints } = convertLevelToGameData(tiles, railConnectionsRef.current);
+    const { railPoints } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments);
     if (railPoints.length < 3) {
       setTestError('Place at least 3 rail tiles before testing.');
       setTimeout(() => setTestError(null), 3000);
@@ -862,7 +1029,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     window.addEventListener('resize', resize);
 
     // Convert tiles to engine-compatible format (already resampled at RAIL_SPACING)
-    const { railPoints, allSegments, obstacles: obsData, endSegmentIndex, endPointIndex } = convertLevelToGameData(tiles, railConnectionsRef.current);
+    const { railPoints, allSegments, obstacles: obsData, endSegmentIndex, endPointIndex } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments);
 
     // Create a custom engine with pre-built rail
     const engine = new GameEngine(canvas, 'overworld', { motor: 0, health: 0, grip: 0, rocket: 0, shield: 0 }, {
@@ -950,7 +1117,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       window.removeEventListener('resize', resize);
       window.removeEventListener('keydown', handleKey);
     };
-  }, [testing, tiles]);
+  }, [testing, tiles, smoothSegments]);
 
   // Save dialog
   const handleSave = () => {
@@ -962,9 +1129,11 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       tiles,
       createdAt: Date.now(),
       connections: serializeConnections(),
+      smoothSegments,
     };
     saveCustomLevel(level);
     lastSavedTilesRef.current = JSON.stringify(tiles);
+    lastSavedSmoothRef.current = JSON.stringify(smoothSegments);
     setCurrentLevelName(levelName.trim());
     setShowSaveDialog(false);
     setLevelName('');
@@ -980,14 +1149,18 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       tiles,
       createdAt: Date.now(),
       connections: serializeConnections(),
+      smoothSegments,
     };
     saveCustomLevel(level);
     lastSavedTilesRef.current = JSON.stringify(tiles);
+    lastSavedSmoothRef.current = JSON.stringify(smoothSegments);
   };
 
   const handleLoad = (level: EditorLevel) => {
     setTiles(level.tiles);
     lastSavedTilesRef.current = JSON.stringify(level.tiles);
+    setSmoothSegments(level.smoothSegments ?? []);
+    lastSavedSmoothRef.current = JSON.stringify(level.smoothSegments ?? []);
     setCurrentLevelName(level.name);
     setShowLoadDialog(false);
     // Restore explicit connections if present; otherwise rebuild from adjacency.
@@ -1023,6 +1196,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const clearAll = () => {
     if (Object.keys(tiles).length > 0 && !confirm('Clear all tiles?')) return;
     setTiles({});
+    setSmoothSegments([]);
     railConnectionsRef.current = {};
     lastPlacedRailRef.current = null;
     setArcCenter(null);
@@ -1158,13 +1332,13 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
             </button>
             {showToolsMenu && (
               <div className="absolute top-full left-0 mt-1 bg-game-card border border-game-card-border rounded-lg p-1 min-w-[140px] shadow-lg">
-                {TOOLS.filter(t => ['circle', 'arc', 'curve'].includes(t.tool as EditorTool)).map(t => (
+                {TOOLS.filter(t => ['circle', 'arc', 'curve', 'circular_curve'].includes(t.tool as EditorTool)).map(t => (
                   <button
                     key={t.tool}
                     onClick={() => {
                       setTool(t.tool); lastPlacedRailRef.current = null;
                       if (t.tool !== 'circle' && t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); }
-                      if (t.tool !== 'curve') { setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); }
+                      if (t.tool !== 'curve' && t.tool !== 'circular_curve') { setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); }
                       setLineStart(null); setLinePreview([]);
                       setShowToolsMenu(false);
                     }}
@@ -1188,7 +1362,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
               onClick={() => {
                 setTool(t.tool as EditorTool); lastPlacedRailRef.current = null;
                 if (t.tool !== 'circle' && t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); }
-                if (t.tool !== 'curve') { setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); }
+                if (t.tool !== 'curve' && t.tool !== 'circular_curve') { setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); }
                 if (t.tool !== 'line') { setLineStart(null); setLinePreview([]); }
                 setShowTilesMenu(false);
               }}
@@ -1322,9 +1496,11 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
                               tiles,
                               createdAt: Date.now(),
                               connections: serializeConnections(),
+                              smoothSegments,
                             };
                             saveCustomLevel(newLevel);
                             lastSavedTilesRef.current = JSON.stringify(tiles);
+                            lastSavedSmoothRef.current = JSON.stringify(smoothSegments);
                             setCurrentLevelName(level.name);
                             setShowSaveDialog(false);
                             setLevelName('');
