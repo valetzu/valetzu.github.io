@@ -122,7 +122,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
 
   const [smoothSegments, setSmoothSegments] = useState<SmoothSegment[]>([]);
   const [freeLines, setFreeLines] = useState<FreeLineSegment[]>([]);
-  const [line2Start, setLine2Start] = useState<{ attach: { segmentIndex: number; endpoint: 'start' | 'end' }; start: { x: number; y: number } } | null>(null);
+  const [line2Start, setLine2Start] = useState<{ attach: import('@/game/editorTypes').FreeLineAttach; start: { x: number; y: number } } | null>(null);
   const [mouseWorld, setMouseWorld] = useState<{ x: number; y: number } | null>(null);
 
   const hasUnsavedChanges = () =>
@@ -382,15 +382,21 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     // Free line extensions (derive current start from attached segment endpoints; ignore freeLines while deriving)
     ctx.strokeStyle = '#333';
     ctx.lineWidth = 4;
-    const baseForLines = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, freeLines).allSegments;
-    const getAttachPoint = (attach: { segmentIndex: number; endpoint: 'start' | 'end' }) => {
-      const seg = baseForLines[attach.segmentIndex];
+    const { allSegments: baseForLines, segmentIdByIndex } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, undefined);
+    const segIdToIdx: Record<string, number> = {};
+    segmentIdByIndex.forEach((id, i) => { segIdToIdx[id] = i; });
+    const getAttachPoint = (attach: import('@/game/editorTypes').FreeLineAttach) => {
+      if ('atWorld' in attach) return attach.atWorld;
+      const idx = segIdToIdx[attach.segmentId];
+      if (idx == null) return null;
+      const seg = baseForLines[idx];
       if (!seg || seg.length < 1) return null;
       const p = attach.endpoint === 'start' ? seg[0] : seg[seg.length - 1];
       return { x: p.x, y: p.y };
     };
     for (const fl of freeLines) {
-      const start = getAttachPoint(fl.attach);
+      let start = getAttachPoint(fl.attach);
+      if (!start && fl.attachWorld) start = fl.attachWorld;
       if (!start) continue;
       const pts = sampleLineWorld(start, fl.end);
       ctx.beginPath();
@@ -399,15 +405,19 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       ctx.stroke();
     }
 
-    // Line2 endpoint hints + hover highlight (subtle)
+    // Line2 endpoint hints + hover highlight (include freeLine ends so user can start from connection points)
     if (tool === 'line2') {
-      const hints = baseForLines.flatMap((seg, si) => {
+      const hints: { attach: import('@/game/editorTypes').FreeLineAttach; pt: { x: number; y: number } }[] = baseForLines.flatMap((seg, si) => {
         if (!seg || seg.length < 1) return [];
+        const id = segmentIdByIndex[si];
         return [
-          { segmentIndex: si, endpoint: 'start' as const, pt: seg[0] },
-          { segmentIndex: si, endpoint: 'end' as const, pt: seg[seg.length - 1] },
+          { attach: { segmentId: id, endpoint: 'start' as const }, pt: seg[0] },
+          { attach: { segmentId: id, endpoint: 'end' as const }, pt: seg[seg.length - 1] },
         ];
       });
+      for (const fl of freeLines) {
+        hints.push({ attach: { segmentId: fl.attach.segmentId, atWorld: fl.end }, pt: fl.end });
+      }
 
       let hover: { x: number; y: number } | null = null;
       let bestD = Infinity;
@@ -420,7 +430,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       }
 
       for (const h of hints) {
-        const isHover = !!hover && hover.x === h.pt.x && hover.y === h.pt.y;
+        const isHover = !!hover && Math.hypot(hover.x - h.pt.x, hover.y - h.pt.y) < 1;
         ctx.strokeStyle = isHover ? 'rgba(0, 255, 136, 0.9)' : 'rgba(0, 255, 136, 0.35)';
         ctx.lineWidth = isHover ? 3 : 2;
         ctx.beginPath();
@@ -926,28 +936,59 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       }
 
       if (tool === 'line2') {
-        // First click: pick nearest endpoint of ANY rail segment (ignore freeLines so they don't affect picking)
+        // First click: pick nearest snap point. Use BASE segments (no freeLines) so hints are stable and the selected start is always used.
         if (!line2Start) {
-          const { allSegments } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, freeLines);
-          if (allSegments.length === 0) return;
-          let best: { segmentIndex: number; endpoint: 'start' | 'end'; pt: { x: number; y: number }; dist: number } | null = null;
+          const { allSegments: baseSegments, segmentIdByIndex: baseIds } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, undefined);
+          type Hint = { attach: import('@/game/editorTypes').FreeLineAttach; pt: { x: number; y: number }; dist: number };
+          const hints: Hint[] = [];
+          for (let si = 0; si < baseSegments.length; si++) {
+            const seg = baseSegments[si];
+            if (!seg || seg.length < 1) continue;
+            const id = baseIds[si];
+            hints.push({ attach: { segmentId: id, endpoint: 'start' }, pt: { x: seg[0].x, y: seg[0].y }, dist: Math.hypot(world.x - seg[0].x, world.y - seg[0].y) });
+            hints.push({ attach: { segmentId: id, endpoint: 'end' }, pt: { x: seg[seg.length - 1].x, y: seg[seg.length - 1].y }, dist: Math.hypot(world.x - seg[seg.length - 1].x, world.y - seg[seg.length - 1].y) });
+          }
+          for (const fl of freeLines) {
+            hints.push({ attach: { segmentId: fl.attach.segmentId, atWorld: fl.end }, pt: fl.end, dist: Math.hypot(world.x - fl.end.x, world.y - fl.end.y) });
+          }
+          const best = hints.length === 0 ? null : hints.reduce((acc, h) => (h.dist < acc.dist ? h : acc), hints[0]);
+          if (!best || best.dist > 45) return;
+          setLine2Start({ attach: best.attach, start: best.pt });
+        } else {
+          // Second click: free end point anywhere in world space (with snapping to any endpoint)
+        const { allSegments, segmentIdByIndex } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, freeLines);
+          let snapEnd: { x: number; y: number } | null = null;
+          let snapTarget: { segmentId: string; endpoint: 'start' | 'end' } | null = null;
+          let bestD = Infinity;
           for (let si = 0; si < allSegments.length; si++) {
             const seg = allSegments[si];
             if (!seg || seg.length < 1) continue;
+            const id = segmentIdByIndex[si];
             const a = seg[0];
             const b = seg[seg.length - 1];
             const da = Math.hypot(world.x - a.x, world.y - a.y);
             const db = Math.hypot(world.x - b.x, world.y - b.y);
-            const candA = { segmentIndex: si, endpoint: 'start' as const, pt: { x: a.x, y: a.y }, dist: da };
-            const candB = { segmentIndex: si, endpoint: 'end' as const, pt: { x: b.x, y: b.y }, dist: db };
-            const cand = candA.dist <= candB.dist ? candA : candB;
-            if (!best || cand.dist < best.dist) best = cand;
+            if (da < bestD) {
+              bestD = da;
+              snapEnd = { x: a.x, y: a.y };
+              snapTarget = { segmentId: id, endpoint: 'start' };
+            }
+            if (db < bestD) {
+              bestD = db;
+              snapEnd = { x: b.x, y: b.y };
+              snapTarget = { segmentId: id, endpoint: 'end' };
+            }
           }
-          if (!best || best.dist > 45) return;
-          setLine2Start({ attach: { segmentIndex: best.segmentIndex, endpoint: best.endpoint }, start: best.pt });
-        } else {
-          // Second click: free end point anywhere in world space
-          setFreeLines(prev => [...prev, { attach: line2Start.attach, end: { x: world.x, y: world.y } }]);
+          const endPoint = bestD <= 45 && snapEnd ? snapEnd : world;
+          setFreeLines(prev => [
+            ...prev,
+            {
+              attach: line2Start.attach,
+              attachWorld: line2Start.start,
+              end: endPoint,
+              target: bestD <= 45 && snapTarget ? snapTarget : undefined,
+            },
+          ]);
           setLine2Start(null);
         }
         return;
@@ -1271,15 +1312,21 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     lastSavedTilesRef.current = JSON.stringify(level.tiles);
     setSmoothSegments(level.smoothSegments ?? []);
     lastSavedSmoothRef.current = JSON.stringify(level.smoothSegments ?? []);
-    // Migrate legacy freeLines (attachTo/start/end) to new attach format if needed
+    // Migrate legacy freeLines (attachTo/start/end or segmentIndex) to attach/target with segmentId
+    const connsForMigration = level.connections
+      ? (() => { const r: Record<string, Set<string>> = {}; for (const [k, arr] of Object.entries(level.connections)) r[k] = new Set(arr as string[]); return r; })()
+      : (rebuildConnectionsFromTiles(level.tiles), railConnectionsRef.current);
+    const { segmentIdByIndex } = convertLevelToGameData(level.tiles, connsForMigration, level.smoothSegments ?? undefined, undefined);
     const loadedFreeLines = (level.freeLines ?? []) as any[];
     const migrated: FreeLineSegment[] = loadedFreeLines.map(fl => {
-      if (fl && fl.attach && fl.end) return fl as FreeLineSegment;
-      if (fl && fl.attachTo && fl.end) {
-        return {
-          attach: { segmentIndex: 0, endpoint: fl.attachTo === 'start' ? 'start' : 'end' },
-          end: fl.end,
-        } as FreeLineSegment;
+      if (!fl || !fl.end) return null;
+      if (fl.attach && fl.attach.segmentId) return fl as FreeLineSegment;
+      if (fl.attach && typeof fl.attach.segmentIndex === 'number') {
+        const id = segmentIdByIndex[fl.attach.segmentIndex];
+        return { ...fl, attach: { ...fl.attach, segmentId: id }, target: fl.target && typeof fl.target.segmentIndex === 'number' ? { segmentId: segmentIdByIndex[fl.target.segmentIndex], endpoint: fl.target.endpoint } : fl.target };
+      }
+      if (fl.attachTo) {
+        return { attach: { segmentId: segmentIdByIndex[0], endpoint: fl.attachTo === 'start' ? 'start' : 'end' }, end: fl.end, target: fl.target };
       }
       return null;
     }).filter(Boolean) as FreeLineSegment[];

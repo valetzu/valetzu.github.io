@@ -30,9 +30,27 @@ export interface SmoothSegment {
   pivotGy: number;
 }
 
+/** Stable id for a rail component (min tile key by gx,gy) so it doesn't change when start tile moves */
+export function componentId(keys: string[]): string {
+  if (keys.length === 0) return '';
+  return keys.slice().sort((a, b) => {
+    const [ax, ay] = parseTileKey(a);
+    const [bx, by] = parseTileKey(b);
+    return ax - bx || ay - by;
+  })[0];
+}
+
+export type FreeLineAttach =
+  | { segmentId: string; endpoint: 'start' | 'end' }
+  | { segmentId: string; atWorld: { x: number; y: number } };
+
 export interface FreeLineSegment {
-  attach: { segmentIndex: number; endpoint: 'start' | 'end' };
+  /** Logical attach reference (segment + endpoint or world point on a segment) */
+  attach: FreeLineAttach;
+  /** Cached world position where the Line 2 started, so it survives rail graph changes */
+  attachWorld?: { x: number; y: number };
   end: { x: number; y: number };
+  target?: { segmentId: string; endpoint: 'start' | 'end' };
 }
 
 export interface EditorLevel {
@@ -267,6 +285,8 @@ export function convertLevelToGameData(
 ): {
   railPoints: { x: number; y: number }[];
   allSegments: { x: number; y: number }[][];
+  /** Stable segment id per index (so Line 2 doesn't break when start tile moves) */
+  segmentIdByIndex: string[];
   obstacles: { type: 'spinner' | 'bouncer'; gx: number; gy: number }[];
   endSegmentIndex: number | null;
   endPointIndex: number | null;
@@ -285,7 +305,8 @@ export function convertLevelToGameData(
 
   if (railKeys.length < 2) {
     const rawRail = railKeys.map(k => keyToWorld(k));
-    return { railPoints: rawRail, allSegments: rawRail.length > 0 ? [rawRail] : [], obstacles, endSegmentIndex: null, endPointIndex: null };
+    const segmentIdByIndex = rawRail.length > 0 ? [componentId(railKeys)] : [];
+    return { railPoints: rawRail, allSegments: rawRail.length > 0 ? [rawRail] : [], segmentIdByIndex, obstacles, endSegmentIndex: null, endPointIndex: null };
   }
 
   const conns = connections && Object.keys(connections).length > 0 ? connections : ({} as Record<string, Set<string>>);
@@ -295,6 +316,7 @@ export function convertLevelToGameData(
   let endSegmentIndex: number | null = null;
   let endPointIndex: number | null = null;
   const allSegments: { x: number; y: number }[][] = [];
+  const segmentIdByIndex: string[] = [];
 
   if (conns && Object.keys(conns).length > 0) {
     const startKey = railKeys.find(k => tiles[k] === 'rail_start')
@@ -311,6 +333,7 @@ export function convertLevelToGameData(
     }
 
     allSegments.push(railPoints);
+    segmentIdByIndex.push(componentId(startOrdered));
     const startSet = new Set(startOrdered);
     let segIdx = 1;
     for (const comp of components) {
@@ -322,6 +345,7 @@ export function convertLevelToGameData(
           endPointIndex = compKeyToIdx[endKey] ?? comp.indexOf(endKey);
         }
         allSegments.push(pts);
+        segmentIdByIndex.push(componentId(comp));
         segIdx++;
       }
     }
@@ -334,6 +358,7 @@ export function convertLevelToGameData(
     const expanded = expandPathWithSmoothSegments(sorted, smoothSegments);
     railPoints = expanded.points;
     allSegments.push(railPoints);
+    segmentIdByIndex.push(componentId(sorted));
     const endKey = railKeys.find(k => tiles[k] === 'rail_end');
     if (endKey && expanded.keyToLastIndex[endKey] != null) {
       endSegmentIndex = 0;
@@ -341,24 +366,80 @@ export function convertLevelToGameData(
     }
   }
 
-  // Apply any attached free-line extensions to whichever segment endpoint they attach to.
+  const segmentIdToIndex: Record<string, number> = {};
+  segmentIdByIndex.forEach((id, i) => { segmentIdToIndex[id] = i; });
+
+  // Apply each freeLine as one segment: insert its geometry at the selected attach point, in order.
+  // Resolve attach by position in path so follow-up connections (and multiple lines from same endpoint) stay correct.
   if (freeLines && freeLines.length > 0) {
-    for (const fl of freeLines) {
-      const seg = allSegments[fl.attach.segmentIndex];
-      if (!seg || seg.length < 1) continue;
-      if (fl.attach.endpoint === 'end') {
-        const startPt = seg[seg.length - 1];
-        const segPts = sampleLineWorld(startPt, fl.end);
-        for (let i = 1; i < segPts.length; i++) seg.push(segPts[i]);
-      } else {
-        const startPt = seg[0];
-        const segPts = sampleLineWorld(fl.end, startPt);
-        allSegments[fl.attach.segmentIndex] = [...segPts.slice(0, -1), ...seg];
+    const path: { x: number; y: number }[] = [...(allSegments[0] ?? [])];
+    if (path.length === 0) {
+      railPoints = allSegments[0] ?? [];
+    } else {
+      const findPathIndex = (world: { x: number; y: number }) => {
+        let bestIdx = 0;
+        let bestD = Infinity;
+        for (let i = 0; i < path.length; i++) {
+          const d = Math.hypot(path[i].x - world.x, path[i].y - world.y);
+          if (d < bestD) { bestD = d; bestIdx = i; }
+        }
+        return bestIdx;
+      };
+
+      for (const fl of freeLines) {
+        let insertAfterIdx: number;
+        let startPt: { x: number; y: number };
+
+        const segIdx = segmentIdToIndex[fl.attach.segmentId];
+
+        if ('endpoint' in fl.attach && segIdx != null) {
+          // Attach to a segment endpoint when that segment still exists
+          const seg = allSegments[segIdx];
+          if (!seg || seg.length < 1) continue;
+          const endpointWorld = fl.attach.endpoint === 'end' ? seg[seg.length - 1] : seg[0];
+          insertAfterIdx = findPathIndex(endpointWorld);
+          startPt = path[insertAfterIdx];
+        } else if ('atWorld' in fl.attach) {
+          // Attach by world position along the current path, independent of segment ids
+          insertAfterIdx = findPathIndex(fl.attach.atWorld);
+          startPt = path[insertAfterIdx];
+        } else if (fl.attachWorld) {
+          // Fallback: use the cached start position from when the line was created,
+          // so moving/rewiring rails doesn't silently drop the free line.
+          insertAfterIdx = findPathIndex(fl.attachWorld);
+          startPt = path[insertAfterIdx];
+        } else {
+          continue;
+        }
+
+        const linePts = sampleLineWorld(startPt, fl.end);
+        if (linePts.length < 2) continue;
+
+        for (let i = 1; i < linePts.length; i++) {
+          path.splice(insertAfterIdx + i, 0, linePts[i]);
+        }
+
+        if (fl.target) {
+          const otherIdx = segmentIdToIndex[fl.target.segmentId];
+          if (otherIdx == null) continue;
+          const otherSeg = allSegments[otherIdx];
+          if (otherSeg && otherSeg.length > 1) {
+            const first = otherSeg[0];
+            const last = otherSeg[otherSeg.length - 1];
+            const df = Math.hypot(fl.end.x - first.x, fl.end.y - first.y);
+            const dl = Math.hypot(fl.end.x - last.x, fl.end.y - last.y);
+            const oriented = df <= dl ? otherSeg : [...otherSeg].reverse();
+            const tailStart = insertAfterIdx + linePts.length;
+            for (let i = 1; i < oriented.length; i++) {
+              path.splice(tailStart + i - 1, 0, oriented[i]);
+            }
+          }
+        }
       }
+      railPoints = path;
+      allSegments[0] = path;
     }
-    // Keep railPoints pointing at segment 0
-    railPoints = allSegments[0] ?? railPoints;
   }
 
-  return { railPoints, allSegments, obstacles, endSegmentIndex, endPointIndex };
+  return { railPoints, allSegments, segmentIdByIndex, obstacles, endSegmentIndex, endPointIndex };
 }
