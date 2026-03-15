@@ -55,6 +55,8 @@ export interface FreeLineSegment {
 
 export interface EditorLevel {
   name: string;
+  /** Stable unique identifier used for music folder paths and deduplication. */
+  id: string;
   tiles: Record<string, TileType>; // "x,y" -> type
   createdAt: number;
   // Optional explicit rail connection graph: tileKey -> array of connected tileKeys.
@@ -63,6 +65,13 @@ export interface EditorLevel {
   smoothSegments?: SmoothSegment[];
   /** World-space line extensions attached to main rail */
   freeLines?: FreeLineSegment[];
+  /** Music filename relative to public/assets/music/customLevels/{id}/ */
+  musicFile?: string;
+}
+
+/** Generate a short random level id that is stable across saves. */
+export function generateLevelId(): string {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
 export function tileKey(gx: number, gy: number): string {

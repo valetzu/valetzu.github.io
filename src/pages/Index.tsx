@@ -1,5 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { WorldType, SaveData, loadSave, saveSave } from '@/game/types';
+import { musicManager } from '@/game/musicManager';
 import GameCanvas from '@/components/GameCanvas';
 import GameMenu from '@/components/GameMenu';
 import LevelEditor from '@/components/LevelEditor';
@@ -34,6 +35,12 @@ const Index = () => {
   const backToMenu = useCallback(() => {
     setPhase('menu');
   }, []);
+
+  useEffect(() => {
+    if (phase === 'menu') {
+      musicManager.playForMenu();
+    }
+  }, [phase]);
 
   if (phase === 'playing') {
     return (

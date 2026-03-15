@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { GameEngine } from '@/game/engine';
 import { WorldType, Upgrades } from '@/game/types';
+import { musicManager } from '@/game/musicManager';
 
 interface GameCanvasProps {
   world: WorldType;
@@ -30,6 +31,8 @@ export default function GameCanvas({ world, upgrades, onGameOver, onBack }: Game
     resize();
     window.addEventListener('resize', resize);
 
+    musicManager.playForWorld(world);
+
     const engine = new GameEngine(canvas, world, upgrades, {
       onGameOver: handleGameOver,
     });
@@ -48,6 +51,7 @@ export default function GameCanvas({ world, upgrades, onGameOver, onBack }: Game
 
     return () => {
       engine.stop();
+      musicManager.stop();
       window.removeEventListener('resize', resize);
       window.removeEventListener('keydown', handleEnter);
     };

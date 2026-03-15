@@ -6,7 +6,9 @@ import {
   convertLevelToGameData,
   SmoothSegment, sampleCircularArcWorld, sampleBezierWorld, keyToWorld,
   FreeLineSegment, sampleLineWorld,
+  generateLevelId,
 } from '@/game/editorTypes';
+import { musicManager } from '@/game/musicManager';
 import { Point, Obstacle, WORLD_CONFIG } from '@/game/types';
 import { GameEngine } from '@/game/engine';
 
@@ -119,6 +121,9 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const lastSavedSmoothRef = useRef<string>('[]');
   const lastSavedFreeLinesRef = useRef<string>('[]');
   const [testError, setTestError] = useState<string | null>(null);
+  const [currentLevelId, setCurrentLevelId] = useState<string>('');
+  const [currentMusicFile, setCurrentMusicFile] = useState<string>('');
+  const [showMusicMenu, setShowMusicMenu] = useState(false);
 
   const [smoothSegments, setSmoothSegments] = useState<SmoothSegment[]>([]);
   const [freeLines, setFreeLines] = useState<FreeLineSegment[]>([]);
@@ -1251,6 +1256,11 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     // Convert tiles to engine-compatible format (already resampled at RAIL_SPACING)
     const { railPoints, allSegments, obstacles: obsData, endSegmentIndex, endPointIndex } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, freeLines);
 
+    // Start level music if configured
+    if (currentLevelId) {
+      musicManager.playForLevel(currentLevelId, currentMusicFile || undefined);
+    }
+
     // Create a custom engine with pre-built rail
     const engine = new GameEngine(canvas, 'overworld', { motor: 0, health: 0, grip: 0, rocket: 0, shield: 0 }, {
       onGameOver: () => { gameOverRef.current = true; },
@@ -1328,6 +1338,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
 
     return () => {
       engine.stop();
+      musicManager.stop();
       window.removeEventListener('resize', resize);
       window.removeEventListener('keydown', handleKey);
     };
@@ -1338,18 +1349,22 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     if (!levelName.trim()) return;
     const existing = loadCustomLevels().find(l => l.name === levelName.trim());
     if (existing && !confirm(`A level named "${levelName.trim()}" already exists. Overwrite it?`)) return;
+    const id = (existing?.id) || currentLevelId || generateLevelId();
     const level: EditorLevel = {
       name: levelName.trim(),
+      id,
       tiles,
       createdAt: Date.now(),
       connections: serializeConnections(),
       smoothSegments,
       freeLines,
+      musicFile: currentMusicFile || undefined,
     };
     saveCustomLevel(level);
     lastSavedTilesRef.current = JSON.stringify(tiles);
     lastSavedSmoothRef.current = JSON.stringify(smoothSegments);
     lastSavedFreeLinesRef.current = JSON.stringify(freeLines);
+    setCurrentLevelId(id);
     setCurrentLevelName(levelName.trim());
     setShowSaveDialog(false);
     setLevelName('');
@@ -1360,18 +1375,22 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       setShowSaveDialog(true);
       return;
     }
+    const id = currentLevelId || generateLevelId();
     const level: EditorLevel = {
       name: currentLevelName,
+      id,
       tiles,
       createdAt: Date.now(),
       connections: serializeConnections(),
       smoothSegments,
       freeLines,
+      musicFile: currentMusicFile || undefined,
     };
     saveCustomLevel(level);
     lastSavedTilesRef.current = JSON.stringify(tiles);
     lastSavedSmoothRef.current = JSON.stringify(smoothSegments);
     lastSavedFreeLinesRef.current = JSON.stringify(freeLines);
+    setCurrentLevelId(id);
   };
 
   const handleLoad = (level: EditorLevel) => {
@@ -1400,6 +1419,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     setFreeLines(migrated);
     lastSavedFreeLinesRef.current = JSON.stringify(migrated);
     setCurrentLevelName(level.name);
+    setCurrentLevelId(level.id || generateLevelId());
+    setCurrentMusicFile(level.musicFile ?? '');
     setShowLoadDialog(false);
     // Restore explicit connections if present; otherwise rebuild from adjacency.
     if (level.connections) {
@@ -1650,6 +1671,62 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
 
         {/* Right: Action buttons */}
         <div className="flex gap-2 items-start">
+          {/* Music selector */}
+          <div className="relative">
+            <button
+              onClick={() => { setShowMusicMenu(v => !v); setShowFileMenu(false); setShowTilesMenu(false); setShowToolsMenu(false); }}
+              className={`px-3 py-2 rounded-lg font-bold text-sm transition-all ${
+                currentMusicFile
+                  ? 'bg-game-accent text-game-bg'
+                  : 'bg-game-card text-game-title border border-game-card-border hover:border-game-accent'
+              }`}
+              title="Level music"
+            >
+              🎵 {currentMusicFile ? currentMusicFile : 'Music'}
+            </button>
+            {showMusicMenu && (
+              <div className="absolute top-full right-0 mt-1 bg-game-card border border-game-card-border rounded-lg p-3 w-72 shadow-lg z-30">
+                <p className="text-game-title text-sm font-bold mb-2">Level Music</p>
+                {currentLevelId ? (
+                  <>
+                    {musicManager.availableTracks.length > 0 && (
+                      <select
+                        value={currentMusicFile}
+                        onChange={e => setCurrentMusicFile(e.target.value)}
+                        className="w-full px-2 py-1.5 rounded bg-game-bg text-game-title border border-game-card-border text-sm mb-2 outline-none focus:border-game-accent"
+                      >
+                        <option value="">— None —</option>
+                        {musicManager.availableTracks.map(t => (
+                          <option key={t.file} value={t.file}>{t.label}</option>
+                        ))}
+                      </select>
+                    )}
+                    <input
+                      type="text"
+                      value={currentMusicFile}
+                      onChange={e => setCurrentMusicFile(e.target.value)}
+                      placeholder="filename.mp3"
+                      className="w-full px-2 py-1.5 rounded bg-game-bg text-game-title border border-game-card-border text-sm outline-none focus:border-game-accent"
+                    />
+                    <p className="text-game-subtitle text-xs mt-1.5 break-all">
+                      Place file at: public/assets/music/customLevels/{currentLevelId}/
+                    </p>
+                    {currentMusicFile && (
+                      <button
+                        onClick={() => setCurrentMusicFile('')}
+                        className="mt-2 text-xs text-game-subtitle hover:text-game-title"
+                      >
+                        ✕ Clear music
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-game-subtitle text-xs">Save the level first to configure music.</p>
+                )}
+              </div>
+            )}
+          </div>
+
           <button
             onClick={() => setSkyOnly(!skyOnly)}
             className={`px-3 py-2 rounded-lg font-bold text-sm transition-all ${
@@ -1762,16 +1839,22 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
                         key={level.name}
                         onClick={() => {
                           if (confirm(`Overwrite level "${level.name}"?`)) {
+                            const id = level.id || currentLevelId || generateLevelId();
                             const newLevel: EditorLevel = {
                               name: level.name,
+                              id,
                               tiles,
                               createdAt: Date.now(),
                               connections: serializeConnections(),
                               smoothSegments,
+                              freeLines,
+                              musicFile: currentMusicFile || undefined,
                             };
                             saveCustomLevel(newLevel);
                             lastSavedTilesRef.current = JSON.stringify(tiles);
                             lastSavedSmoothRef.current = JSON.stringify(smoothSegments);
+                            lastSavedFreeLinesRef.current = JSON.stringify(freeLines);
+                            setCurrentLevelId(id);
                             setCurrentLevelName(level.name);
                             setShowSaveDialog(false);
                             setLevelName('');
