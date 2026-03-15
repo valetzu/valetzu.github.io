@@ -1,0 +1,14 @@
+[
+  { "file": "music_main_menu.mp3", "label": "Main Menu Theme" },
+  { "file": "music_overworld.mp3", "label": "Overworld Theme" },
+  { "file": "music_ice.mp3", "label": "Ice World Theme" },
+  { "file": "music_moon.mp3", "label": "Moon World Theme" },
+  { "file": "xmoto_main.mp3", "label": "1" },
+  { "file": "xmoto_batcave.mp3", "label": "2" },
+  { "file": "xmoto_cubulo.mp3", "label": "3" },
+  { "file": "xmoto_legolodio.mp3", "label": "4" },
+  { "file": "xmoto_madeirastew.mp3", "label": "5" },
+  { "file": "xmoto_ridealong.mp3", "label": "6" },
+  { "file": "xmoto_speeditup.mp3", "label": "7" },
+  { "file": "xmoto_legolodio.mp3", "label": "8" }
+]

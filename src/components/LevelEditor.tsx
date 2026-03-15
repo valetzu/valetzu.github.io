@@ -8,7 +8,7 @@ import {
   FreeLineSegment, sampleLineWorld,
   generateLevelId,
 } from '@/game/editorTypes';
-import { musicManager } from '@/game/musicManager';
+import { musicManager, availableTracks } from '@/game/musicManager';
 import { Point, Obstacle, WORLD_CONFIG } from '@/game/types';
 import { GameEngine } from '@/game/engine';
 
@@ -1257,8 +1257,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     const { railPoints, allSegments, obstacles: obsData, endSegmentIndex, endPointIndex } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, freeLines);
 
     // Start level music if configured
-    if (currentLevelId) {
-      musicManager.playForLevel(currentLevelId, currentMusicFile || undefined);
+    if (currentMusicFile) {
+      musicManager.playForLevel(currentMusicFile);
     }
 
     // Create a custom engine with pre-built rail
@@ -1671,61 +1671,20 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
 
         {/* Right: Action buttons */}
         <div className="flex gap-2 items-start">
-          {/* Music selector */}
-          <div className="relative">
-            <button
-              onClick={() => { setShowMusicMenu(v => !v); setShowFileMenu(false); setShowTilesMenu(false); setShowToolsMenu(false); }}
-              className={`px-3 py-2 rounded-lg font-bold text-sm transition-all ${
-                currentMusicFile
-                  ? 'bg-game-accent text-game-bg'
-                  : 'bg-game-card text-game-title border border-game-card-border hover:border-game-accent'
-              }`}
-              title="Level music"
-            >
-              🎵 {currentMusicFile ? currentMusicFile : 'Music'}
-            </button>
-            {showMusicMenu && (
-              <div className="absolute top-full right-0 mt-1 bg-game-card border border-game-card-border rounded-lg p-3 w-72 shadow-lg z-30">
-                <p className="text-game-title text-sm font-bold mb-2">Level Music</p>
-                {currentLevelId ? (
-                  <>
-                    {musicManager.availableTracks.length > 0 && (
-                      <select
-                        value={currentMusicFile}
-                        onChange={e => setCurrentMusicFile(e.target.value)}
-                        className="w-full px-2 py-1.5 rounded bg-game-bg text-game-title border border-game-card-border text-sm mb-2 outline-none focus:border-game-accent"
-                      >
-                        <option value="">— None —</option>
-                        {musicManager.availableTracks.map(t => (
-                          <option key={t.file} value={t.file}>{t.label}</option>
-                        ))}
-                      </select>
-                    )}
-                    <input
-                      type="text"
-                      value={currentMusicFile}
-                      onChange={e => setCurrentMusicFile(e.target.value)}
-                      placeholder="filename.mp3"
-                      className="w-full px-2 py-1.5 rounded bg-game-bg text-game-title border border-game-card-border text-sm outline-none focus:border-game-accent"
-                    />
-                    <p className="text-game-subtitle text-xs mt-1.5 break-all">
-                      Place file at: public/assets/music/customLevels/{currentLevelId}/
-                    </p>
-                    {currentMusicFile && (
-                      <button
-                        onClick={() => setCurrentMusicFile('')}
-                        className="mt-2 text-xs text-game-subtitle hover:text-game-title"
-                      >
-                        ✕ Clear music
-                      </button>
-                    )}
-                  </>
-                ) : (
-                  <p className="text-game-subtitle text-xs">Save the level first to configure music.</p>
-                )}
-              </div>
-            )}
-          </div>
+          {/* Music selector button */}
+          <button
+            onClick={() => { setShowMusicMenu(true); setShowFileMenu(false); setShowTilesMenu(false); setShowToolsMenu(false); }}
+            className={`px-3 py-2 rounded-lg font-bold text-sm transition-all ${
+              currentMusicFile
+                ? 'bg-game-accent text-game-bg'
+                : 'bg-game-card text-game-title border border-game-card-border hover:border-game-accent'
+            }`}
+            title="Select level music"
+          >
+            🎵 {currentMusicFile
+              ? (availableTracks.find(t => t.file === currentMusicFile)?.label ?? currentMusicFile)
+              : 'Music'}
+          </button>
 
           <button
             onClick={() => setSkyOnly(!skyOnly)}
@@ -1811,6 +1770,51 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           +
         </button>
       </div>
+
+      {/* Music Selection Dialog */}
+      {showMusicMenu && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-20" onClick={() => setShowMusicMenu(false)}>
+          <div className="bg-game-card border-2 border-game-card-border rounded-2xl p-6 w-96 max-h-[70vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-game-title text-xl font-bold">🎵 Level Music</h3>
+              <button onClick={() => setShowMusicMenu(false)} className="text-game-subtitle hover:text-game-title text-lg">✕</button>
+            </div>
+            <p className="text-game-subtitle text-xs mb-3">
+              Place music files in <span className="text-game-title font-mono">public/assets/music/</span> and add them to <span className="text-game-title font-mono">music_catalog.json</span>.
+            </p>
+            <div className="overflow-y-auto space-y-1 flex-1">
+              {/* None option */}
+              <button
+                onClick={() => { setCurrentMusicFile(''); setShowMusicMenu(false); }}
+                className={`w-full text-left px-3 py-2 rounded-lg text-sm font-bold transition-all ${
+                  !currentMusicFile
+                    ? 'bg-game-accent text-game-bg'
+                    : 'bg-game-bg text-game-subtitle hover:text-game-title border border-game-card-border'
+                }`}
+              >
+                — None —
+              </button>
+              {availableTracks.length === 0 && (
+                <p className="text-game-subtitle text-xs text-center py-4">No tracks in catalog yet.</p>
+              )}
+              {availableTracks.map(track => (
+                <button
+                  key={track.file}
+                  onClick={() => { setCurrentMusicFile(track.file); setShowMusicMenu(false); }}
+                  className={`w-full text-left px-3 py-2.5 rounded-lg transition-all ${
+                    currentMusicFile === track.file
+                      ? 'bg-game-accent text-game-bg'
+                      : 'bg-game-bg border border-game-card-border hover:border-game-accent'
+                  }`}
+                >
+                  <div className={`font-bold text-sm ${currentMusicFile === track.file ? 'text-game-bg' : 'text-game-title'}`}>{track.label}</div>
+                  <div className={`text-xs font-mono mt-0.5 ${currentMusicFile === track.file ? 'text-game-bg/70' : 'text-game-subtitle'}`}>{track.file}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Save Dialog */}
       {showSaveDialog && (
