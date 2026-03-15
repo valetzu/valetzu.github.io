@@ -1277,14 +1277,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     // Add obstacles - convert grid coords to world coords matching the resampled rail
     let nextEditorObsId = 1;
     for (const obs of obsData) {
-      const wx = obs.gx * GRID_SIZE;
-      const wy = obs.gy * GRID_SIZE;
-      // Find closest rail x to determine the correct world-x in the resampled space
-      // Since resampled rail maps linearly from editor x, we can use the same x offset
-      const minRailX = railPoints.length > 0 ? railPoints[0].x : 0;
-      const maxRailX = railPoints.length > 0 ? railPoints[railPoints.length - 1].x : 0;
-      // Scale obstacle x relative to rail range
-      const obsWorldX = Math.max(minRailX, Math.min(maxRailX, wx));
+      const obsWorldX = (obs.gx + 0.5) * GRID_SIZE;
+      const wy = (obs.gy + 0.5) * GRID_SIZE;
       
       if (obs.type === 'spinner') {
         engine.obstacles.push({
