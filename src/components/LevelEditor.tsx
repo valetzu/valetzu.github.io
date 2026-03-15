@@ -8,7 +8,7 @@ import {
   FreeLineSegment, sampleLineWorld,
   generateLevelId,
 } from '@/game/editorTypes';
-import { musicManager, availableTracks } from '@/game/musicManager';
+import { musicManager, getAvailableTracks, addToCatalog } from '@/game/musicManager';
 import { Point, Obstacle, WORLD_CONFIG } from '@/game/types';
 import { GameEngine } from '@/game/engine';
 
@@ -1682,7 +1682,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
             title="Select level music"
           >
             🎵 {currentMusicFile
-              ? (availableTracks.find(t => t.file === currentMusicFile)?.label ?? currentMusicFile)
+              ? (getAvailableTracks().find(t => t.file === currentMusicFile)?.label ?? currentMusicFile)
               : 'Music'}
           </button>
 
@@ -1794,13 +1794,13 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
               >
                 — None —
               </button>
-              {availableTracks.length === 0 && (
-                <p className="text-game-subtitle text-xs text-center py-4">No tracks in catalog yet.</p>
+              {getAvailableTracks().length === 0 && (
+                <p className="text-game-subtitle text-xs text-center py-4">No music files found in public/assets/music/.</p>
               )}
-              {availableTracks.map(track => (
+              {getAvailableTracks().map(track => (
                 <button
                   key={track.file}
-                  onClick={() => { setCurrentMusicFile(track.file); setShowMusicMenu(false); }}
+                  onClick={() => { setCurrentMusicFile(track.file); addToCatalog(track.file); setShowMusicMenu(false); }}
                   className={`w-full text-left px-3 py-2.5 rounded-lg transition-all ${
                     currentMusicFile === track.file
                       ? 'bg-game-accent text-game-bg'
