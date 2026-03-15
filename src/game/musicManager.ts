@@ -2,6 +2,7 @@ import catalogJson from './configs/music/music_catalog.json';
 import endlessConfig from './configs/music/gamemodes/music_endless.json';
 import menuConfig from './configs/music/menus/music_main_menu.json';
 import type { WorldType } from './types';
+import { loadSettings } from './settings';
 
 export interface MusicTrack {
   file: string;
@@ -92,6 +93,7 @@ class MusicManager {
     this.stop();
     this.audio = new Audio(src);
     this.audio.loop = loop;
+    this.audio.volume = loadSettings().musicVolume;
     this.currentSrc = src;
     try {
       await this.audio.play();

@@ -4,6 +4,7 @@ import { musicManager } from '@/game/musicManager';
 import GameCanvas from '@/components/GameCanvas';
 import GameMenu from '@/components/GameMenu';
 import LevelEditor from '@/components/LevelEditor';
+import SettingsMenu from '@/components/SettingsMenu';
 
 type Phase = 'menu' | 'playing' | 'editor';
 
@@ -11,6 +12,7 @@ const Index = () => {
   const [phase, setPhase] = useState<Phase>('menu');
   const [save, setSave] = useState<SaveData>(loadSave);
   const [world, setWorld] = useState<WorldType>('overworld');
+  const [showSettings, setShowSettings] = useState(false);
 
   const startGame = useCallback((w: WorldType) => {
     setWorld(w);
@@ -57,7 +59,18 @@ const Index = () => {
     return <LevelEditor onBack={backToMenu} />;
   }
 
-  return <GameMenu save={save} onStartGame={startGame} onUpdateSave={setSave} onOpenEditor={() => setPhase('editor')} />;
+  return (
+    <>
+      <GameMenu
+        save={save}
+        onStartGame={startGame}
+        onUpdateSave={setSave}
+        onOpenEditor={() => setPhase('editor')}
+        onOpenSettings={() => setShowSettings(true)}
+      />
+      {showSettings && <SettingsMenu onClose={() => setShowSettings(false)} />}
+    </>
+  );
 };
 
 export default Index;

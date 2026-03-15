@@ -66,6 +66,7 @@ export class GameEngine {
   lastTime = 0;
   animFrame = 0;
   running = false;
+  paused = false;
   gameOver = false;
   flashTimer = 0;
 
@@ -235,13 +236,22 @@ export class GameEngine {
     if (this.animFrame) cancelAnimationFrame(this.animFrame);
   }
 
+  pause() {
+    this.paused = true;
+  }
+
+  resume() {
+    this.paused = false;
+    this.lastTime = performance.now(); // prevent dt spike after pause
+  }
+
   loop = () => {
     if (!this.running) return;
     const now = performance.now();
     const dt = Math.min((now - this.lastTime) / 1000, 0.05);
     this.lastTime = now;
 
-    if (!this.gameOver && !this.levelCompleted) {
+    if (!this.paused && !this.gameOver && !this.levelCompleted) {
       this.update(dt);
     }
     this.render();

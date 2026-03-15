@@ -10,11 +10,12 @@ interface GameMenuProps {
   onStartGame: (world: WorldType) => void;
   onUpdateSave: (save: SaveData) => void;
   onOpenEditor: () => void;
+  onOpenSettings: () => void;
 }
 
 type MenuView = 'main' | 'shop';
 
-export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor }: GameMenuProps) {
+export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor, onOpenSettings }: GameMenuProps) {
   const [view, setView] = useState<MenuView>('main');
 
   const buyUpgrade = (key: keyof Upgrades) => {
@@ -139,6 +140,13 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
           className="flex-1 py-4 rounded-xl bg-game-bar-bg text-game-title font-bold text-xl border-2 border-game-card-border hover:border-game-accent active:scale-[0.98] transition-all"
         >
           🗺️ Editor
+        </button>
+        <button
+          onClick={onOpenSettings}
+          className="py-4 px-5 rounded-xl bg-game-bar-bg text-game-title font-bold text-xl border-2 border-game-card-border hover:border-game-accent active:scale-[0.98] transition-all"
+          title="Settings"
+        >
+          ⚙
         </button>
       </div>
 
