@@ -139,6 +139,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
 
   const [obstacleParams, setObstacleParams] = useState<Record<string, ObstacleParams>>({});
   const [selectedObstacleKey, setSelectedObstacleKey] = useState<string | null>(null);
+  // Params carried when "picking up" an obstacle to move it
+  const pendingObstacleParamsRef = useRef<ObstacleParams | null>(null);
 
   const [smoothSegments, setSmoothSegments] = useState<SmoothSegment[]>([]);
   const [freeLines, setFreeLines] = useState<FreeLineSegment[]>([]);
@@ -1076,12 +1078,24 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         return;
       }
 
-      // None tool: click on obstacle tile to select it (for inspector)
+      // None tool: first click selects, second click on selected tile "picks it up"
       if (tool === 'none') {
         const key = tileKey(gx, gy);
         const tileType = tiles[key];
         if (tileType && obstacleDefMap.has(tileType)) {
-          setSelectedObstacleKey(prev => prev === key ? null : key);
+          if (selectedObstacleKey === key) {
+            // Second click: pick up — remove tile, carry its params, switch to that obstacle tool
+            pendingObstacleParamsRef.current = obstacleParams[key]
+              ? { ...obstacleParams[key] }
+              : null;
+            removeRailConnections(key);
+            setSelectedObstacleKey(null);
+            setObstacleParams(prev => { const next = { ...prev }; delete next[key]; return next; });
+            setTiles(prev => { const next = { ...prev }; delete next[key]; return next; });
+            setTool(tileType as EditorTool);
+          } else {
+            setSelectedObstacleKey(key);
+          }
         } else {
           setSelectedObstacleKey(null);
         }
@@ -1260,6 +1274,12 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         return next;
       });
     } else if (tool === 'rail' || obstacleDefMap.has(tool)) {
+      // Apply carried params if this is the first placement after a "pick up"
+      if (obstacleDefMap.has(tool) && pendingObstacleParamsRef.current) {
+        const carried = pendingObstacleParamsRef.current;
+        pendingObstacleParamsRef.current = null;
+        setObstacleParams(prev => ({ ...prev, [key]: carried }));
+      }
       const isRail = tool === 'rail';
       if (isRail) {
         // Connect to last placed rail if adjacent
