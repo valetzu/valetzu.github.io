@@ -64,6 +64,7 @@ export class GameEngine {
   shieldCharges = 0;
 
   lastTime = 0;
+  lastDt = 0.016;
   animFrame = 0;
   running = false;
   paused = false;
@@ -250,6 +251,7 @@ export class GameEngine {
     const now = performance.now();
     const dt = Math.min((now - this.lastTime) / 1000, 0.05);
     this.lastTime = now;
+    this.lastDt = dt;
 
     if (!this.paused && !this.gameOver && !this.levelCompleted) {
       this.update(dt);
@@ -552,8 +554,9 @@ export class GameEngine {
           return;
         }
       } else if (obs.type === 'laser') {
-        const phase = (obs.angle ?? 0) % (Math.PI * 2);
-        if (phase <= Math.PI) continue; // beam is off — no collision
+        const warnRadC = obs.bounceSpeed * (obs.warningTime ?? 2.0);
+        const phaseC = (obs.angle ?? 0) % (warnRadC + Math.PI);
+        if (phaseC < warnRadC) continue; // still in warning phase — beam off
         const ptSegDistSqL = (px: number, py: number, ax: number, ay: number, bx: number, by: number) => {
           const dx = bx - ax, dy = by - ay;
           const lenSq = dx * dx + dy * dy;
@@ -812,15 +815,15 @@ export class GameEngine {
       if (usedSprite) {
         // Sprite handled; continue to next obstacle.
         if (obs.type === 'spinner') {
-          obs.angle += obs.rotSpeed * 0.016;
+          obs.angle += obs.rotSpeed * this.lastDt;
         } else if (obs.type === 'bouncer' || obs.type === 'pendulum') {
-          obs.angle += obs.bounceSpeed * 0.016;
+          obs.angle += obs.bounceSpeed * this.lastDt;
         }
         continue;
       }
 
       if (obs.type === 'spinner') {
-        obs.angle += obs.rotSpeed * 0.016;
+        obs.angle += obs.rotSpeed * this.lastDt;
         ctx.save();
         ctx.translate(screenX, obs.y - cy);
         ctx.rotate(obs.rotation ?? 0);
@@ -876,7 +879,7 @@ export class GameEngine {
         ctx.restore();
 
       } else if (obs.type === 'bouncer') {
-        obs.angle += obs.bounceSpeed * 0.016;
+        obs.angle += obs.bounceSpeed * this.lastDt;
         const localOffset = Math.sin(obs.angle) * obs.amplitude;
         ctx.save();
         ctx.translate(screenX, obs.baseY - cy);
@@ -920,7 +923,7 @@ export class GameEngine {
         ctx.restore();
 
       } else if (obs.type === 'pendulum') {
-        obs.angle += obs.bounceSpeed * 0.016;
+        obs.angle += obs.bounceSpeed * this.lastDt;
         const currentSwing = (obs.swingAngle ?? 0.8) * Math.sin(obs.angle);
         const cableLen = obs.cableLength ?? 120;
         const bobR = obs.bobRadius ?? obs.radius;
@@ -970,10 +973,15 @@ export class GameEngine {
         ctx.restore();
 
       } else if (obs.type === 'laser') {
-        obs.angle += obs.bounceSpeed * 0.016;
-        const phase = obs.angle % (Math.PI * 2);
-        const isActive = phase > Math.PI;
-        const isWarning = phase > Math.PI * 0.65 && !isActive;
+        obs.angle += obs.bounceSpeed * this.lastDt;
+        // Cycle = [warning: warningTime s] + [active beam: π/bounceSpeed s]
+        // angle advances at ~bounceSpeed rad/s, so warningTime s = bounceSpeed*warningTime rad
+        const warnRad = obs.bounceSpeed * (obs.warningTime ?? 2.0);
+        const activeRad = Math.PI;
+        const totalCycle = warnRad + activeRad;
+        const phase = obs.angle % totalCycle;
+        const isActive = phase >= warnRad;
+        const isWarning = !isActive;
 
         const baseDir = obs.beamDirection === 'left' ? Math.PI : 0;
         const beamAngle = baseDir + (obs.rotation ?? 0);

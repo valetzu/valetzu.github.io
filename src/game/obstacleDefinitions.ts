@@ -20,7 +20,7 @@ export interface SpinnerParams    { obstacleType: 'spinner';    armLength: numbe
 export interface BouncerParams    { obstacleType: 'bouncer';    amplitude: number; bounceSpeed: number; radius: number; rotation: number }
 export interface PendulumParams   { obstacleType: 'pendulum';   cableLength: number; swingAngle: number; bobRadius: number; swingSpeed: number; rotation: number }
 export interface CrusherParams    { obstacleType: 'crusher';    zoneWidth: number; zoneHeight: number; rotation: number }
-export interface LaserParams      { obstacleType: 'laser';      beamLength: number; direction: 'left' | 'right'; cycleSpeed: number; rotation: number }
+export interface LaserParams      { obstacleType: 'laser';      beamLength: number; direction: 'left' | 'right'; cycleSpeed: number; warningTime: number; rotation: number }
 export interface SwoopParams      { obstacleType: 'swoop';      patrolWidth: number; patrolHeight: number; diveDepth: number; rotation: number }
 export interface OrbiterParams    { obstacleType: 'orbiter';    orbitRadius: number; orbRadius: number; rotation: number }
 export interface BoulderParams    { obstacleType: 'boulder';    radius: number; rotation: number }
@@ -320,12 +320,13 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
     label: 'Laser',
     emoji: '🔦',
     tileColor: 'rgba(255,50,50,0.3)',
-    defaultParams: { obstacleType: 'laser', beamLength: 200, direction: 'right', cycleSpeed: 1.5, rotation: 0 } as LaserParams,
+    defaultParams: { obstacleType: 'laser', beamLength: 200, direction: 'right', cycleSpeed: 1.5, warningTime: 2.0, rotation: 0 } as LaserParams,
     paramMeta: {
-      beamLength:  { label: 'Beam Length',  min: 20, max: 600, step: 10  },
-      direction:   { label: 'Direction',    type: 'select', options: ['left', 'right'] },
-      cycleSpeed:  { label: 'Cycle Speed',  min: 0.2, max: 5, step: 0.1  },
-      rotation:    { label: 'Initial Rotation (°)', min: 0, max: 360, step: 1 },
+      beamLength:   { label: 'Beam Length',        min: 20,  max: 600, step: 10  },
+      direction:    { label: 'Direction',           type: 'select', options: ['left', 'right'] },
+      cycleSpeed:   { label: 'Cycle Speed',         min: 0.2, max: 5,   step: 0.1  },
+      warningTime:  { label: 'Warning Time (sec)',  min: 0.5, max: 8,   step: 0.5  },
+      rotation:     { label: 'Initial Rotation (°)', min: 0, max: 360, step: 1 },
     },
     getReach(params: LaserParams): ObstacleReachZone[] {
       const dx = params.direction === 'right' ? params.beamLength : -params.beamLength;
@@ -334,7 +335,7 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
       ];
     },
     toGameObstacle(id, worldX, worldY, params: LaserParams): Obstacle {
-      return { id, typeId: 'obstacle.laser', type: 'laser', x: worldX, y: worldY, radius: 12, angle: 0, rotation: (params.rotation ?? 0) * Math.PI / 180, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: params.cycleSpeed ?? 1.5, armLength: params.beamLength, hit: false, hp: 1, beamLength: params.beamLength, beamDirection: params.direction };
+      return { id, typeId: 'obstacle.laser', type: 'laser', x: worldX, y: worldY, radius: 12, angle: 0, rotation: (params.rotation ?? 0) * Math.PI / 180, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: params.cycleSpeed ?? 1.5, armLength: params.beamLength, hit: false, hp: 1, beamLength: params.beamLength, beamDirection: params.direction, warningTime: params.warningTime ?? 2.0 };
     },
   } as ObstacleDefinition<LaserParams>,
 

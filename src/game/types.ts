@@ -55,6 +55,7 @@ export interface Obstacle {
   dropZoneHeight?: number;
   zoneWidth?: number;
   zoneHeight?: number;
+  warningTime?: number;
 }
 
 export const DEFAULT_UPGRADES: Upgrades = {
