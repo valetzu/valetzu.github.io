@@ -335,7 +335,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       const key = tileKey(hoverGx, hoverGy);
       const def = obstacleDefMap.get(tool);
       if (def) {
-        const params = resolveParams(tool, obstacleParams[key]);
+        const params = pendingObstacleParamsRef.current ?? resolveParams(tool, obstacleParams[key]);
         if (params) {
           const worldX = (hoverGx + 0.5) * GRID_SIZE;
           const worldY = (hoverGy + 0.5) * GRID_SIZE;
@@ -1275,10 +1275,15 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       });
     } else if (tool === 'rail' || obstacleDefMap.has(tool)) {
       // Apply carried params if this is the first placement after a "pick up"
-      if (obstacleDefMap.has(tool) && pendingObstacleParamsRef.current) {
+      const isRelocation = obstacleDefMap.has(tool) && pendingObstacleParamsRef.current !== null;
+      if (isRelocation) {
         const carried = pendingObstacleParamsRef.current;
         pendingObstacleParamsRef.current = null;
         setObstacleParams(prev => ({ ...prev, [key]: carried }));
+        setTiles(prev => ({ ...prev, [key]: tool as TileType }));
+        setTool('none');
+        setSelectedObstacleKey(key);
+        return;
       }
       const isRail = tool === 'rail';
       if (isRail) {
