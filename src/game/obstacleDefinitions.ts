@@ -20,7 +20,7 @@ export interface SpinnerParams    { obstacleType: 'spinner';    armLength: numbe
 export interface BouncerParams    { obstacleType: 'bouncer';    amplitude: number; bounceSpeed: number; radius: number; rotation: number }
 export interface PendulumParams   { obstacleType: 'pendulum';   cableLength: number; swingAngle: number; bobRadius: number; swingSpeed: number; rotation: number }
 export interface CrusherParams    { obstacleType: 'crusher';    zoneWidth: number; zoneHeight: number; rotation: number }
-export interface LaserParams      { obstacleType: 'laser';      beamLength: number; direction: 'left' | 'right'; rotation: number }
+export interface LaserParams      { obstacleType: 'laser';      beamLength: number; direction: 'left' | 'right'; cycleSpeed: number; rotation: number }
 export interface SwoopParams      { obstacleType: 'swoop';      patrolWidth: number; patrolHeight: number; diveDepth: number; rotation: number }
 export interface OrbiterParams    { obstacleType: 'orbiter';    orbitRadius: number; orbRadius: number; rotation: number }
 export interface BoulderParams    { obstacleType: 'boulder';    radius: number; rotation: number }
@@ -86,8 +86,14 @@ export function drawReach(
   ctx: CanvasRenderingContext2D,
   zones: ObstacleReachZone[],
   screenX: number,
-  screenY: number
+  screenY: number,
+  rotationRad?: number
 ): void {
+  // Translate to obstacle center, optionally rotate, then draw all zones at (0,0)
+  ctx.save();
+  ctx.translate(screenX, screenY);
+  if (rotationRad) ctx.rotate(rotationRad);
+
   for (const zone of zones) {
     ctx.save();
     ctx.setLineDash([5, 4]);
@@ -99,7 +105,7 @@ export function drawReach(
         ctx.fillStyle = `rgba(${r},${g},${b},0.18)`;
         ctx.strokeStyle = `rgba(${r},${g},${b},0.65)`;
         ctx.beginPath();
-        ctx.arc(screenX, screenY, zone.radius, 0, Math.PI * 2);
+        ctx.arc(0, 0, zone.radius, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
         break;
@@ -108,16 +114,15 @@ export function drawReach(
         const [r, g, b] = hexToRgb(zone.color);
         ctx.fillStyle = `rgba(${r},${g},${b},0.18)`;
         ctx.strokeStyle = `rgba(${r},${g},${b},0.65)`;
-        // Draw ring using two arcs with even-odd fill
         ctx.beginPath();
-        ctx.arc(screenX, screenY, zone.outerRadius, 0, Math.PI * 2);
-        ctx.arc(screenX, screenY, zone.innerRadius, 0, Math.PI * 2, true);
+        ctx.arc(0, 0, zone.outerRadius, 0, Math.PI * 2);
+        ctx.arc(0, 0, zone.innerRadius, 0, Math.PI * 2, true);
         ctx.fill('evenodd');
         ctx.beginPath();
-        ctx.arc(screenX, screenY, zone.outerRadius, 0, Math.PI * 2);
+        ctx.arc(0, 0, zone.outerRadius, 0, Math.PI * 2);
         ctx.stroke();
         ctx.beginPath();
-        ctx.arc(screenX, screenY, zone.innerRadius, 0, Math.PI * 2);
+        ctx.arc(0, 0, zone.innerRadius, 0, Math.PI * 2);
         ctx.stroke();
         break;
       }
@@ -125,8 +130,8 @@ export function drawReach(
         const [r, g, b] = hexToRgb(zone.color);
         ctx.strokeStyle = `rgba(${r},${g},${b},0.65)`;
         ctx.fillStyle = `rgba(${r},${g},${b},0.12)`;
-        const ox = screenX + zone.offsetX;
-        const oy = screenY + zone.offsetY;
+        const ox = zone.offsetX;
+        const oy = zone.offsetY;
         ctx.beginPath();
         ctx.moveTo(ox, oy);
         ctx.arc(ox, oy, zone.radius, zone.startAngle, zone.startAngle + zone.span);
@@ -139,8 +144,8 @@ export function drawReach(
         const [r, g, b] = hexToRgb(zone.color);
         ctx.fillStyle = `rgba(${r},${g},${b},0.18)`;
         ctx.strokeStyle = `rgba(${r},${g},${b},0.65)`;
-        const rx = screenX + zone.offsetX - zone.width / 2;
-        const ry = screenY + zone.offsetY - zone.height / 2;
+        const rx = zone.offsetX - zone.width / 2;
+        const ry = zone.offsetY - zone.height / 2;
         ctx.fillRect(rx, ry, zone.width, zone.height);
         ctx.strokeRect(rx, ry, zone.width, zone.height);
         break;
@@ -150,14 +155,16 @@ export function drawReach(
         ctx.strokeStyle = `rgba(${r},${g},${b},0.65)`;
         ctx.lineWidth = zone.thickness;
         ctx.beginPath();
-        ctx.moveTo(screenX, screenY);
-        ctx.lineTo(screenX + zone.dx, screenY + zone.dy);
+        ctx.moveTo(0, 0);
+        ctx.lineTo(zone.dx, zone.dy);
         ctx.stroke();
         break;
       }
     }
     ctx.restore();
   }
+
+  ctx.restore(); // undo translate + rotate
 }
 
 // Parse "#rrggbb" or named color into [r,g,b].  Falls back to orange on failure.
@@ -313,11 +320,12 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
     label: 'Laser',
     emoji: '🔦',
     tileColor: 'rgba(255,50,50,0.3)',
-    defaultParams: { obstacleType: 'laser', beamLength: 200, direction: 'right', rotation: 0 } as LaserParams,
+    defaultParams: { obstacleType: 'laser', beamLength: 200, direction: 'right', cycleSpeed: 1.5, rotation: 0 } as LaserParams,
     paramMeta: {
-      beamLength: { label: 'Beam Length', min: 20, max: 600, step: 10 },
-      direction:  { label: 'Direction',   type: 'select', options: ['left', 'right'] },
-      rotation:   { label: 'Initial Rotation (°)', min: 0, max: 360, step: 1 },
+      beamLength:  { label: 'Beam Length',  min: 20, max: 600, step: 10  },
+      direction:   { label: 'Direction',    type: 'select', options: ['left', 'right'] },
+      cycleSpeed:  { label: 'Cycle Speed',  min: 0.2, max: 5, step: 0.1  },
+      rotation:    { label: 'Initial Rotation (°)', min: 0, max: 360, step: 1 },
     },
     getReach(params: LaserParams): ObstacleReachZone[] {
       const dx = params.direction === 'right' ? params.beamLength : -params.beamLength;
@@ -326,7 +334,7 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
       ];
     },
     toGameObstacle(id, worldX, worldY, params: LaserParams): Obstacle {
-      return { id, typeId: 'obstacle.laser', type: 'laser', x: worldX, y: worldY, radius: 12, angle: 0, rotation: (params.rotation ?? 0) * Math.PI / 180, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: params.beamLength, hit: false, hp: 1, beamLength: params.beamLength, beamDirection: params.direction };
+      return { id, typeId: 'obstacle.laser', type: 'laser', x: worldX, y: worldY, radius: 12, angle: 0, rotation: (params.rotation ?? 0) * Math.PI / 180, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: params.cycleSpeed ?? 1.5, armLength: params.beamLength, hit: false, hp: 1, beamLength: params.beamLength, beamDirection: params.direction };
     },
   } as ObstacleDefinition<LaserParams>,
 

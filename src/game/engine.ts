@@ -551,6 +551,27 @@ export class GameEngine {
           this.hitPassenger(obs);
           return;
         }
+      } else if (obs.type === 'laser') {
+        const phase = (obs.angle ?? 0) % (Math.PI * 2);
+        if (phase <= Math.PI) continue; // beam is off — no collision
+        const ptSegDistSqL = (px: number, py: number, ax: number, ay: number, bx: number, by: number) => {
+          const dx = bx - ax, dy = by - ay;
+          const lenSq = dx * dx + dy * dy;
+          if (lenSq === 0) return (px - ax) ** 2 + (py - ay) ** 2;
+          const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+          return (px - ax - t * dx) ** 2 + (py - ay - t * dy) ** 2;
+        };
+        const baseDir = obs.beamDirection === 'left' ? Math.PI : 0;
+        const beamAngle = baseDir + (obs.rotation ?? 0);
+        const beamLen = obs.beamLength ?? obs.armLength;
+        const beamEndX = obs.x + Math.cos(beamAngle) * beamLen;
+        const beamEndY = obs.y + Math.sin(beamAngle) * beamLen;
+        const BEAM_HALF = 5;
+        const dSq = ptSegDistSqL(cx, cy, obs.x, obs.y, beamEndX, beamEndY);
+        if (dSq < (HIT_RADIUS + BEAM_HALF) ** 2) {
+          this.hitPassenger(obs);
+          return;
+        }
       } else {
         hitDist = Math.sqrt((cx - obs.x) ** 2 + (cy - obs.y) ** 2);
         if (hitDist < HIT_RADIUS + obs.radius) {
@@ -947,6 +968,81 @@ export class GameEngine {
         ctx.stroke();
 
         ctx.restore();
+
+      } else if (obs.type === 'laser') {
+        obs.angle += obs.bounceSpeed * 0.016;
+        const phase = obs.angle % (Math.PI * 2);
+        const isActive = phase > Math.PI;
+        const isWarning = phase > Math.PI * 0.65 && !isActive;
+
+        const baseDir = obs.beamDirection === 'left' ? Math.PI : 0;
+        const beamAngle = baseDir + (obs.rotation ?? 0);
+        const beamLen = obs.beamLength ?? obs.armLength;
+        const pivotX = screenX;
+        const pivotY = obs.y - cy;
+        const beamEndX = pivotX + Math.cos(beamAngle) * beamLen;
+        const beamEndY = pivotY + Math.sin(beamAngle) * beamLen;
+
+        // Emitter body (rotated to face beam direction)
+        ctx.save();
+        ctx.translate(pivotX, pivotY);
+        ctx.rotate(beamAngle);
+        ctx.fillStyle = '#444';
+        ctx.fillRect(-10, -8, 18, 16);
+        ctx.fillStyle = '#777';
+        ctx.fillRect(6, -5, 8, 10);
+        ctx.strokeStyle = '#999';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(-10, -8, 18, 16);
+        // Lens dot
+        ctx.fillStyle = isActive ? '#ff4444' : (isWarning ? '#ff9944' : '#888');
+        ctx.beginPath();
+        ctx.arc(13, 0, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // Warning flicker (dashed preview)
+        if (isWarning) {
+          const wAlpha = 0.2 + Math.random() * 0.25;
+          ctx.strokeStyle = `rgba(255, 80, 80, ${wAlpha})`;
+          ctx.lineWidth = 2;
+          ctx.setLineDash([10, 10]);
+          ctx.beginPath();
+          ctx.moveTo(pivotX, pivotY);
+          ctx.lineTo(beamEndX, beamEndY);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+
+        // Active beam with glow
+        if (isActive) {
+          ctx.save();
+          ctx.shadowColor = '#ff0000';
+          ctx.shadowBlur = 14;
+          ctx.lineCap = 'round';
+          // Outer glow
+          ctx.strokeStyle = 'rgba(255, 40, 40, 0.3)';
+          ctx.lineWidth = 16;
+          ctx.beginPath();
+          ctx.moveTo(pivotX, pivotY);
+          ctx.lineTo(beamEndX, beamEndY);
+          ctx.stroke();
+          // Core beam
+          ctx.strokeStyle = '#ff3030';
+          ctx.lineWidth = 5;
+          ctx.beginPath();
+          ctx.moveTo(pivotX, pivotY);
+          ctx.lineTo(beamEndX, beamEndY);
+          ctx.stroke();
+          // Bright center line
+          ctx.strokeStyle = '#ffaaaa';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(pivotX, pivotY);
+          ctx.lineTo(beamEndX, beamEndY);
+          ctx.stroke();
+          ctx.restore();
+        }
 
       } else {
         // Static - rock

@@ -321,7 +321,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
               const worldX = (gx + 0.5) * GRID_SIZE;
               const worldY = (gy + 0.5) * GRID_SIZE;
               const zones = def.getReach(params as any);
-              drawReach(ctx, zones, worldX - cx, worldY - cy);
+              const rotRad = ((params as any).rotation ?? 0) * Math.PI / 180;
+              drawReach(ctx, zones, worldX - cx, worldY - cy, rotRad);
             }
           }
         }
@@ -340,7 +341,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           const worldX = (hoverGx + 0.5) * GRID_SIZE;
           const worldY = (hoverGy + 0.5) * GRID_SIZE;
           const zones = def.getReach(params as any);
-          drawReach(ctx, zones, worldX - cx, worldY - cy);
+          const rotRad = ((params as any).rotation ?? 0) * Math.PI / 180;
+          drawReach(ctx, zones, worldX - cx, worldY - cy, rotRad);
           // Ghost tile preview
           ctx.globalAlpha = 0.55;
           const sx = hoverGx * GRID_SIZE - cx;
