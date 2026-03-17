@@ -1747,6 +1747,27 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
               {t.emoji} {t.label}
             </button>
           ))}
+
+          {/* Hand tool (select/inspect) */}
+          <button
+            onClick={() => {
+              setTool('none');
+              lastPlacedRailRef.current = null;
+              setArcCenter(null); setArcPreview([]);
+              setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false);
+              setLineStart(null); setLinePreview([]);
+              setLine2Start(null);
+              setShowTilesMenu(false); setShowToolsMenu(false);
+            }}
+            className={`px-3 py-2 rounded-lg font-bold text-sm transition-all ${
+              tool === 'none'
+                ? 'bg-game-accent text-game-bg scale-105'
+                : 'bg-game-card text-game-title border border-game-card-border hover:border-game-accent'
+            }`}
+            title="Hand — select & inspect obstacles"
+          >
+            ✋ Hand
+          </button>
         </div>
 
         {/* Right: Action buttons */}
