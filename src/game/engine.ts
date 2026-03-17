@@ -575,6 +575,14 @@ export class GameEngine {
           this.hitPassenger(obs);
           return;
         }
+      } else if (obs.type === 'swoop') {
+        const birdWorldX = obs.x + Math.sin(obs.angle) * (obs.patrolWidth ?? 160) / 2;
+        const birdWorldY = obs.baseY + obs.amplitude;
+        hitDist = Math.sqrt((cx - birdWorldX) ** 2 + (cy - birdWorldY) ** 2);
+        if (hitDist < HIT_RADIUS + obs.radius) {
+          this.hitPassenger(obs);
+          return;
+        }
       } else {
         hitDist = Math.sqrt((cx - obs.x) ** 2 + (cy - obs.y) ** 2);
         if (hitDist < HIT_RADIUS + obs.radius) {
@@ -1051,6 +1059,144 @@ export class GameEngine {
           ctx.stroke();
           ctx.restore();
         }
+
+      } else if (obs.type === 'swoop') {
+        const pw    = obs.patrolWidth  ?? 160;
+        const ph    = obs.patrolHeight ?? 80;
+        const dd    = obs.diveDepth    ?? 120;
+        const DIVE_SPEED = 320; // px/s downward
+        const RISE_SPEED = 160; // px/s upward
+
+        // Current world position
+        const birdWorldX = obs.x + Math.sin(obs.angle) * pw / 2;
+        const birdWorldY = obs.baseY + obs.amplitude;
+
+        // State machine via armLength: 0=patrol, >0=diving, <0=rising
+        if (obs.armLength > 0) {
+          obs.amplitude += DIVE_SPEED * this.lastDt;
+          if (obs.amplitude >= dd) {
+            obs.amplitude = dd;
+            obs.armLength = -1;
+          }
+        } else if (obs.armLength < 0) {
+          obs.amplitude -= RISE_SPEED * this.lastDt;
+          if (obs.amplitude <= 0) {
+            obs.amplitude = 0;
+            obs.armLength = 0;
+          }
+        } else {
+          // Patrol: advance horizontal oscillation
+          obs.angle += obs.bounceSpeed * this.lastDt;
+          // Detect player: dive if player is within detection zone below bird
+          const gp = this.getGondolaPos();
+          const px = gp.x;
+          const py = gp.y + GONDOLA_HANG;
+          const dxP = px - birdWorldX;
+          const dyP = py - birdWorldY;
+          if (Math.abs(dxP) < pw / 2 && dyP > -obs.radius && dyP < ph) {
+            obs.armLength = 1;
+          }
+        }
+
+        // ── Draw ──────────────────────────────────────────────────────────
+        const bSX = birdWorldX - cx;
+        const bSY = birdWorldY - cy;
+        const isDiving = obs.armLength !== 0;
+        const movingRight = Math.cos(obs.angle) >= 0;
+        const dir = movingRight ? 1 : -1;
+        const flap = isDiving ? 0 : Math.sin(obs.angle * 5) * 5;
+
+        ctx.save();
+        ctx.translate(bSX, bSY);
+
+        // Tail feathers
+        ctx.fillStyle = '#4a3020';
+        ctx.beginPath();
+        if (isDiving) {
+          ctx.moveTo(-dir * 8, 0);
+          ctx.lineTo(-dir * 20, 14);
+          ctx.lineTo(-dir * 16, 6);
+          ctx.lineTo(-dir * 12, 14);
+          ctx.lineTo(-dir * 8, 4);
+        } else {
+          ctx.moveTo(-dir * 8, 0);
+          ctx.lineTo(-dir * 22, 4);
+          ctx.lineTo(-dir * 18, 8);
+          ctx.lineTo(-dir * 14, 4);
+          ctx.lineTo(-dir * 8, 6);
+        }
+        ctx.closePath();
+        ctx.fill();
+
+        // Wing
+        ctx.fillStyle = '#7a5030';
+        if (isDiving) {
+          // Tucked wings sweeping back
+          ctx.beginPath();
+          ctx.moveTo(0, -4);
+          ctx.lineTo(-dir * 18, -2);
+          ctx.lineTo(-dir * 16, 8);
+          ctx.lineTo(0, 6);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = '#9a6840';
+          ctx.beginPath();
+          ctx.moveTo(0, -4);
+          ctx.lineTo(-dir * 18, -10);
+          ctx.lineTo(-dir * 20, -2);
+          ctx.lineTo(-dir * 8, -2);
+          ctx.closePath();
+          ctx.fill();
+        } else {
+          // Spread wings with flap
+          ctx.beginPath();
+          ctx.moveTo(-dir * 2, 2);
+          ctx.lineTo(-dir * 28, -6 + flap);
+          ctx.lineTo(-dir * 24, 6 + flap);
+          ctx.lineTo(-dir * 4, 6);
+          ctx.closePath();
+          ctx.fill();
+          // Wing tip lighter
+          ctx.fillStyle = '#9a6840';
+          ctx.beginPath();
+          ctx.moveTo(-dir * 22, -5 + flap);
+          ctx.lineTo(-dir * 32, -2 + flap);
+          ctx.lineTo(-dir * 28, 5 + flap);
+          ctx.closePath();
+          ctx.fill();
+        }
+
+        // Body
+        ctx.fillStyle = '#4a3020';
+        ctx.beginPath();
+        ctx.ellipse(dir * 2, 0, 12, 7, isDiving ? dir * 0.4 : 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Head
+        ctx.fillStyle = '#3a2010';
+        ctx.beginPath();
+        ctx.arc(dir * 12, -3, 6, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Beak
+        ctx.fillStyle = '#bb8800';
+        ctx.beginPath();
+        ctx.moveTo(dir * 17, -3);
+        ctx.lineTo(dir * 25, -1);
+        ctx.lineTo(dir * 17, 1);
+        ctx.fill();
+
+        // Eye
+        ctx.fillStyle = '#ffaa00';
+        ctx.beginPath();
+        ctx.arc(dir * 13, -4, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#111';
+        ctx.beginPath();
+        ctx.arc(dir * 13.5, -4, 1.2, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
 
       } else {
         // Static - rock

@@ -21,7 +21,7 @@ export interface BouncerParams    { obstacleType: 'bouncer';    amplitude: numbe
 export interface PendulumParams   { obstacleType: 'pendulum';   cableLength: number; swingAngle: number; bobRadius: number; swingSpeed: number; rotation: number }
 export interface CrusherParams    { obstacleType: 'crusher';    zoneWidth: number; zoneHeight: number; rotation: number }
 export interface LaserParams      { obstacleType: 'laser';      beamLength: number; direction: 'left' | 'right'; cycleSpeed: number; warningTime: number; rotation: number }
-export interface SwoopParams      { obstacleType: 'swoop';      patrolWidth: number; patrolHeight: number; diveDepth: number; rotation: number }
+export interface SwoopParams      { obstacleType: 'swoop';      patrolWidth: number; patrolHeight: number; diveDepth: number; patrolSpeed: number; rotation: number }
 export interface OrbiterParams    { obstacleType: 'orbiter';    orbitRadius: number; orbRadius: number; rotation: number }
 export interface BoulderParams    { obstacleType: 'boulder';    radius: number; rotation: number }
 export interface MineParams       { obstacleType: 'mine';       triggerRadius: number; explosionRadius: number; rotation: number }
@@ -346,11 +346,12 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
     label: 'Swoop',
     emoji: '🦅',
     tileColor: 'rgba(255,200,50,0.3)',
-    defaultParams: { obstacleType: 'swoop', patrolWidth: 120, patrolHeight: 60, diveDepth: 80, rotation: 0 } as SwoopParams,
+    defaultParams: { obstacleType: 'swoop', patrolWidth: 160, patrolHeight: 80, diveDepth: 120, patrolSpeed: 0.8, rotation: 0 } as SwoopParams,
     paramMeta: {
-      patrolWidth:  { label: 'Patrol Width',  min: 20, max: 400, step: 5 },
-      patrolHeight: { label: 'Patrol Height', min: 10, max: 300, step: 5 },
-      diveDepth:    { label: 'Dive Depth',    min: 10, max: 300, step: 5 },
+      patrolWidth:  { label: 'Patrol Width',  min: 20, max: 600, step: 5  },
+      patrolHeight: { label: 'Detect Height', min: 10, max: 300, step: 5  },
+      diveDepth:    { label: 'Dive Depth',    min: 10, max: 400, step: 5  },
+      patrolSpeed:  { label: 'Patrol Speed',  min: 0.1, max: 4,  step: 0.1 },
       rotation:     { label: 'Initial Rotation (°)', min: 0, max: 360, step: 1 },
     },
     getReach(params: SwoopParams): ObstacleReachZone[] {
@@ -360,7 +361,7 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
       ];
     },
     toGameObstacle(id, worldX, worldY, params: SwoopParams): Obstacle {
-      return { id, typeId: 'obstacle.swoop', type: 'swoop', x: worldX, y: worldY, radius: 20, angle: 0, rotation: (params.rotation ?? 0) * Math.PI / 180, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: 0, hit: false, hp: 1, patrolWidth: params.patrolWidth, patrolHeight: params.patrolHeight, diveDepth: params.diveDepth };
+      return { id, typeId: 'obstacle.swoop', type: 'swoop', x: worldX, y: worldY, radius: 18, angle: (params.rotation ?? 0) * Math.PI / 180, rotation: 0, rotSpeed: 0, baseY: worldY, amplitude: 0, bounceSpeed: params.patrolSpeed ?? 0.8, armLength: 0, hit: false, hp: 1, patrolWidth: params.patrolWidth, patrolHeight: params.patrolHeight, diveDepth: params.diveDepth };
     },
   } as ObstacleDefinition<SwoopParams>,
 
