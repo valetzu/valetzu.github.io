@@ -1174,17 +1174,24 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     }
   };
 
+  // Zoom keeping the canvas center fixed in world space
+  const zoomToCenter = (newZoom: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const hw = canvas.width / 2;
+    const hh = canvas.height / 2;
+    setCamera({
+      x: camera.x + hw / zoom - hw / newZoom,
+      y: camera.y + hh / zoom - hh / newZoom,
+    });
+    setZoom(newZoom);
+  };
+
   const handleWheel = (e: React.WheelEvent) => {
-    // Zoom with mouse wheel: scroll up -> zoom in, scroll down -> zoom out
     e.preventDefault();
     const delta = e.deltaY;
-    if (delta < 0) {
-      // Zoom in
-      setZoom(z => Math.min(3, z + 0.25));
-    } else if (delta > 0) {
-      // Zoom out
-      setZoom(z => Math.max(0.25, z - 0.25));
-    }
+    if (delta < 0) zoomToCenter(Math.min(3, zoom + 0.25));
+    else if (delta > 0) zoomToCenter(Math.max(0.25, zoom - 0.25));
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -1881,7 +1888,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       {/* Zoom buttons */}
       <div className="fixed bottom-12 right-4 flex gap-2 z-10">
         <button
-          onClick={() => setZoom(z => Math.max(0.25, z - 0.25))}
+          onClick={() => zoomToCenter(Math.max(0.25, zoom - 0.25))}
           className="w-10 h-10 rounded-lg bg-game-card text-game-title border border-game-card-border font-bold text-lg hover:border-game-accent"
         >
           −
@@ -1890,7 +1897,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           {Math.round(zoom * 100)}%
         </span>
         <button
-          onClick={() => setZoom(z => Math.min(3, z + 0.25))}
+          onClick={() => zoomToCenter(Math.min(3, zoom + 0.25))}
           className="w-10 h-10 rounded-lg bg-game-card text-game-title border border-game-card-border font-bold text-lg hover:border-game-accent"
         >
           +
