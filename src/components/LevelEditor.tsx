@@ -1169,6 +1169,14 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         }
       }
 
+      // Clicking an existing tile of the same type → switch to hand tool (and select if obstacle)
+      const clickedKey = tileKey(gx, gy);
+      if (tiles[clickedKey] === (tool as TileType)) {
+        setTool('none');
+        if (obstacleDefMap.has(tool)) setSelectedObstacleKey(clickedKey);
+        return;
+      }
+
       setIsDrawing(true);
       placeTile(gx, gy);
     }
