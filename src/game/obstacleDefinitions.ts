@@ -16,16 +16,16 @@ export type ObstacleReachZone =
 // Per-instance serialisable params (one concrete type per obstacle)
 // ---------------------------------------------------------------------------
 
-export interface SpinnerParams    { obstacleType: 'spinner';    armLength: number; rotSpeed: number; radius: number }
-export interface BouncerParams    { obstacleType: 'bouncer';    amplitude: number; bounceSpeed: number; radius: number }
-export interface PendulumParams   { obstacleType: 'pendulum';   cableLength: number; swingAngle: number; bobRadius: number; swingSpeed: number }
-export interface CrusherParams    { obstacleType: 'crusher';    zoneWidth: number; zoneHeight: number }
-export interface LaserParams      { obstacleType: 'laser';      beamLength: number; direction: 'left' | 'right' }
-export interface SwoopParams      { obstacleType: 'swoop';      patrolWidth: number; patrolHeight: number; diveDepth: number }
-export interface OrbiterParams    { obstacleType: 'orbiter';    orbitRadius: number; orbRadius: number }
-export interface BoulderParams    { obstacleType: 'boulder';    radius: number }
-export interface MineParams       { obstacleType: 'mine';       triggerRadius: number; explosionRadius: number }
-export interface StalactiteParams { obstacleType: 'stalactite'; triggerRadius: number; dropZoneWidth: number; dropZoneHeight: number }
+export interface SpinnerParams    { obstacleType: 'spinner';    armLength: number; rotSpeed: number; radius: number; rotation: number }
+export interface BouncerParams    { obstacleType: 'bouncer';    amplitude: number; bounceSpeed: number; radius: number; rotation: number }
+export interface PendulumParams   { obstacleType: 'pendulum';   cableLength: number; swingAngle: number; bobRadius: number; swingSpeed: number; rotation: number }
+export interface CrusherParams    { obstacleType: 'crusher';    zoneWidth: number; zoneHeight: number; rotation: number }
+export interface LaserParams      { obstacleType: 'laser';      beamLength: number; direction: 'left' | 'right'; rotation: number }
+export interface SwoopParams      { obstacleType: 'swoop';      patrolWidth: number; patrolHeight: number; diveDepth: number; rotation: number }
+export interface OrbiterParams    { obstacleType: 'orbiter';    orbitRadius: number; orbRadius: number; rotation: number }
+export interface BoulderParams    { obstacleType: 'boulder';    radius: number; rotation: number }
+export interface MineParams       { obstacleType: 'mine';       triggerRadius: number; explosionRadius: number; rotation: number }
+export interface StalactiteParams { obstacleType: 'stalactite'; triggerRadius: number; dropZoneWidth: number; dropZoneHeight: number; rotation: number }
 
 export type ObstacleParams =
   | SpinnerParams | BouncerParams | PendulumParams | CrusherParams
@@ -196,11 +196,12 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
     label: 'Spinner',
     emoji: '🌀',
     tileColor: 'rgba(255,107,53,0.3)',
-    defaultParams: { obstacleType: 'spinner', armLength: 120, rotSpeed: 0.5, radius: 12 } as SpinnerParams,
+    defaultParams: { obstacleType: 'spinner', armLength: 120, rotSpeed: 0.5, radius: 12, rotation: 0 } as SpinnerParams,
     paramMeta: {
       armLength:  { label: 'Arm Length',      min: 20,  max: 300, step: 5  },
       rotSpeed:   { label: 'Rotation Speed',  min: 0.1, max: 5,   step: 0.1 },
-      radius:     { label: 'Hub Radius',       min: 4,   max: 40,  step: 1  },
+      radius:     { label: 'Hub Radius',      min: 4,   max: 40,  step: 1  },
+      rotation:   { label: 'Initial Rotation (°)', min: 0, max: 360, step: 1 },
     },
     getReach(params: SpinnerParams): ObstacleReachZone[] {
       return [
@@ -215,6 +216,7 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
         rotSpeed: -params.rotSpeed, // negate so positive = clockwise visually
         baseY: 0, amplitude: 0, bounceSpeed: 0,
         armLength: params.armLength, hit: false, hp: 1,
+        rotation: (params.rotation ?? 0) * Math.PI / 180,
       };
     },
   } as ObstacleDefinition<SpinnerParams>,
@@ -226,11 +228,12 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
     label: 'Bouncer',
     emoji: '🔴',
     tileColor: 'rgba(229,57,53,0.3)',
-    defaultParams: { obstacleType: 'bouncer', amplitude: 80, bounceSpeed: 0.7, radius: 18 } as BouncerParams,
+    defaultParams: { obstacleType: 'bouncer', amplitude: 80, bounceSpeed: 0.7, radius: 18, rotation: 0 } as BouncerParams,
     paramMeta: {
       amplitude:   { label: 'Bounce Height', min: 10, max: 300, step: 5   },
       bounceSpeed: { label: 'Bounce Speed',  min: 0.1, max: 5,  step: 0.1 },
       radius:      { label: 'Ball Radius',   min: 4,  max: 50,  step: 1   },
+      rotation:    { label: 'Initial Rotation (°)', min: 0, max: 360, step: 1 },
     },
     getReach(params: BouncerParams): ObstacleReachZone[] {
       const totalH = params.amplitude * 2 + params.radius * 2;
@@ -243,7 +246,7 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
         id, typeId: 'obstacle.bouncer', type: 'bouncer',
         x: worldX, y: worldY,
         radius: params.radius, angle: 0,
-        rotSpeed: 0,
+        rotSpeed: 0, rotation: (params.rotation ?? 0) * Math.PI / 180,
         baseY: worldY - 20, amplitude: params.amplitude,
         bounceSpeed: params.bounceSpeed,
         armLength: 0, hit: false, hp: 1,
@@ -258,12 +261,13 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
     label: 'Pendulum',
     emoji: '⏱️',
     tileColor: 'rgba(100,180,255,0.3)',
-    defaultParams: { obstacleType: 'pendulum', cableLength: 220, swingAngle: 1.2, bobRadius: 18, swingSpeed: 1.2 } as PendulumParams,
+    defaultParams: { obstacleType: 'pendulum', cableLength: 220, swingAngle: 1.2, bobRadius: 18, swingSpeed: 1.2, rotation: 0 } as PendulumParams,
     paramMeta: {
       cableLength: { label: 'Cable Length',  min: 30,  max: 400,  step: 10   },
       swingAngle:  { label: 'Swing Angle',   min: 0.1, max: 1.55, step: 0.05 },
       bobRadius:   { label: 'Bob Radius',    min: 4,   max: 50,   step: 1    },
       swingSpeed:  { label: 'Swing Speed',   min: 0.1, max: 5,    step: 0.1  },
+      rotation:    { label: 'Initial Rotation (°)', min: 0, max: 360, step: 1 },
     },
     getReach(params: PendulumParams): ObstacleReachZone[] {
       const arcR = params.cableLength + params.bobRadius;
@@ -275,7 +279,7 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
       ];
     },
     toGameObstacle(id, worldX, worldY, params: PendulumParams): Obstacle {
-      return { id, typeId: 'obstacle.pendulum', type: 'pendulum', x: worldX, y: worldY, radius: params.bobRadius, angle: 0, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: params.swingSpeed, armLength: 0, hit: false, hp: 1, cableLength: params.cableLength, swingAngle: params.swingAngle, bobRadius: params.bobRadius };
+      return { id, typeId: 'obstacle.pendulum', type: 'pendulum', x: worldX, y: worldY, radius: params.bobRadius, angle: 0, rotation: (params.rotation ?? 0) * Math.PI / 180, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: params.swingSpeed, armLength: 0, hit: false, hp: 1, cableLength: params.cableLength, swingAngle: params.swingAngle, bobRadius: params.bobRadius };
     },
   } as ObstacleDefinition<PendulumParams>,
 
@@ -286,10 +290,11 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
     label: 'Crusher',
     emoji: '🔩',
     tileColor: 'rgba(180,180,180,0.3)',
-    defaultParams: { obstacleType: 'crusher', zoneWidth: 80, zoneHeight: 60 } as CrusherParams,
+    defaultParams: { obstacleType: 'crusher', zoneWidth: 80, zoneHeight: 60, rotation: 0 } as CrusherParams,
     paramMeta: {
       zoneWidth:  { label: 'Zone Width',  min: 20, max: 400, step: 5 },
       zoneHeight: { label: 'Zone Height', min: 20, max: 400, step: 5 },
+      rotation:   { label: 'Initial Rotation (°)', min: 0, max: 360, step: 1 },
     },
     getReach(params: CrusherParams): ObstacleReachZone[] {
       return [
@@ -297,7 +302,7 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
       ];
     },
     toGameObstacle(id, worldX, worldY, params: CrusherParams): Obstacle {
-      return { id, typeId: 'obstacle.crusher', type: 'crusher', x: worldX, y: worldY, radius: Math.min(params.zoneWidth, params.zoneHeight) / 2, angle: 0, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: 0, hit: false, hp: 1, zoneWidth: params.zoneWidth, zoneHeight: params.zoneHeight };
+      return { id, typeId: 'obstacle.crusher', type: 'crusher', x: worldX, y: worldY, radius: Math.min(params.zoneWidth, params.zoneHeight) / 2, angle: 0, rotation: (params.rotation ?? 0) * Math.PI / 180, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: 0, hit: false, hp: 1, zoneWidth: params.zoneWidth, zoneHeight: params.zoneHeight };
     },
   } as ObstacleDefinition<CrusherParams>,
 
@@ -308,10 +313,11 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
     label: 'Laser',
     emoji: '🔦',
     tileColor: 'rgba(255,50,50,0.3)',
-    defaultParams: { obstacleType: 'laser', beamLength: 200, direction: 'right' } as LaserParams,
+    defaultParams: { obstacleType: 'laser', beamLength: 200, direction: 'right', rotation: 0 } as LaserParams,
     paramMeta: {
       beamLength: { label: 'Beam Length', min: 20, max: 600, step: 10 },
       direction:  { label: 'Direction',   type: 'select', options: ['left', 'right'] },
+      rotation:   { label: 'Initial Rotation (°)', min: 0, max: 360, step: 1 },
     },
     getReach(params: LaserParams): ObstacleReachZone[] {
       const dx = params.direction === 'right' ? params.beamLength : -params.beamLength;
@@ -320,7 +326,7 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
       ];
     },
     toGameObstacle(id, worldX, worldY, params: LaserParams): Obstacle {
-      return { id, typeId: 'obstacle.laser', type: 'laser', x: worldX, y: worldY, radius: 12, angle: 0, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: params.beamLength, hit: false, hp: 1, beamLength: params.beamLength, beamDirection: params.direction };
+      return { id, typeId: 'obstacle.laser', type: 'laser', x: worldX, y: worldY, radius: 12, angle: 0, rotation: (params.rotation ?? 0) * Math.PI / 180, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: params.beamLength, hit: false, hp: 1, beamLength: params.beamLength, beamDirection: params.direction };
     },
   } as ObstacleDefinition<LaserParams>,
 
@@ -331,11 +337,12 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
     label: 'Swoop',
     emoji: '🦅',
     tileColor: 'rgba(255,200,50,0.3)',
-    defaultParams: { obstacleType: 'swoop', patrolWidth: 120, patrolHeight: 60, diveDepth: 80 } as SwoopParams,
+    defaultParams: { obstacleType: 'swoop', patrolWidth: 120, patrolHeight: 60, diveDepth: 80, rotation: 0 } as SwoopParams,
     paramMeta: {
       patrolWidth:  { label: 'Patrol Width',  min: 20, max: 400, step: 5 },
       patrolHeight: { label: 'Patrol Height', min: 10, max: 300, step: 5 },
       diveDepth:    { label: 'Dive Depth',    min: 10, max: 300, step: 5 },
+      rotation:     { label: 'Initial Rotation (°)', min: 0, max: 360, step: 1 },
     },
     getReach(params: SwoopParams): ObstacleReachZone[] {
       return [
@@ -344,7 +351,7 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
       ];
     },
     toGameObstacle(id, worldX, worldY, params: SwoopParams): Obstacle {
-      return { id, typeId: 'obstacle.swoop', type: 'swoop', x: worldX, y: worldY, radius: 20, angle: 0, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: 0, hit: false, hp: 1, patrolWidth: params.patrolWidth, patrolHeight: params.patrolHeight, diveDepth: params.diveDepth };
+      return { id, typeId: 'obstacle.swoop', type: 'swoop', x: worldX, y: worldY, radius: 20, angle: 0, rotation: (params.rotation ?? 0) * Math.PI / 180, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: 0, hit: false, hp: 1, patrolWidth: params.patrolWidth, patrolHeight: params.patrolHeight, diveDepth: params.diveDepth };
     },
   } as ObstacleDefinition<SwoopParams>,
 
@@ -355,10 +362,11 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
     label: 'Orbiter',
     emoji: '🪐',
     tileColor: 'rgba(180,80,255,0.3)',
-    defaultParams: { obstacleType: 'orbiter', orbitRadius: 80, orbRadius: 14 } as OrbiterParams,
+    defaultParams: { obstacleType: 'orbiter', orbitRadius: 80, orbRadius: 14, rotation: 0 } as OrbiterParams,
     paramMeta: {
       orbitRadius: { label: 'Orbit Radius', min: 10, max: 300, step: 5 },
       orbRadius:   { label: 'Ball Radius',  min: 4,  max: 50,  step: 1 },
+      rotation:    { label: 'Initial Rotation (°)', min: 0, max: 360, step: 1 },
     },
     getReach(params: OrbiterParams): ObstacleReachZone[] {
       return [
@@ -366,7 +374,7 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
       ];
     },
     toGameObstacle(id, worldX, worldY, params: OrbiterParams): Obstacle {
-      return { id, typeId: 'obstacle.orbiter', type: 'orbiter', x: worldX, y: worldY, radius: params.orbRadius, angle: 0, rotSpeed: 1.2, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: params.orbitRadius, hit: false, hp: 1, orbitRadius: params.orbitRadius };
+      return { id, typeId: 'obstacle.orbiter', type: 'orbiter', x: worldX, y: worldY, radius: params.orbRadius, angle: 0, rotation: (params.rotation ?? 0) * Math.PI / 180, rotSpeed: 1.2, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: params.orbitRadius, hit: false, hp: 1, orbitRadius: params.orbitRadius };
     },
   } as ObstacleDefinition<OrbiterParams>,
 
@@ -377,9 +385,10 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
     label: 'Boulder',
     emoji: '🪨',
     tileColor: 'rgba(140,120,80,0.3)',
-    defaultParams: { obstacleType: 'boulder', radius: 30 } as BoulderParams,
+    defaultParams: { obstacleType: 'boulder', radius: 30, rotation: 0 } as BoulderParams,
     paramMeta: {
-      radius: { label: 'Boulder Radius', min: 8, max: 120, step: 2 },
+      radius:   { label: 'Boulder Radius', min: 8, max: 120, step: 2 },
+      rotation: { label: 'Initial Rotation (°)', min: 0, max: 360, step: 1 },
     },
     getReach(params: BoulderParams): ObstacleReachZone[] {
       return [
@@ -387,7 +396,7 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
       ];
     },
     toGameObstacle(id, worldX, worldY, params: BoulderParams): Obstacle {
-      return { id, typeId: 'obstacle.boulder', type: 'boulder', x: worldX, y: worldY, radius: params.radius, angle: 0, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: 0, hit: false, hp: 1 };
+      return { id, typeId: 'obstacle.boulder', type: 'boulder', x: worldX, y: worldY, radius: params.radius, angle: 0, rotation: (params.rotation ?? 0) * Math.PI / 180, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: 0, hit: false, hp: 1 };
     },
   } as ObstacleDefinition<BoulderParams>,
 
@@ -398,10 +407,11 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
     label: 'Mine',
     emoji: '💣',
     tileColor: 'rgba(255,220,0,0.3)',
-    defaultParams: { obstacleType: 'mine', triggerRadius: 40, explosionRadius: 80 } as MineParams,
+    defaultParams: { obstacleType: 'mine', triggerRadius: 40, explosionRadius: 80, rotation: 0 } as MineParams,
     paramMeta: {
-      triggerRadius:   { label: 'Trigger Radius',    min: 5,  max: 200, step: 5 },
-      explosionRadius: { label: 'Explosion Radius',  min: 10, max: 300, step: 5 },
+      triggerRadius:   { label: 'Trigger Radius',   min: 5,  max: 200, step: 5 },
+      explosionRadius: { label: 'Explosion Radius', min: 10, max: 300, step: 5 },
+      rotation:        { label: 'Initial Rotation (°)', min: 0, max: 360, step: 1 },
     },
     getReach(params: MineParams): ObstacleReachZone[] {
       return [
@@ -410,7 +420,7 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
       ];
     },
     toGameObstacle(id, worldX, worldY, params: MineParams): Obstacle {
-      return { id, typeId: 'obstacle.mine', type: 'mine', x: worldX, y: worldY, radius: params.triggerRadius, angle: 0, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: 0, hit: false, hp: 1, triggerRadius: params.triggerRadius, explosionRadius: params.explosionRadius };
+      return { id, typeId: 'obstacle.mine', type: 'mine', x: worldX, y: worldY, radius: params.triggerRadius, angle: 0, rotation: (params.rotation ?? 0) * Math.PI / 180, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: 0, hit: false, hp: 1, triggerRadius: params.triggerRadius, explosionRadius: params.explosionRadius };
     },
   } as ObstacleDefinition<MineParams>,
 
@@ -421,11 +431,12 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
     label: 'Stalactite',
     emoji: '🗡️',
     tileColor: 'rgba(180,220,255,0.3)',
-    defaultParams: { obstacleType: 'stalactite', triggerRadius: 60, dropZoneWidth: 20, dropZoneHeight: 100 } as StalactiteParams,
+    defaultParams: { obstacleType: 'stalactite', triggerRadius: 60, dropZoneWidth: 20, dropZoneHeight: 100, rotation: 0 } as StalactiteParams,
     paramMeta: {
       triggerRadius:  { label: 'Trigger Radius', min: 10, max: 300, step: 5 },
       dropZoneWidth:  { label: 'Drop Width',     min: 4,  max: 100, step: 2 },
       dropZoneHeight: { label: 'Drop Height',    min: 10, max: 400, step: 5 },
+      rotation:       { label: 'Initial Rotation (°)', min: 0, max: 360, step: 1 },
     },
     getReach(params: StalactiteParams): ObstacleReachZone[] {
       return [
@@ -434,7 +445,7 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
       ];
     },
     toGameObstacle(id, worldX, worldY, params: StalactiteParams): Obstacle {
-      return { id, typeId: 'obstacle.stalactite', type: 'stalactite', x: worldX, y: worldY, radius: params.dropZoneWidth / 2, angle: 0, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: 0, hit: false, hp: 1, triggerRadius: params.triggerRadius, dropZoneWidth: params.dropZoneWidth, dropZoneHeight: params.dropZoneHeight };
+      return { id, typeId: 'obstacle.stalactite', type: 'stalactite', x: worldX, y: worldY, radius: params.dropZoneWidth / 2, angle: 0, rotation: (params.rotation ?? 0) * Math.PI / 180, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: 0, hit: false, hp: 1, triggerRadius: params.triggerRadius, dropZoneWidth: params.dropZoneWidth, dropZoneHeight: params.dropZoneHeight };
     },
   } as ObstacleDefinition<StalactiteParams>,
 ];

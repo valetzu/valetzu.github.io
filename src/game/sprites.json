@@ -22,7 +22,7 @@
       "sprite": "obstacles/bouncer.png",
       "anchor": { "x": 0.5, "y": 0.5 },
       "hitboxScale": 0.95,
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "obstacle.staticRock",
@@ -68,4 +68,3 @@
     }
   ]
 }
-

@@ -38,6 +38,7 @@ export interface Obstacle {
   armLength: number;
   hit: boolean;
   hp: number;
+  rotation?: number;
   // Extended fields for new obstacle types
   cableLength?: number;
   swingAngle?: number;

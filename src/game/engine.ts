@@ -498,9 +498,10 @@ export class GameEngine {
         };
         const ARM_HALF = 9;  // half of arm lineWidth 18
         const POLE_HALF = 5; // half of pole lineWidth 10
-        // Check arm segments (capsule collision)
+        const spinRot = obs.rotation ?? 0;
+        // Check arm segments (capsule collision) — rotation-aware
         for (let a = 0; a < 4; a++) {
-          const armAngle = obs.angle + (a * Math.PI) / 2;
+          const armAngle = obs.angle + spinRot + (a * Math.PI) / 2;
           const tipX = obs.x + Math.cos(armAngle) * obs.armLength;
           const tipY = obs.y + Math.sin(armAngle) * obs.armLength;
           const dSq = ptSegDistSq(cx, cy, obs.x, obs.y, tipX, tipY);
@@ -509,9 +510,10 @@ export class GameEngine {
             return;
           }
         }
-        // Check pole segment (capsule collision)
-        const poleBottomY = obs.y + 60;
-        const dPoleSq = ptSegDistSq(cx, cy, obs.x, obs.y, obs.x, poleBottomY);
+        // Check pole segment — rotated endpoint
+        const poleEndX = obs.x - 60 * Math.sin(spinRot);
+        const poleEndY = obs.y + 60 * Math.cos(spinRot);
+        const dPoleSq = ptSegDistSq(cx, cy, obs.x, obs.y, poleEndX, poleEndY);
         if (dPoleSq < (HIT_RADIUS + POLE_HALF) ** 2) {
           this.hitPassenger(obs);
           return;
@@ -523,18 +525,28 @@ export class GameEngine {
           return;
         }
       } else if (obs.type === 'bouncer') {
-        const by = obs.baseY + Math.sin(obs.angle) * obs.amplitude;
-        hitDist = Math.sqrt((cx - obs.x) ** 2 + (cy - by) ** 2);
+        // Rotate player offset into bouncer-local space
+        const bRot = obs.rotation ?? 0;
+        const bdx = cx - obs.x, bdy = cy - obs.baseY;
+        const bldx =  bdx * Math.cos(bRot) + bdy * Math.sin(bRot);
+        const bldy = -bdx * Math.sin(bRot) + bdy * Math.cos(bRot);
+        const localOffset = Math.sin(obs.angle) * obs.amplitude;
+        hitDist = Math.sqrt(bldx ** 2 + (bldy - localOffset) ** 2);
         if (hitDist < HIT_RADIUS + obs.radius) {
           this.hitPassenger(obs);
           return;
         }
       } else if (obs.type === 'pendulum') {
+        // Rotate player offset into pendulum-local space
+        const pRot = obs.rotation ?? 0;
+        const pdx = cx - obs.x, pdy = cy - obs.y;
+        const pldx =  pdx * Math.cos(pRot) + pdy * Math.sin(pRot);
+        const pldy = -pdx * Math.sin(pRot) + pdy * Math.cos(pRot);
         const currentSwing = (obs.swingAngle ?? 0.8) * Math.sin(obs.angle);
         const cableLen = obs.cableLength ?? 120;
-        const bobX = obs.x + Math.sin(currentSwing) * cableLen;
-        const bobY = obs.y + Math.cos(currentSwing) * cableLen;
-        hitDist = Math.sqrt((cx - bobX) ** 2 + (cy - bobY) ** 2);
+        const localBobX = Math.sin(currentSwing) * cableLen;
+        const localBobY = Math.cos(currentSwing) * cableLen;
+        hitDist = Math.sqrt((pldx - localBobX) ** 2 + (pldy - localBobY) ** 2);
         if (hitDist < HIT_RADIUS + (obs.bobRadius ?? obs.radius)) {
           this.hitPassenger(obs);
           return;
@@ -787,21 +799,20 @@ export class GameEngine {
       }
 
       if (obs.type === 'spinner') {
-        // Update angle
         obs.angle += obs.rotSpeed * 0.016;
-        const sx = screenX;
-        const sy = obs.y - cy;
+        ctx.save();
+        ctx.translate(screenX, obs.y - cy);
+        ctx.rotate(obs.rotation ?? 0);
 
         // Non-hitbox structural parts — gray, reduced opacity (background feel)
         ctx.globalAlpha = 0.35;
 
-        // Pole
+        // Pole (local: 0,0 → 0,60)
         ctx.strokeStyle = '#888';
         ctx.lineWidth = 10;
-        const groundY = obs.y + 60 - cy;
         ctx.beginPath();
-        ctx.moveTo(sx, sy);
-        ctx.lineTo(sx, groundY);
+        ctx.moveTo(0, 0);
+        ctx.lineTo(0, 60);
         ctx.stroke();
 
         // Arms
@@ -809,19 +820,17 @@ export class GameEngine {
         ctx.lineCap = 'round';
         for (let a = 0; a < 4; a++) {
           const armAngle = obs.angle + (a * Math.PI) / 2;
-          const tipX = sx + Math.cos(armAngle) * obs.armLength;
-          const tipY = sy + Math.sin(armAngle) * obs.armLength;
           ctx.strokeStyle = '#999';
           ctx.beginPath();
-          ctx.moveTo(sx, sy);
-          ctx.lineTo(tipX, tipY);
+          ctx.moveTo(0, 0);
+          ctx.lineTo(Math.cos(armAngle) * obs.armLength, Math.sin(armAngle) * obs.armLength);
           ctx.stroke();
         }
 
         // Center hub
         ctx.fillStyle = '#aaa';
         ctx.beginPath();
-        ctx.arc(sx, sy, obs.radius, 0, Math.PI * 2);
+        ctx.arc(0, 0, obs.radius, 0, Math.PI * 2);
         ctx.fill();
         ctx.strokeStyle = '#777';
         ctx.lineWidth = 2;
@@ -832,40 +841,44 @@ export class GameEngine {
         // Tip balls — hitbox, full opacity
         for (let a = 0; a < 4; a++) {
           const armAngle = obs.angle + (a * Math.PI) / 2;
-          const tipX = sx + Math.cos(armAngle) * obs.armLength;
-          const tipY = sy + Math.sin(armAngle) * obs.armLength;
+          const tipLX = Math.cos(armAngle) * obs.armLength;
+          const tipLY = Math.sin(armAngle) * obs.armLength;
           ctx.fillStyle = '#cc3333';
           ctx.beginPath();
-          ctx.arc(tipX, tipY, 7, 0, Math.PI * 2);
+          ctx.arc(tipLX, tipLY, 7, 0, Math.PI * 2);
           ctx.fill();
           ctx.strokeStyle = '#ff6666';
           ctx.lineWidth = 2;
           ctx.stroke();
         }
 
+        ctx.restore();
+
       } else if (obs.type === 'bouncer') {
         obs.angle += obs.bounceSpeed * 0.016;
-        const by = obs.baseY + Math.sin(obs.angle) * obs.amplitude;
-        const sx = screenX;
-        const sy = by - cy;
+        const localOffset = Math.sin(obs.angle) * obs.amplitude;
+        ctx.save();
+        ctx.translate(screenX, obs.baseY - cy);
+        ctx.rotate(obs.rotation ?? 0);
 
-        // Spring below
+        // Spring (local: from ball bottom to spring mount)
+        const springBottomLocal = obs.amplitude + 30;
         ctx.strokeStyle = '#FFD700';
         ctx.lineWidth = 3;
-        const springBottom = obs.baseY + obs.amplitude + 30 - cy;
         for (let s = 0; s < 6; s++) {
           const t = s / 6;
-          const zy = sy + (springBottom - sy) * t;
-          const zx = sx + Math.sin(t * Math.PI * 4) * 10;
-          if (s === 0) { ctx.beginPath(); ctx.moveTo(sx, sy + obs.radius); }
-          ctx.lineTo(zx, zy);
+          const lz = localOffset + (springBottomLocal - localOffset) * t;
+          const lx = Math.sin(t * Math.PI * 4) * 10;
+          if (s === 0) { ctx.beginPath(); ctx.moveTo(0, localOffset + obs.radius); }
+          ctx.lineTo(lx, lz);
         }
+        ctx.lineTo(0, springBottomLocal);
         ctx.stroke();
 
         // Ball
         ctx.fillStyle = '#E53935';
         ctx.beginPath();
-        ctx.arc(sx, sy, obs.radius, 0, Math.PI * 2);
+        ctx.arc(0, localOffset, obs.radius, 0, Math.PI * 2);
         ctx.fill();
         ctx.strokeStyle = '#B71C1C';
         ctx.lineWidth = 2;
@@ -876,36 +889,31 @@ export class GameEngine {
           const sa = (s / 8) * Math.PI * 2;
           ctx.fillStyle = '#B71C1C';
           ctx.beginPath();
-          ctx.moveTo(
-            sx + Math.cos(sa) * obs.radius,
-            sy + Math.sin(sa) * obs.radius
-          );
-          ctx.lineTo(
-            sx + Math.cos(sa + 0.15) * (obs.radius + 8),
-            sy + Math.sin(sa + 0.15) * (obs.radius + 8)
-          );
-          ctx.lineTo(
-            sx + Math.cos(sa - 0.15) * (obs.radius + 8),
-            sy + Math.sin(sa - 0.15) * (obs.radius + 8)
-          );
+          ctx.moveTo(Math.cos(sa) * obs.radius, localOffset + Math.sin(sa) * obs.radius);
+          ctx.lineTo(Math.cos(sa + 0.15) * (obs.radius + 8), localOffset + Math.sin(sa + 0.15) * (obs.radius + 8));
+          ctx.lineTo(Math.cos(sa - 0.15) * (obs.radius + 8), localOffset + Math.sin(sa - 0.15) * (obs.radius + 8));
           ctx.closePath();
           ctx.fill();
         }
+
+        ctx.restore();
 
       } else if (obs.type === 'pendulum') {
         obs.angle += obs.bounceSpeed * 0.016;
         const currentSwing = (obs.swingAngle ?? 0.8) * Math.sin(obs.angle);
         const cableLen = obs.cableLength ?? 120;
-        const anchorX = screenX;
-        const anchorY = obs.y - cy;
-        const bobX = anchorX + Math.sin(currentSwing) * cableLen;
-        const bobY = anchorY + Math.cos(currentSwing) * cableLen;
         const bobR = obs.bobRadius ?? obs.radius;
+        const bLX = Math.sin(currentSwing) * cableLen;
+        const bLY = Math.cos(currentSwing) * cableLen;
+
+        ctx.save();
+        ctx.translate(screenX, obs.y - cy);
+        ctx.rotate(obs.rotation ?? 0);
 
         // Anchor mount
         ctx.fillStyle = '#888';
         ctx.beginPath();
-        ctx.arc(anchorX, anchorY, 6, 0, Math.PI * 2);
+        ctx.arc(0, 0, 6, 0, Math.PI * 2);
         ctx.fill();
 
         // Cable
@@ -913,8 +921,8 @@ export class GameEngine {
         ctx.lineWidth = 3;
         ctx.lineCap = 'round';
         ctx.beginPath();
-        ctx.moveTo(anchorX, anchorY);
-        ctx.lineTo(bobX, bobY);
+        ctx.moveTo(0, 0);
+        ctx.lineTo(bLX, bLY);
         ctx.stroke();
 
         // Bob spikes
@@ -922,9 +930,9 @@ export class GameEngine {
           const sa = (s / 6) * Math.PI * 2;
           ctx.fillStyle = '#555';
           ctx.beginPath();
-          ctx.moveTo(bobX + Math.cos(sa) * bobR, bobY + Math.sin(sa) * bobR);
-          ctx.lineTo(bobX + Math.cos(sa + 0.2) * (bobR + 7), bobY + Math.sin(sa + 0.2) * (bobR + 7));
-          ctx.lineTo(bobX + Math.cos(sa - 0.2) * (bobR + 7), bobY + Math.sin(sa - 0.2) * (bobR + 7));
+          ctx.moveTo(bLX + Math.cos(sa) * bobR, bLY + Math.sin(sa) * bobR);
+          ctx.lineTo(bLX + Math.cos(sa + 0.2) * (bobR + 7), bLY + Math.sin(sa + 0.2) * (bobR + 7));
+          ctx.lineTo(bLX + Math.cos(sa - 0.2) * (bobR + 7), bLY + Math.sin(sa - 0.2) * (bobR + 7));
           ctx.closePath();
           ctx.fill();
         }
@@ -932,11 +940,13 @@ export class GameEngine {
         // Bob
         ctx.fillStyle = '#444';
         ctx.beginPath();
-        ctx.arc(bobX, bobY, bobR, 0, Math.PI * 2);
+        ctx.arc(bLX, bLY, bobR, 0, Math.PI * 2);
         ctx.fill();
         ctx.strokeStyle = '#666';
         ctx.lineWidth = 2;
         ctx.stroke();
+
+        ctx.restore();
 
       } else {
         // Static - rock
