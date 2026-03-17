@@ -11,6 +11,7 @@ export type TileType =
   | 'orbiter' | 'boulder' | 'mine' | 'stalactite';
 
 export type EditorTool =
+  | 'none'
   | 'rail'
   | 'rail_start'
   | 'rail_end'

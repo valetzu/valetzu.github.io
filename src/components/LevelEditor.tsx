@@ -37,6 +37,9 @@ const TOOLS: { tool: EditorTool; label: string; emoji: string }[] = [
   { tool: 'line2', label: 'Free Line', emoji: '📐' },
 ];
 
+const TILE_TOOL_TYPES = new Set<EditorTool>(['rail', 'rail_start', 'rail_end', ...OBSTACLE_DEFINITIONS.map(d => d.tileType as EditorTool)]);
+const SHAPE_TOOL_TYPES = new Set<EditorTool>(['arc', 'curve', 'circular_curve', 'circle']);
+
 const OBSTACLE_COLORS: Record<string, string> = Object.fromEntries(
   OBSTACLE_DEFINITIONS.map(d => [d.tileType, d.tileColor])
 );
@@ -51,7 +54,7 @@ const TILE_COLORS: Record<string, string> = {
 
 export default function LevelEditor({ onBack }: LevelEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [tool, setTool] = useState<EditorTool>('rail');
+  const [tool, setTool] = useState<EditorTool>('none');
   const [tiles, setTiles] = useState<Record<string, TileType>>({});
   // Track explicit connections between rail tiles: key -> Set of connected keys
   const railConnectionsRef = useRef<Record<string, Set<string>>>({});
@@ -1599,22 +1602,30 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           {/* Tiles dropdown */}
           <div className="relative">
             <button
-              onClick={() => { setShowTilesMenu(!showTilesMenu); setShowToolsMenu(false); setShowFileMenu(false); }}
-              className="px-3 py-2 rounded-lg font-bold text-sm bg-game-card text-game-title border border-game-card-border hover:border-game-accent"
+              onClick={() => {
+                if (TILE_TOOL_TYPES.has(tool)) setTool('none');
+                setShowTilesMenu(!showTilesMenu);
+                setShowToolsMenu(false);
+                setShowFileMenu(false);
+              }}
+              className={`px-3 py-2 rounded-lg font-bold text-sm border transition-all ${
+                TILE_TOOL_TYPES.has(tool)
+                  ? 'bg-game-accent text-game-bg border-game-accent'
+                  : 'bg-game-card text-game-title border-game-card-border hover:border-game-accent'
+              }`}
             >
               {(() => {
-                const activeTile = TOOLS.find(t => t.tool === tool && ['rail', 'rail_start', 'rail_end', 'spinner', 'bouncer'].includes(t.tool));
+                const activeTile = TOOLS.find(t => t.tool === tool && TILE_TOOL_TYPES.has(t.tool));
                 return activeTile ? `${activeTile.emoji} ${activeTile.label}` : '🧱 Tiles';
               })()} ▾
             </button>
             {showTilesMenu && (
               <div className="absolute top-full left-0 mt-1 bg-game-card border border-game-card-border rounded-lg p-1 min-w-[140px] shadow-lg">
-                {TOOLS.filter(t => ['rail', 'rail_start', 'rail_end', 'spinner', 'bouncer'].includes(t.tool)).map(t => (
+                {TOOLS.filter(t => TILE_TOOL_TYPES.has(t.tool)).map(t => (
                   <button
                     key={t.tool}
                     onClick={() => {
                       setTool(t.tool); lastPlacedRailRef.current = null;
-                      // Switching to a tile tool should leave only tile-related state active.
                       setArcCenter(null); setArcPreview([]);
                       setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false);
                       setLineStart(null); setLinePreview([]);
@@ -1636,14 +1647,30 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           {/* Tools dropdown for rail-building helpers */}
           <div className="relative">
             <button
-              onClick={() => { setShowToolsMenu(!showToolsMenu); setShowTilesMenu(false); setShowFileMenu(false); }}
-              className="px-3 py-2 rounded-lg font-bold text-sm bg-game-card text-game-title border border-game-card-border hover:border-game-accent"
+              onClick={() => {
+                if (SHAPE_TOOL_TYPES.has(tool)) {
+                  setTool('none');
+                  setArcCenter(null); setArcPreview([]);
+                  setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false);
+                }
+                setShowToolsMenu(!showToolsMenu);
+                setShowTilesMenu(false);
+                setShowFileMenu(false);
+              }}
+              className={`px-3 py-2 rounded-lg font-bold text-sm border transition-all ${
+                SHAPE_TOOL_TYPES.has(tool)
+                  ? 'bg-game-accent text-game-bg border-game-accent'
+                  : 'bg-game-card text-game-title border-game-card-border hover:border-game-accent'
+              }`}
             >
-              🛠 Tools ▾
+              {(() => {
+                const activeTool = TOOLS.find(t => t.tool === tool && SHAPE_TOOL_TYPES.has(t.tool));
+                return activeTool ? `${activeTool.emoji} ${activeTool.label}` : '🛠 Tools';
+              })()} ▾
             </button>
             {showToolsMenu && (
               <div className="absolute top-full left-0 mt-1 bg-game-card border border-game-card-border rounded-lg p-1 min-w-[140px] shadow-lg">
-                {TOOLS.filter(t => ['circle', 'arc', 'curve', 'circular_curve'].includes(t.tool as EditorTool)).map(t => (
+                {TOOLS.filter(t => SHAPE_TOOL_TYPES.has(t.tool)).map(t => (
                   <button
                     key={t.tool}
                     onClick={() => {
@@ -1666,36 +1693,21 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
             )}
           </div>
 
-          {/* Standalone tools */}
-          {TOOLS.filter(t => ['eraser', 'line'].includes(t.tool)).map(t => (
+          {/* Standalone tools: Eraser, Line, Line2 */}
+          {TOOLS.filter(t => ['eraser', 'line', 'line2'].includes(t.tool)).map(t => (
             <button
               key={t.tool}
               onClick={() => {
-                setTool(t.tool as EditorTool); lastPlacedRailRef.current = null;
-                if (t.tool !== 'circle' && t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); }
-                if (t.tool !== 'curve' && t.tool !== 'circular_curve') { setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); }
-                if (t.tool !== 'line') { setLineStart(null); setLinePreview([]); }
-                setShowTilesMenu(false);
-              }}
-              className={`px-3 py-2 rounded-lg font-bold text-sm transition-all ${
-                tool === t.tool
-                  ? 'bg-game-accent text-game-bg scale-105'
-                  : 'bg-game-card text-game-title border border-game-card-border hover:border-game-accent'
-              }`}
-            >
-              {t.emoji} {t.label}
-            </button>
-          ))}
-          {/* Line2 standalone */}
-          {TOOLS.filter(t => ['line2'].includes(t.tool)).map(t => (
-            <button
-              key={t.tool}
-              onClick={() => {
-                setTool(t.tool as EditorTool); lastPlacedRailRef.current = null;
-                setLine2Start(null);
-                if (t.tool !== 'circle' && t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); }
-                if (t.tool !== 'curve' && t.tool !== 'circular_curve') { setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); }
-                if (t.tool !== 'line') { setLineStart(null); setLinePreview([]); }
+                if (tool === t.tool) {
+                  setTool('none');
+                } else {
+                  setTool(t.tool as EditorTool);
+                }
+                lastPlacedRailRef.current = null;
+                setArcCenter(null); setArcPreview([]);
+                setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false);
+                setLineStart(null); setLinePreview([]);
+                if (t.tool === 'line2') setLine2Start(null);
                 setShowTilesMenu(false);
               }}
               className={`px-3 py-2 rounded-lg font-bold text-sm transition-all ${
