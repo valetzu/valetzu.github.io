@@ -25,8 +25,8 @@ export type EntityId = string;
 export interface Obstacle {
   id: EntityId;
   // Logical type identifier used by the sprite system
-  typeId: 'obstacle.spinner' | 'obstacle.bouncer' | 'obstacle.staticRock';
-  type: 'spinner' | 'bouncer' | 'static';
+  typeId: string;
+  type: string;
   x: number;
   y: number;
   radius: number;
@@ -37,6 +37,22 @@ export interface Obstacle {
   bounceSpeed: number;
   armLength: number;
   hit: boolean;
+  // Extended fields for new obstacle types
+  cableLength?: number;
+  swingAngle?: number;
+  bobRadius?: number;
+  beamLength?: number;
+  beamDirection?: 'left' | 'right';
+  patrolHeight?: number;
+  diveDepth?: number;
+  patrolWidth?: number;
+  orbitRadius?: number;
+  triggerRadius?: number;
+  explosionRadius?: number;
+  dropZoneWidth?: number;
+  dropZoneHeight?: number;
+  zoneWidth?: number;
+  zoneHeight?: number;
 }
 
 export const DEFAULT_UPGRADES: Upgrades = {

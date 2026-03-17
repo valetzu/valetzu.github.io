@@ -11,17 +11,23 @@ import {
 import { musicManager, getAvailableTracks, addToCatalog } from '@/game/musicManager';
 import { Point, Obstacle, WORLD_CONFIG } from '@/game/types';
 import { GameEngine } from '@/game/engine';
+import { OBSTACLE_DEFINITIONS, obstacleDefMap, resolveParams, ObstacleParams, drawReach } from '@/game/obstacleDefinitions';
 
 interface LevelEditorProps {
   onBack: () => void;
 }
 
+const OBSTACLE_TOOLS = OBSTACLE_DEFINITIONS.map(d => ({
+  tool: d.tileType as EditorTool,
+  label: d.label,
+  emoji: d.emoji,
+}));
+
 const TOOLS: { tool: EditorTool; label: string; emoji: string }[] = [
   { tool: 'rail_start', label: 'Start', emoji: '🟢' },
   { tool: 'rail_end', label: 'End', emoji: '🏁' },
   { tool: 'rail', label: 'Rail', emoji: '🛤️' },
-  { tool: 'spinner', label: 'Spinner', emoji: '🌀' },
-  { tool: 'bouncer', label: 'Bouncer', emoji: '🔴' },
+  ...OBSTACLE_TOOLS,
   { tool: 'eraser', label: 'Eraser', emoji: '🧹' },
   { tool: 'arc', label: 'Arc Tool', emoji: '🔄' },
   { tool: 'curve', label: 'Curve', emoji: '〰️' },
@@ -31,13 +37,16 @@ const TOOLS: { tool: EditorTool; label: string; emoji: string }[] = [
   { tool: 'line2', label: 'Free Line', emoji: '📐' },
 ];
 
-const TILE_COLORS: Record<TileType, string> = {
+const OBSTACLE_COLORS: Record<string, string> = Object.fromEntries(
+  OBSTACLE_DEFINITIONS.map(d => [d.tileType, d.tileColor])
+);
+
+const TILE_COLORS: Record<string, string> = {
   empty: 'transparent',
   rail: '#FFD700',
   rail_start: '#00E676',
   rail_end: '#FF4081',
-  spinner: '#FF6B35',
-  bouncer: '#E53935',
+  ...OBSTACLE_COLORS,
 };
 
 export default function LevelEditor({ onBack }: LevelEditorProps) {
@@ -124,6 +133,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const [currentLevelId, setCurrentLevelId] = useState<string>('');
   const [currentMusicFile, setCurrentMusicFile] = useState<string>('');
   const [showMusicMenu, setShowMusicMenu] = useState(false);
+
+  const obstacleParamsRef = useRef<Record<string, ObstacleParams>>({});
 
   const [smoothSegments, setSmoothSegments] = useState<SmoothSegment[]>([]);
   const [freeLines, setFreeLines] = useState<FreeLineSegment[]>([]);
@@ -267,20 +278,58 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           ctx.arc(centerX, centerY, 4, 0, Math.PI * 2);
           ctx.fill();
         }
-      } else if (type === 'spinner') {
-        ctx.fillStyle = 'rgba(255,107,53,0.3)';
-        ctx.fillRect(sx + 2, sy + 2, GRID_SIZE - 4, GRID_SIZE - 4);
-        ctx.font = `${GRID_SIZE * 0.6}px system-ui`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('🌀', sx + GRID_SIZE / 2, sy + GRID_SIZE / 2);
-      } else if (type === 'bouncer') {
-        ctx.fillStyle = 'rgba(229,57,53,0.3)';
-        ctx.fillRect(sx + 2, sy + 2, GRID_SIZE - 4, GRID_SIZE - 4);
-        ctx.font = `${GRID_SIZE * 0.6}px system-ui`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('🔴', sx + GRID_SIZE / 2, sy + GRID_SIZE / 2);
+      } else {
+        // Generic obstacle tile — driven by the registry
+        const def = obstacleDefMap.get(type);
+        if (def) {
+          ctx.fillStyle = def.tileColor;
+          ctx.fillRect(sx + 2, sy + 2, GRID_SIZE - 4, GRID_SIZE - 4);
+          ctx.font = `${GRID_SIZE * 0.6}px system-ui`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillStyle = 'white';
+          ctx.fillText(def.emoji, sx + GRID_SIZE / 2, sy + GRID_SIZE / 2);
+
+          // Show reach overlay when cursor hovers this cell
+          if (mouseWorld) {
+            const hoverGx = Math.floor(mouseWorld.x / GRID_SIZE);
+            const hoverGy = Math.floor(mouseWorld.y / GRID_SIZE);
+            if (hoverGx === gx && hoverGy === gy) {
+              const params = resolveParams(type, obstacleParamsRef.current[key]);
+              if (params) {
+                const worldX = (gx + 0.5) * GRID_SIZE;
+                const worldY = (gy + 0.5) * GRID_SIZE;
+                const zones = def.getReach(params as any);
+                drawReach(ctx, zones, worldX - cx, worldY - cy);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Reach preview when obstacle tool is active and cursor is over the grid
+    if (mouseWorld && obstacleDefMap.has(tool)) {
+      const hoverGx = Math.floor(mouseWorld.x / GRID_SIZE);
+      const hoverGy = Math.floor(mouseWorld.y / GRID_SIZE);
+      const key = tileKey(hoverGx, hoverGy);
+      const def = obstacleDefMap.get(tool);
+      if (def) {
+        const params = resolveParams(tool, obstacleParamsRef.current[key]);
+        if (params) {
+          const worldX = (hoverGx + 0.5) * GRID_SIZE;
+          const worldY = (hoverGy + 0.5) * GRID_SIZE;
+          const zones = def.getReach(params as any);
+          drawReach(ctx, zones, worldX - cx, worldY - cy);
+          // Ghost emoji preview
+          ctx.globalAlpha = 0.5;
+          ctx.font = `${GRID_SIZE * 0.6}px system-ui`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillStyle = 'white';
+          ctx.fillText(def.emoji, worldX - cx, worldY - cy);
+          ctx.globalAlpha = 1.0;
+        }
       }
     }
 
@@ -1254,7 +1303,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     window.addEventListener('resize', resize);
 
     // Convert tiles to engine-compatible format (already resampled at RAIL_SPACING)
-    const { railPoints, allSegments, obstacles: obsData, endSegmentIndex, endPointIndex } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, freeLines);
+    const { railPoints, allSegments, obstacles: obsData, endSegmentIndex, endPointIndex } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, freeLines, obstacleParamsRef.current);
 
     // Start level music if configured
     if (currentMusicFile) {
@@ -1284,36 +1333,20 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     engine.noBackground = skyOnly;
     engine.obstacles = [];
 
-    // Add obstacles - convert grid coords to world coords matching the resampled rail
+    // Add obstacles - convert grid coords to world coords using the registry
     let nextEditorObsId = 1;
     for (const obs of obsData) {
       const obsWorldX = (obs.gx + 0.5) * GRID_SIZE;
-      const wy = (obs.gy + 0.5) * GRID_SIZE;
-      
-      if (obs.type === 'spinner') {
-        engine.obstacles.push({
-          id: `editor_obs_${nextEditorObsId++}`,
-          typeId: 'obstacle.spinner',
-          type: 'spinner',
-          x: obsWorldX, y: wy,
-          radius: 12, angle: 0,
-          rotSpeed: -0.5,
-          baseY: 0, amplitude: 0, bounceSpeed: 0,
-          armLength: 120, hit: false,
-        });
-      } else {
-        engine.obstacles.push({
-          id: `editor_obs_${nextEditorObsId++}`,
-          typeId: 'obstacle.bouncer',
-          type: 'bouncer',
-          x: obsWorldX, y: wy,
-          radius: 18, angle: 0,
-          rotSpeed: 0,
-          baseY: wy - 20, amplitude: 80,
-          bounceSpeed: 0.7,
-          armLength: 0, hit: false,
-        });
-      }
+      const obsWorldY = (obs.gy + 0.5) * GRID_SIZE;
+      const def = obstacleDefMap.get(obs.tileType);
+      if (!def) continue;
+      const gameObs = def.toGameObstacle(
+        `editor_obs_${nextEditorObsId++}`,
+        obsWorldX,
+        obsWorldY,
+        obs.params as any,
+      );
+      if (gameObs) engine.obstacles.push(gameObs);
     }
 
     // Prevent auto-generation of more rail; mark as finite path
@@ -1359,6 +1392,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       smoothSegments,
       freeLines,
       musicFile: currentMusicFile || undefined,
+      obstacleParams: Object.keys(obstacleParamsRef.current).length > 0 ? { ...obstacleParamsRef.current } : undefined,
     };
     saveCustomLevel(level);
     lastSavedTilesRef.current = JSON.stringify(tiles);
@@ -1385,6 +1419,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       smoothSegments,
       freeLines,
       musicFile: currentMusicFile || undefined,
+      obstacleParams: Object.keys(obstacleParamsRef.current).length > 0 ? { ...obstacleParamsRef.current } : undefined,
     };
     saveCustomLevel(level);
     lastSavedTilesRef.current = JSON.stringify(tiles);
@@ -1418,6 +1453,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     }).filter(Boolean) as FreeLineSegment[];
     setFreeLines(migrated);
     lastSavedFreeLinesRef.current = JSON.stringify(migrated);
+    obstacleParamsRef.current = level.obstacleParams ? { ...level.obstacleParams } : {};
     setCurrentLevelName(level.name);
     setCurrentLevelId(level.id || generateLevelId());
     setCurrentMusicFile(level.musicFile ?? '');
@@ -1458,6 +1494,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     setSmoothSegments([]);
     setFreeLines([]);
     railConnectionsRef.current = {};
+    obstacleParamsRef.current = {};
     lastPlacedRailRef.current = null;
     setLine2Start(null);
     setArcCenter(null);

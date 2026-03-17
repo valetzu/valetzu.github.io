@@ -1,14 +1,29 @@
+import { obstacleDefMap, resolveParams, ObstacleParams } from './obstacleDefinitions';
+
 export const GRID_SIZE = 50;
 export const EDITOR_WIDTH = 200; // grid cells wide
 export const EDITOR_HEIGHT = 16; // grid cells tall
 
-export type TileType = 'empty' | 'rail' | 'rail_start' | 'rail_end' | 'spinner' | 'bouncer';
+export type TileType =
+  | 'empty' | 'rail' | 'rail_start' | 'rail_end'
+  | 'spinner' | 'bouncer'
+  | 'pendulum' | 'crusher' | 'laser' | 'swoop'
+  | 'orbiter' | 'boulder' | 'mine' | 'stalactite';
+
 export type EditorTool =
   | 'rail'
   | 'rail_start'
   | 'rail_end'
   | 'spinner'
   | 'bouncer'
+  | 'pendulum'
+  | 'crusher'
+  | 'laser'
+  | 'swoop'
+  | 'orbiter'
+  | 'boulder'
+  | 'mine'
+  | 'stalactite'
   | 'eraser'
   | 'arc'
   | 'curve'
@@ -67,6 +82,11 @@ export interface EditorLevel {
   freeLines?: FreeLineSegment[];
   /** Music filename relative to public/assets/music/customLevels/{id}/ */
   musicFile?: string;
+  /**
+   * Per-tile obstacle parameters keyed by "gx,gy".
+   * Absence of a key means use the obstacle type's defaultParams.
+   */
+  obstacleParams?: Record<string, ObstacleParams>;
 }
 
 /** Generate a short random level id that is stable across saves. */
@@ -290,25 +310,28 @@ export function convertLevelToGameData(
   tiles: Record<string, TileType>,
   connections?: Record<string, Set<string>>,
   smoothSegments?: SmoothSegment[],
-  freeLines?: FreeLineSegment[]
+  freeLines?: FreeLineSegment[],
+  obstacleParams?: Record<string, ObstacleParams>
 ): {
   railPoints: { x: number; y: number }[];
   allSegments: { x: number; y: number }[][];
   /** Stable segment id per index (so Line 2 doesn't break when start tile moves) */
   segmentIdByIndex: string[];
-  obstacles: { type: 'spinner' | 'bouncer'; gx: number; gy: number }[];
+  obstacles: { tileType: string; gx: number; gy: number; params: ObstacleParams }[];
   endSegmentIndex: number | null;
   endPointIndex: number | null;
 } {
-  const obstacles: { type: 'spinner' | 'bouncer'; gx: number; gy: number }[] = [];
+  const obstacles: { tileType: string; gx: number; gy: number; params: ObstacleParams }[] = [];
   const railKeys: string[] = [];
 
   for (const [key, type] of Object.entries(tiles)) {
     if (type === 'rail' || type === 'rail_start' || type === 'rail_end') {
       railKeys.push(key);
-    } else if (type === 'spinner' || type === 'bouncer') {
+    } else if (obstacleDefMap.has(type)) {
       const [gx, gy] = parseTileKey(key);
-      obstacles.push({ type, gx, gy });
+      const stored = obstacleParams ? obstacleParams[key] : undefined;
+      const params = resolveParams(type, stored);
+      if (params) obstacles.push({ tileType: type, gx, gy, params });
     }
   }
 
