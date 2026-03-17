@@ -321,8 +321,12 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           const worldY = (hoverGy + 0.5) * GRID_SIZE;
           const zones = def.getReach(params as any);
           drawReach(ctx, zones, worldX - cx, worldY - cy);
-          // Ghost emoji preview
-          ctx.globalAlpha = 0.5;
+          // Ghost tile preview
+          ctx.globalAlpha = 0.55;
+          const sx = hoverGx * GRID_SIZE - cx;
+          const sy = hoverGy * GRID_SIZE - cy;
+          ctx.fillStyle = def.tileColor;
+          ctx.fillRect(sx + 2, sy + 2, GRID_SIZE - 4, GRID_SIZE - 4);
           ctx.font = `${GRID_SIZE * 0.6}px system-ui`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
@@ -544,7 +548,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(`Middle-click / Right-click drag to pan • +/- to zoom (${Math.round(zoom * 100)}%) • Click to place tiles`, w / 2, h - 15);
-  }, [camera, tiles, smoothSegments, freeLines, tool, arcCenter, arcPreview, zoom, curveStart, curveEnd, curveControl, lineStart, linePreview, line2Start]);
+  }, [camera, tiles, smoothSegments, freeLines, tool, arcCenter, arcPreview, zoom, curveStart, curveEnd, curveControl, lineStart, linePreview, line2Start, mouseWorld]);
 
   // Resize & render loop
   useEffect(() => {
@@ -1140,14 +1144,13 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    setMouseWorld(screenToWorld(e.clientX, e.clientY));
     if (isPanning) {
-      setCamera({
-        x: panStart.x - e.clientX / zoom,
-        y: panStart.y - e.clientY / zoom,
-      });
+      const newCam = { x: panStart.x - e.clientX / zoom, y: panStart.y - e.clientY / zoom };
+      setCamera(newCam);
+      setMouseWorld({ x: e.clientX / zoom + newCam.x, y: e.clientY / zoom + newCam.y });
       return;
     }
+    setMouseWorld(screenToWorld(e.clientX, e.clientY));
 
     if (isDrawing) {
       const { gx, gy } = screenToGrid(e.clientX, e.clientY);
