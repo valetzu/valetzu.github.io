@@ -346,8 +346,8 @@ export class GameEngine {
 
       // Camera follows airborne gondola
       const gondolaWorld = this.getGondolaPos();
-      this.camera.x += (gondolaWorld.x - this.canvas.width * 0.35 - this.camera.x) * 0.08;
-      this.camera.y += (gondolaWorld.y - this.canvas.height * 0.45 - this.camera.y) * 0.06;
+      this.camera.x += (gondolaWorld.x - this.canvas.width * 0.35 - this.camera.x) * (1 - Math.exp(-5.0 * dt));
+      this.camera.y += (gondolaWorld.y - this.canvas.height * 0.45 - this.camera.y) * (1 - Math.exp(-3.7 * dt));
 
       // Timers
       if (this.invulnTimer > 0) this.invulnTimer -= dt;
@@ -451,8 +451,8 @@ export class GameEngine {
 
     // Camera
     const gondolaWorld = this.getGondolaPos();
-    this.camera.x += (gondolaWorld.x - this.canvas.width * 0.35 - this.camera.x) * 0.08;
-    this.camera.y += (gondolaWorld.y - this.canvas.height * 0.45 - this.camera.y) * 0.06;
+    this.camera.x += (gondolaWorld.x - this.canvas.width * 0.35 - this.camera.x) * (1 - Math.exp(-5.0 * dt));
+    this.camera.y += (gondolaWorld.y - this.canvas.height * 0.45 - this.camera.y) * (1 - Math.exp(-3.7 * dt));
 
     // Callbacks
     this.onUpdate?.(this.distance, this.passengers, Math.abs(this.speed) * 0.1);
