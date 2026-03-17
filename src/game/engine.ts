@@ -488,18 +488,35 @@ export class GameEngine {
       let hitDist: number;
 
       if (obs.type === 'spinner') {
-        // Check each arm tip
+        // Point-to-segment distance squared helper
+        const ptSegDistSq = (px: number, py: number, ax: number, ay: number, bx: number, by: number) => {
+          const dx = bx - ax, dy = by - ay;
+          const lenSq = dx * dx + dy * dy;
+          if (lenSq === 0) return (px - ax) ** 2 + (py - ay) ** 2;
+          const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+          return (px - ax - t * dx) ** 2 + (py - ay - t * dy) ** 2;
+        };
+        const ARM_HALF = 9;  // half of arm lineWidth 18
+        const POLE_HALF = 5; // half of pole lineWidth 10
+        // Check arm segments (capsule collision)
         for (let a = 0; a < 4; a++) {
           const armAngle = obs.angle + (a * Math.PI) / 2;
           const tipX = obs.x + Math.cos(armAngle) * obs.armLength;
           const tipY = obs.y + Math.sin(armAngle) * obs.armLength;
-          const d = Math.sqrt((cx - tipX) ** 2 + (cy - tipY) ** 2);
-          if (d < HIT_RADIUS + 12) {
+          const dSq = ptSegDistSq(cx, cy, obs.x, obs.y, tipX, tipY);
+          if (dSq < (HIT_RADIUS + ARM_HALF) ** 2) {
             this.hitPassenger(obs);
             return;
           }
         }
-        // Check center
+        // Check pole segment (capsule collision)
+        const poleBottomY = obs.y + 60;
+        const dPoleSq = ptSegDistSq(cx, cy, obs.x, obs.y, obs.x, poleBottomY);
+        if (dPoleSq < (HIT_RADIUS + POLE_HALF) ** 2) {
+          this.hitPassenger(obs);
+          return;
+        }
+        // Check center hub
         hitDist = Math.sqrt((cx - obs.x) ** 2 + (cy - obs.y) ** 2);
         if (hitDist < HIT_RADIUS + obs.radius) {
           this.hitPassenger(obs);
@@ -775,44 +792,56 @@ export class GameEngine {
         const sx = screenX;
         const sy = obs.y - cy;
 
+        // Non-hitbox structural parts — gray, reduced opacity (background feel)
+        ctx.globalAlpha = 0.35;
+
         // Pole
-        ctx.strokeStyle = '#666';
-        ctx.lineWidth = 4;
+        ctx.strokeStyle = '#888';
+        ctx.lineWidth = 10;
         const groundY = obs.y + 60 - cy;
         ctx.beginPath();
         ctx.moveTo(sx, sy);
         ctx.lineTo(sx, groundY);
         ctx.stroke();
 
-        // Arms (yellow-black striped)
+        // Arms
+        ctx.lineWidth = 18;
+        ctx.lineCap = 'round';
         for (let a = 0; a < 4; a++) {
           const armAngle = obs.angle + (a * Math.PI) / 2;
           const tipX = sx + Math.cos(armAngle) * obs.armLength;
           const tipY = sy + Math.sin(armAngle) * obs.armLength;
-
-          ctx.strokeStyle = a % 2 === 0 ? '#FFD700' : '#333';
-          ctx.lineWidth = 8;
-          ctx.lineCap = 'round';
+          ctx.strokeStyle = '#999';
           ctx.beginPath();
           ctx.moveTo(sx, sy);
           ctx.lineTo(tipX, tipY);
           ctx.stroke();
-
-          // Tip ball
-          ctx.fillStyle = a % 2 === 0 ? '#333' : '#FFD700';
-          ctx.beginPath();
-          ctx.arc(tipX, tipY, 6, 0, Math.PI * 2);
-          ctx.fill();
         }
 
-        // Center
-        ctx.fillStyle = '#888';
+        // Center hub
+        ctx.fillStyle = '#aaa';
         ctx.beginPath();
         ctx.arc(sx, sy, obs.radius, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = '#555';
+        ctx.strokeStyle = '#777';
         ctx.lineWidth = 2;
         ctx.stroke();
+
+        ctx.globalAlpha = 1.0;
+
+        // Tip balls — hitbox, full opacity
+        for (let a = 0; a < 4; a++) {
+          const armAngle = obs.angle + (a * Math.PI) / 2;
+          const tipX = sx + Math.cos(armAngle) * obs.armLength;
+          const tipY = sy + Math.sin(armAngle) * obs.armLength;
+          ctx.fillStyle = '#cc3333';
+          ctx.beginPath();
+          ctx.arc(tipX, tipY, 7, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#ff6666';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
 
       } else if (obs.type === 'bouncer') {
         obs.angle += obs.bounceSpeed * 0.016;
