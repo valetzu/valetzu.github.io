@@ -1231,7 +1231,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         delete next[key];
         return next;
       });
-    } else if (tool === 'rail' || tool === 'spinner' || tool === 'bouncer') {
+    } else if (tool === 'rail' || obstacleDefMap.has(tool)) {
       const isRail = tool === 'rail';
       if (isRail) {
         // Connect to last placed rail if adjacent

@@ -151,7 +151,7 @@ export class GameEngine {
           radius: 12, angle: Math.random() * Math.PI * 2,
           rotSpeed: -(0.3 + Math.random() * 0.4 + difficulty * 0.4),
           baseY: 0, amplitude: 0, bounceSpeed: 0,
-          armLength: armLen, hit: false,
+          armLength: armLen, hit: false, hp: 1,
         };
       } else {
         // Bouncer
@@ -164,7 +164,7 @@ export class GameEngine {
           rotSpeed: 0,
           baseY: railY - 20, amplitude: 100 + Math.random() * 80,
           bounceSpeed: 0.6 + Math.random() * 0.8,
-          armLength: 0, hit: false,
+          armLength: 0, hit: false, hp: 1,
         };
       }
       this.obstacles.push(obs);
@@ -512,6 +512,16 @@ export class GameEngine {
           this.hitPassenger(obs);
           return;
         }
+      } else if (obs.type === 'pendulum') {
+        const currentSwing = (obs.swingAngle ?? 0.8) * Math.sin(obs.angle);
+        const cableLen = obs.cableLength ?? 120;
+        const bobX = obs.x + Math.sin(currentSwing) * cableLen;
+        const bobY = obs.y + Math.cos(currentSwing) * cableLen;
+        hitDist = Math.sqrt((cx - bobX) ** 2 + (cy - bobY) ** 2);
+        if (hitDist < HIT_RADIUS + (obs.bobRadius ?? obs.radius)) {
+          this.hitPassenger(obs);
+          return;
+        }
       } else {
         hitDist = Math.sqrt((cx - obs.x) ** 2 + (cy - obs.y) ** 2);
         if (hitDist < HIT_RADIUS + obs.radius) {
@@ -522,8 +532,7 @@ export class GameEngine {
     }
   }
 
-  hitPassenger(obs: Obstacle) {
-    obs.hit = true;
+  hitPassenger(_obs: Obstacle) {
     this.passengers--;
     this.invulnTimer = INVULN_TIME;
     this.flashTimer = 0.3;
@@ -753,9 +762,8 @@ export class GameEngine {
       if (usedSprite) {
         // Sprite handled; continue to next obstacle.
         if (obs.type === 'spinner') {
-          // Still update angle for next frame even if sprite-drawn.
           obs.angle += obs.rotSpeed * 0.016;
-        } else if (obs.type === 'bouncer') {
+        } else if (obs.type === 'bouncer' || obs.type === 'pendulum') {
           obs.angle += obs.bounceSpeed * 0.016;
         }
         continue;
@@ -854,6 +862,52 @@ export class GameEngine {
           ctx.closePath();
           ctx.fill();
         }
+
+      } else if (obs.type === 'pendulum') {
+        obs.angle += obs.bounceSpeed * 0.016;
+        const currentSwing = (obs.swingAngle ?? 0.8) * Math.sin(obs.angle);
+        const cableLen = obs.cableLength ?? 120;
+        const anchorX = screenX;
+        const anchorY = obs.y - cy;
+        const bobX = anchorX + Math.sin(currentSwing) * cableLen;
+        const bobY = anchorY + Math.cos(currentSwing) * cableLen;
+        const bobR = obs.bobRadius ?? obs.radius;
+
+        // Anchor mount
+        ctx.fillStyle = '#888';
+        ctx.beginPath();
+        ctx.arc(anchorX, anchorY, 6, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Cable
+        ctx.strokeStyle = '#888';
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(anchorX, anchorY);
+        ctx.lineTo(bobX, bobY);
+        ctx.stroke();
+
+        // Bob spikes
+        for (let s = 0; s < 6; s++) {
+          const sa = (s / 6) * Math.PI * 2;
+          ctx.fillStyle = '#555';
+          ctx.beginPath();
+          ctx.moveTo(bobX + Math.cos(sa) * bobR, bobY + Math.sin(sa) * bobR);
+          ctx.lineTo(bobX + Math.cos(sa + 0.2) * (bobR + 7), bobY + Math.sin(sa + 0.2) * (bobR + 7));
+          ctx.lineTo(bobX + Math.cos(sa - 0.2) * (bobR + 7), bobY + Math.sin(sa - 0.2) * (bobR + 7));
+          ctx.closePath();
+          ctx.fill();
+        }
+
+        // Bob
+        ctx.fillStyle = '#444';
+        ctx.beginPath();
+        ctx.arc(bobX, bobY, bobR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#666';
+        ctx.lineWidth = 2;
+        ctx.stroke();
 
       } else {
         // Static - rock

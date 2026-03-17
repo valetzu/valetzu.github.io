@@ -233,18 +233,18 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
     label: 'Pendulum',
     emoji: '⏱️',
     tileColor: 'rgba(100,180,255,0.3)',
-    defaultParams: { obstacleType: 'pendulum', cableLength: 120, swingAngle: 0.8, bobRadius: 18 } as PendulumParams,
+    defaultParams: { obstacleType: 'pendulum', cableLength: 220, swingAngle: 1.2, bobRadius: 18 } as PendulumParams,
     getReach(params: PendulumParams): ObstacleReachZone[] {
       const arcR = params.cableLength + params.bobRadius;
       const span = params.swingAngle * 2;
-      const startAngle = Math.PI / 2 - params.swingAngle; // centred downward
+      const startAngle = Math.PI / 2 - params.swingAngle;
       return [
         { kind: 'arc', radius: arcR, startAngle, span, offsetX: 0, offsetY: 0, color: '#64b4ff' },
         { kind: 'circle', radius: params.bobRadius, color: '#64b4ff' },
       ];
     },
-    toGameObstacle(_id, _wx, _wy, _params: PendulumParams): null {
-      return null; // engine not yet implemented
+    toGameObstacle(id, worldX, worldY, params: PendulumParams): Obstacle {
+      return { id, typeId: 'obstacle.pendulum', type: 'pendulum', x: worldX, y: worldY, radius: params.bobRadius, angle: 0, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: 1.2, armLength: 0, hit: false, cableLength: params.cableLength, swingAngle: params.swingAngle, bobRadius: params.bobRadius };
     },
   } as ObstacleDefinition<PendulumParams>,
 
@@ -261,8 +261,8 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
         { kind: 'rect', width: params.zoneWidth, height: params.zoneHeight, offsetX: 0, offsetY: 0, color: '#aaaaaa' },
       ];
     },
-    toGameObstacle(_id, _wx, _wy, _params: CrusherParams): null {
-      return null;
+    toGameObstacle(id, worldX, worldY, params: CrusherParams): Obstacle {
+      return { id, typeId: 'obstacle.crusher', type: 'crusher', x: worldX, y: worldY, radius: Math.min(params.zoneWidth, params.zoneHeight) / 2, angle: 0, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: 0, hit: false, zoneWidth: params.zoneWidth, zoneHeight: params.zoneHeight };
     },
   } as ObstacleDefinition<CrusherParams>,
 
@@ -280,8 +280,8 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
         { kind: 'line', dx, dy: 0, thickness: 6, color: '#ff3232' },
       ];
     },
-    toGameObstacle(_id, _wx, _wy, _params: LaserParams): null {
-      return null;
+    toGameObstacle(id, worldX, worldY, params: LaserParams): Obstacle {
+      return { id, typeId: 'obstacle.laser', type: 'laser', x: worldX, y: worldY, radius: 12, angle: 0, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: params.beamLength, hit: false, beamLength: params.beamLength, beamDirection: params.direction };
     },
   } as ObstacleDefinition<LaserParams>,
 
@@ -295,14 +295,12 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
     defaultParams: { obstacleType: 'swoop', patrolWidth: 120, patrolHeight: 60, diveDepth: 80 } as SwoopParams,
     getReach(params: SwoopParams): ObstacleReachZone[] {
       return [
-        // Patrol range (above)
         { kind: 'rect', width: params.patrolWidth, height: params.patrolHeight, offsetX: 0, offsetY: -params.patrolHeight / 2, color: '#ffc832' },
-        // Dive zone (below patrol)
         { kind: 'rect', width: params.patrolWidth, height: params.diveDepth, offsetX: 0, offsetY: params.patrolHeight / 2 + params.diveDepth / 2, color: '#ff8832' },
       ];
     },
-    toGameObstacle(_id, _wx, _wy, _params: SwoopParams): null {
-      return null;
+    toGameObstacle(id, worldX, worldY, params: SwoopParams): Obstacle {
+      return { id, typeId: 'obstacle.swoop', type: 'swoop', x: worldX, y: worldY, radius: 20, angle: 0, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: 0, hit: false, patrolWidth: params.patrolWidth, patrolHeight: params.patrolHeight, diveDepth: params.diveDepth };
     },
   } as ObstacleDefinition<SwoopParams>,
 
@@ -319,8 +317,8 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
         { kind: 'ring', innerRadius: params.orbitRadius - params.orbRadius, outerRadius: params.orbitRadius + params.orbRadius, color: '#b450ff' },
       ];
     },
-    toGameObstacle(_id, _wx, _wy, _params: OrbiterParams): null {
-      return null;
+    toGameObstacle(id, worldX, worldY, params: OrbiterParams): Obstacle {
+      return { id, typeId: 'obstacle.orbiter', type: 'orbiter', x: worldX, y: worldY, radius: params.orbRadius, angle: 0, rotSpeed: 1.2, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: params.orbitRadius, hit: false, orbitRadius: params.orbitRadius };
     },
   } as ObstacleDefinition<OrbiterParams>,
 
@@ -337,8 +335,8 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
         { kind: 'circle', radius: params.radius, color: '#8c7850' },
       ];
     },
-    toGameObstacle(_id, _wx, _wy, _params: BoulderParams): null {
-      return null;
+    toGameObstacle(id, worldX, worldY, params: BoulderParams): Obstacle {
+      return { id, typeId: 'obstacle.boulder', type: 'boulder', x: worldX, y: worldY, radius: params.radius, angle: 0, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: 0, hit: false, hp: 1 };
     },
   } as ObstacleDefinition<BoulderParams>,
 
@@ -356,8 +354,8 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
         { kind: 'circle', radius: params.triggerRadius, color: '#ffcc00' },
       ];
     },
-    toGameObstacle(_id, _wx, _wy, _params: MineParams): null {
-      return null;
+    toGameObstacle(id, worldX, worldY, params: MineParams): Obstacle {
+      return { id, typeId: 'obstacle.mine', type: 'mine', x: worldX, y: worldY, radius: params.triggerRadius, angle: 0, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: 0, hit: false, triggerRadius: params.triggerRadius, explosionRadius: params.explosionRadius };
     },
   } as ObstacleDefinition<MineParams>,
 
@@ -372,12 +370,11 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
     getReach(params: StalactiteParams): ObstacleReachZone[] {
       return [
         { kind: 'circle', radius: params.triggerRadius, color: '#b4dcff' },
-        // Drop zone extends downward from the tile centre
         { kind: 'rect', width: params.dropZoneWidth, height: params.dropZoneHeight, offsetX: 0, offsetY: params.dropZoneHeight / 2, color: '#7ab8ff' },
       ];
     },
-    toGameObstacle(_id, _wx, _wy, _params: StalactiteParams): null {
-      return null;
+    toGameObstacle(id, worldX, worldY, params: StalactiteParams): Obstacle {
+      return { id, typeId: 'obstacle.stalactite', type: 'stalactite', x: worldX, y: worldY, radius: params.dropZoneWidth / 2, angle: 0, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: 0, hit: false, triggerRadius: params.triggerRadius, dropZoneWidth: params.dropZoneWidth, dropZoneHeight: params.dropZoneHeight };
     },
   } as ObstacleDefinition<StalactiteParams>,
 ];
