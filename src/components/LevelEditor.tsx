@@ -11,7 +11,7 @@ import {
 import { musicManager, getAvailableTracks, addToCatalog } from '@/game/musicManager';
 import { Point, Obstacle, WORLD_CONFIG } from '@/game/types';
 import { GameEngine } from '@/game/engine';
-import { OBSTACLE_DEFINITIONS, obstacleDefMap, resolveParams, ObstacleParams, drawReach } from '@/game/obstacleDefinitions';
+import { OBSTACLE_DEFINITIONS, obstacleDefMap, resolveParams, ObstacleParams, drawReach, ParamFieldMeta } from '@/game/obstacleDefinitions';
 
 interface LevelEditorProps {
   onBack: () => void;
@@ -137,7 +137,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const [currentMusicFile, setCurrentMusicFile] = useState<string>('');
   const [showMusicMenu, setShowMusicMenu] = useState(false);
 
-  const obstacleParamsRef = useRef<Record<string, ObstacleParams>>({});
+  const [obstacleParams, setObstacleParams] = useState<Record<string, ObstacleParams>>({});
+  const [selectedObstacleKey, setSelectedObstacleKey] = useState<string | null>(null);
 
   const [smoothSegments, setSmoothSegments] = useState<SmoothSegment[]>([]);
   const [freeLines, setFreeLines] = useState<FreeLineSegment[]>([]);
@@ -176,6 +177,11 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const [linePreview, setLinePreview] = useState<{ gx: number; gy: number }[]>([]);
 
   const worldHeight = EDITOR_HEIGHT * GRID_SIZE;
+
+  // Clear obstacle selection when switching to a non-select tool
+  useEffect(() => {
+    if (tool !== 'none') setSelectedObstacleKey(null);
+  }, [tool]);
 
   // Draw the editor grid
   const render = useCallback(() => {
@@ -293,18 +299,27 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           ctx.fillStyle = 'white';
           ctx.fillText(def.emoji, sx + GRID_SIZE / 2, sy + GRID_SIZE / 2);
 
-          // Show reach overlay when cursor hovers this cell
-          if (mouseWorld) {
-            const hoverGx = Math.floor(mouseWorld.x / GRID_SIZE);
-            const hoverGy = Math.floor(mouseWorld.y / GRID_SIZE);
-            if (hoverGx === gx && hoverGy === gy) {
-              const params = resolveParams(type, obstacleParamsRef.current[key]);
-              if (params) {
-                const worldX = (gx + 0.5) * GRID_SIZE;
-                const worldY = (gy + 0.5) * GRID_SIZE;
-                const zones = def.getReach(params as any);
-                drawReach(ctx, zones, worldX - cx, worldY - cy);
-              }
+          // Selection highlight
+          if (key === selectedObstacleKey) {
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([4, 3]);
+            ctx.strokeRect(sx + 1, sy + 1, GRID_SIZE - 2, GRID_SIZE - 2);
+            ctx.setLineDash([]);
+          }
+
+          // Show reach overlay when this tile is selected OR when cursor hovers it
+          const isSelected = key === selectedObstacleKey;
+          const isHovered = mouseWorld != null &&
+            Math.floor(mouseWorld.x / GRID_SIZE) === gx &&
+            Math.floor(mouseWorld.y / GRID_SIZE) === gy;
+          if (isSelected || isHovered) {
+            const params = resolveParams(type, obstacleParams[key]);
+            if (params) {
+              const worldX = (gx + 0.5) * GRID_SIZE;
+              const worldY = (gy + 0.5) * GRID_SIZE;
+              const zones = def.getReach(params as any);
+              drawReach(ctx, zones, worldX - cx, worldY - cy);
             }
           }
         }
@@ -318,7 +333,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       const key = tileKey(hoverGx, hoverGy);
       const def = obstacleDefMap.get(tool);
       if (def) {
-        const params = resolveParams(tool, obstacleParamsRef.current[key]);
+        const params = resolveParams(tool, obstacleParams[key]);
         if (params) {
           const worldX = (hoverGx + 0.5) * GRID_SIZE;
           const worldY = (hoverGy + 0.5) * GRID_SIZE;
@@ -551,7 +566,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(`Middle-click / Right-click drag to pan • +/- to zoom (${Math.round(zoom * 100)}%) • Click to place tiles`, w / 2, h - 15);
-  }, [camera, tiles, smoothSegments, freeLines, tool, arcCenter, arcPreview, zoom, curveStart, curveEnd, curveControl, lineStart, linePreview, line2Start, mouseWorld]);
+  }, [camera, tiles, smoothSegments, freeLines, tool, arcCenter, arcPreview, zoom, curveStart, curveEnd, curveControl, lineStart, linePreview, line2Start, mouseWorld, obstacleParams, selectedObstacleKey]);
 
   // Resize & render loop
   useEffect(() => {
@@ -1061,6 +1076,18 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         return;
       }
 
+      // None tool: click on obstacle tile to select it (for inspector)
+      if (tool === 'none') {
+        const key = tileKey(gx, gy);
+        const tileType = tiles[key];
+        if (tileType && obstacleDefMap.has(tileType)) {
+          setSelectedObstacleKey(prev => prev === key ? null : key);
+        } else {
+          setSelectedObstacleKey(null);
+        }
+        return;
+      }
+
       // Eraser: check if click is near a free line or smooth curve segment and delete it
       if (tool === 'eraser') {
         const { allSegments: baseSegs, segmentIdByIndex: baseIds } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, undefined);
@@ -1226,6 +1253,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     if (tool === 'eraser') {
       removeRailConnections(key);
       if (lastPlacedRailRef.current === key) lastPlacedRailRef.current = null;
+      setSelectedObstacleKey(prev => prev === key ? null : prev);
       setTiles(prev => {
         const next = { ...prev };
         delete next[key];
@@ -1309,7 +1337,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     window.addEventListener('resize', resize);
 
     // Convert tiles to engine-compatible format (already resampled at RAIL_SPACING)
-    const { railPoints, allSegments, obstacles: obsData, endSegmentIndex, endPointIndex } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, freeLines, obstacleParamsRef.current);
+    const { railPoints, allSegments, obstacles: obsData, endSegmentIndex, endPointIndex } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, freeLines, obstacleParams);
 
     // Start level music if configured
     if (currentMusicFile) {
@@ -1398,7 +1426,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       smoothSegments,
       freeLines,
       musicFile: currentMusicFile || undefined,
-      obstacleParams: Object.keys(obstacleParamsRef.current).length > 0 ? { ...obstacleParamsRef.current } : undefined,
+      obstacleParams: Object.keys(obstacleParams).length > 0 ? obstacleParams : undefined,
     };
     saveCustomLevel(level);
     lastSavedTilesRef.current = JSON.stringify(tiles);
@@ -1425,7 +1453,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       smoothSegments,
       freeLines,
       musicFile: currentMusicFile || undefined,
-      obstacleParams: Object.keys(obstacleParamsRef.current).length > 0 ? { ...obstacleParamsRef.current } : undefined,
+      obstacleParams: Object.keys(obstacleParams).length > 0 ? obstacleParams : undefined,
     };
     saveCustomLevel(level);
     lastSavedTilesRef.current = JSON.stringify(tiles);
@@ -1459,7 +1487,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     }).filter(Boolean) as FreeLineSegment[];
     setFreeLines(migrated);
     lastSavedFreeLinesRef.current = JSON.stringify(migrated);
-    obstacleParamsRef.current = level.obstacleParams ? { ...level.obstacleParams } : {};
+    setObstacleParams(level.obstacleParams ? { ...level.obstacleParams } : {});
     setCurrentLevelName(level.name);
     setCurrentLevelId(level.id || generateLevelId());
     setCurrentMusicFile(level.musicFile ?? '');
@@ -1500,7 +1528,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     setSmoothSegments([]);
     setFreeLines([]);
     railConnectionsRef.current = {};
-    obstacleParamsRef.current = {};
+    setObstacleParams({});
     lastPlacedRailRef.current = null;
     setLine2Start(null);
     setArcCenter(null);
@@ -1948,6 +1976,96 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           </div>
         </div>
       )}
+
+      {/* Inspector Panel */}
+      {selectedObstacleKey && (() => {
+        const tileType = tiles[selectedObstacleKey];
+        if (!tileType) return null;
+        const def = obstacleDefMap.get(tileType);
+        if (!def) return null;
+        const params = { ...def.defaultParams, ...(obstacleParams[selectedObstacleKey] ?? {}) } as Record<string, any>;
+        const [selGx, selGy] = parseTileKey(selectedObstacleKey);
+        return (
+          <div className="fixed right-4 top-20 bottom-12 w-64 bg-game-card border border-game-card-border rounded-xl flex flex-col shadow-xl z-10 overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between px-3 py-2 border-b border-game-card-border bg-game-bar-bg">
+              <span className="text-game-title font-bold text-sm">{def.emoji} {def.label}</span>
+              <button
+                onClick={() => setSelectedObstacleKey(null)}
+                className="text-game-subtitle hover:text-game-title text-lg leading-none"
+              >✕</button>
+            </div>
+            <div className="text-game-subtitle text-xs px-3 py-1 border-b border-game-card-border">
+              Cell {selGx},{selGy}
+            </div>
+            {/* Fields */}
+            <div className="flex-1 overflow-y-auto px-3 py-2 space-y-3">
+              {Object.entries(def.paramMeta as Record<string, ParamFieldMeta>).map(([field, meta]) => (
+                <div key={field}>
+                  <label className="block text-game-subtitle text-xs mb-1">{meta.label}</label>
+                  {(!meta.type || meta.type === 'number') ? (
+                    <input
+                      type="number"
+                      value={params[field] ?? ''}
+                      min={meta.min}
+                      max={meta.max}
+                      step={meta.step ?? 1}
+                      onChange={e => {
+                        const val = parseFloat(e.target.value);
+                        if (isNaN(val)) return;
+                        const clamped = meta.min != null && meta.max != null
+                          ? Math.min(meta.max, Math.max(meta.min, val))
+                          : val;
+                        setObstacleParams(prev => ({
+                          ...prev,
+                          [selectedObstacleKey]: {
+                            ...(prev[selectedObstacleKey] ?? def.defaultParams),
+                            [field]: clamped,
+                          } as ObstacleParams,
+                        }));
+                      }}
+                      className="w-full px-2 py-1 rounded bg-game-bg text-game-title border border-game-card-border text-sm outline-none focus:border-game-accent"
+                    />
+                  ) : meta.type === 'select' ? (
+                    <select
+                      value={params[field] ?? ''}
+                      onChange={e => {
+                        setObstacleParams(prev => ({
+                          ...prev,
+                          [selectedObstacleKey]: {
+                            ...(prev[selectedObstacleKey] ?? def.defaultParams),
+                            [field]: e.target.value,
+                          } as ObstacleParams,
+                        }));
+                      }}
+                      className="w-full px-2 py-1 rounded bg-game-bg text-game-title border border-game-card-border text-sm outline-none focus:border-game-accent"
+                    >
+                      {(meta.options ?? []).map(opt => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+            {/* Reset */}
+            <div className="px-3 py-2 border-t border-game-card-border">
+              <button
+                onClick={() => {
+                  setObstacleParams(prev => {
+                    const next = { ...prev };
+                    delete next[selectedObstacleKey];
+                    return next;
+                  });
+                }}
+                className="w-full py-1.5 rounded-lg bg-game-bar-bg text-game-subtitle text-xs font-bold hover:brightness-110"
+              >
+                Reset to Defaults
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Load Dialog */}
       {showLoadDialog && (
