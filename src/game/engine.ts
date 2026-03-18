@@ -583,6 +583,14 @@ export class GameEngine {
           this.hitPassenger(obs);
           return;
         }
+      } else if (obs.type === 'orbiter') {
+        const ballX = obs.x + Math.cos(obs.angle + (obs.rotation ?? 0)) * obs.armLength;
+        const ballY = obs.y + Math.sin(obs.angle + (obs.rotation ?? 0)) * obs.armLength;
+        hitDist = Math.sqrt((cx - ballX) ** 2 + (cy - ballY) ** 2);
+        if (hitDist < HIT_RADIUS + obs.radius) {
+          this.hitPassenger(obs);
+          return;
+        }
       } else {
         hitDist = Math.sqrt((cx - obs.x) ** 2 + (cy - obs.y) ** 2);
         if (hitDist < HIT_RADIUS + obs.radius) {
@@ -1196,6 +1204,61 @@ export class GameEngine {
         ctx.arc(dir * 13.5, -4, 1.2, 0, Math.PI * 2);
         ctx.fill();
 
+        ctx.restore();
+
+      } else if (obs.type === 'orbiter') {
+        obs.angle += obs.rotSpeed * this.lastDt;
+        const orbitR = obs.armLength;
+        const rot = obs.rotation ?? 0;
+        const ballSX = screenX + Math.cos(obs.angle + rot) * orbitR;
+        const ballSY = (obs.y - cy) + Math.sin(obs.angle + rot) * orbitR;
+
+        // Orbit ring (dashed)
+        ctx.save();
+        ctx.translate(screenX, obs.y - cy);
+        ctx.strokeStyle = 'rgba(180, 80, 255, 0.3)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.arc(0, 0, orbitR, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Center anchor
+        ctx.fillStyle = '#7030aa';
+        ctx.beginPath();
+        ctx.arc(0, 0, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#9050cc';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.restore();
+
+        // Arm line
+        ctx.save();
+        ctx.strokeStyle = 'rgba(180, 80, 255, 0.45)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(screenX, obs.y - cy);
+        ctx.lineTo(ballSX, ballSY);
+        ctx.stroke();
+        ctx.restore();
+
+        // Orbiting ball
+        ctx.save();
+        ctx.translate(ballSX, ballSY);
+        ctx.fillStyle = '#b450ff';
+        ctx.beginPath();
+        ctx.arc(0, 0, obs.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#d890ff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        // Highlight
+        ctx.fillStyle = 'rgba(255, 220, 255, 0.6)';
+        ctx.beginPath();
+        ctx.arc(-obs.radius * 0.3, -obs.radius * 0.35, obs.radius * 0.35, 0, Math.PI * 2);
+        ctx.fill();
         ctx.restore();
 
       } else {

@@ -22,7 +22,7 @@ export interface PendulumParams   { obstacleType: 'pendulum';   cableLength: num
 export interface CrusherParams    { obstacleType: 'crusher';    zoneWidth: number; zoneHeight: number; rotation: number }
 export interface LaserParams      { obstacleType: 'laser';      beamLength: number; direction: 'left' | 'right'; cycleSpeed: number; warningTime: number; rotation: number }
 export interface SwoopParams      { obstacleType: 'swoop';      patrolWidth: number; patrolHeight: number; diveDepth: number; patrolSpeed: number; rotation: number }
-export interface OrbiterParams    { obstacleType: 'orbiter';    orbitRadius: number; orbRadius: number; rotation: number }
+export interface OrbiterParams    { obstacleType: 'orbiter';    orbitRadius: number; orbRadius: number; orbitSpeed: number; rotation: number }
 export interface BoulderParams    { obstacleType: 'boulder';    radius: number; rotation: number }
 export interface MineParams       { obstacleType: 'mine';       triggerRadius: number; explosionRadius: number; rotation: number }
 export interface StalactiteParams { obstacleType: 'stalactite'; triggerRadius: number; dropZoneWidth: number; dropZoneHeight: number; rotation: number }
@@ -372,10 +372,11 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
     label: 'Orbiter',
     emoji: '🪐',
     tileColor: 'rgba(180,80,255,0.3)',
-    defaultParams: { obstacleType: 'orbiter', orbitRadius: 80, orbRadius: 14, rotation: 0 } as OrbiterParams,
+    defaultParams: { obstacleType: 'orbiter', orbitRadius: 80, orbRadius: 14, orbitSpeed: 1.2, rotation: 0 } as OrbiterParams,
     paramMeta: {
-      orbitRadius: { label: 'Orbit Radius', min: 10, max: 300, step: 5 },
-      orbRadius:   { label: 'Ball Radius',  min: 4,  max: 50,  step: 1 },
+      orbitRadius: { label: 'Orbit Radius', min: 10, max: 300, step: 5  },
+      orbRadius:   { label: 'Ball Radius',  min: 4,  max: 50,  step: 1  },
+      orbitSpeed:  { label: 'Orbit Speed',  min: 0.1, max: 8,  step: 0.1 },
       rotation:    { label: 'Initial Rotation (°)', min: 0, max: 360, step: 1 },
     },
     getReach(params: OrbiterParams): ObstacleReachZone[] {
@@ -384,7 +385,7 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
       ];
     },
     toGameObstacle(id, worldX, worldY, params: OrbiterParams): Obstacle {
-      return { id, typeId: 'obstacle.orbiter', type: 'orbiter', x: worldX, y: worldY, radius: params.orbRadius, angle: 0, rotation: (params.rotation ?? 0) * Math.PI / 180, rotSpeed: 1.2, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: params.orbitRadius, hit: false, hp: 1, orbitRadius: params.orbitRadius };
+      return { id, typeId: 'obstacle.orbiter', type: 'orbiter', x: worldX, y: worldY, radius: params.orbRadius, angle: 0, rotation: (params.rotation ?? 0) * Math.PI / 180, rotSpeed: params.orbitSpeed ?? 1.2, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: params.orbitRadius, hit: false, hp: 1, orbitRadius: params.orbitRadius };
     },
   } as ObstacleDefinition<OrbiterParams>,
 
