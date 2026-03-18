@@ -141,6 +141,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const [selectedObstacleKey, setSelectedObstacleKey] = useState<string | null>(null);
   // Params carried when "picking up" an obstacle to move it
   const pendingObstacleParamsRef = useRef<ObstacleParams | null>(null);
+  // Accumulated rotation (degrees) for the next fresh obstacle placement
+  const pendingToolRotRef = useRef<number>(0);
 
   const [smoothSegments, setSmoothSegments] = useState<SmoothSegment[]>([]);
   const [freeLines, setFreeLines] = useState<FreeLineSegment[]>([]);
@@ -180,10 +182,42 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
 
   const worldHeight = EDITOR_HEIGHT * GRID_SIZE;
 
-  // Clear obstacle selection when switching to a non-select tool
+  // Clear obstacle selection when switching to a non-select tool; reset tool rotation when leaving obstacle tools
   useEffect(() => {
     if (tool !== 'none') setSelectedObstacleKey(null);
+    if (!obstacleDefMap.has(tool)) pendingToolRotRef.current = 0;
   }, [tool]);
+
+  // R key: quick-rotate obstacle 90° clockwise
+  useEffect(() => {
+    if (testing) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'r' && e.key !== 'R') return;
+      // Don't fire when typing in an input
+      if ((e.target as HTMLElement).tagName === 'INPUT') return;
+
+      if (selectedObstacleKey) {
+        // Rotate the selected placed obstacle
+        setObstacleParams(prev => {
+          const def = obstacleDefMap.get(tiles[selectedObstacleKey]);
+          if (!def) return prev;
+          const existing = prev[selectedObstacleKey] as any ?? { ...def.defaultParams };
+          return { ...prev, [selectedObstacleKey]: { ...existing, rotation: ((existing.rotation ?? 0) + 90) % 360 } };
+        });
+      } else if (obstacleDefMap.has(tool)) {
+        if (pendingObstacleParamsRef.current) {
+          // Rotate the carried (picked-up) obstacle
+          const p = pendingObstacleParamsRef.current as any;
+          pendingObstacleParamsRef.current = { ...p, rotation: ((p.rotation ?? 0) + 90) % 360 } as ObstacleParams;
+        } else {
+          // Accumulate rotation for the next fresh placement
+          pendingToolRotRef.current = (pendingToolRotRef.current + 90) % 360;
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [testing, tool, selectedObstacleKey, tiles]);
 
   // Draw the editor grid
   const render = useCallback(() => {
@@ -336,7 +370,11 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       const key = tileKey(hoverGx, hoverGy);
       const def = obstacleDefMap.get(tool);
       if (def) {
-        const params = pendingObstacleParamsRef.current ?? resolveParams(tool, obstacleParams[key]);
+        let params = pendingObstacleParamsRef.current ?? resolveParams(tool, obstacleParams[key]);
+        // When not carrying a picked-up obstacle, factor in the pending tool rotation
+        if (params && !pendingObstacleParamsRef.current && pendingToolRotRef.current !== 0) {
+          params = { ...params, rotation: ((params as any).rotation ?? 0) + pendingToolRotRef.current } as ObstacleParams;
+        }
         if (params) {
           const worldX = (hoverGx + 0.5) * GRID_SIZE;
           const worldY = (hoverGy + 0.5) * GRID_SIZE;
@@ -1317,6 +1355,15 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         lastPlacedRailRef.current = key;
       }
       setTiles(prev => ({ ...prev, [key]: tool as TileType }));
+      // Store pre-set rotation from R key presses for this fresh placement
+      if (obstacleDefMap.has(tool) && pendingToolRotRef.current !== 0) {
+        const def = obstacleDefMap.get(tool)!;
+        const baseRot = (def.defaultParams as any).rotation ?? 0;
+        setObstacleParams(prev => ({
+          ...prev,
+          [key]: { ...def.defaultParams, rotation: baseRot + pendingToolRotRef.current },
+        }));
+      }
     } else if (tool === 'rail_start' || tool === 'rail_end') {
       setTiles(prev => {
         const next = { ...prev };
