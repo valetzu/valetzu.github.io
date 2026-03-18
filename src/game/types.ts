@@ -56,6 +56,7 @@ export interface Obstacle {
   zoneWidth?: number;
   zoneHeight?: number;
   warningTime?: number;
+  fallTimeout?: number;
 }
 
 export const DEFAULT_UPGRADES: Upgrades = {

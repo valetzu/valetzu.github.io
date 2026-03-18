@@ -23,7 +23,7 @@ export interface CrusherParams    { obstacleType: 'crusher';    zoneWidth: numbe
 export interface LaserParams      { obstacleType: 'laser';      beamLength: number; direction: 'left' | 'right'; cycleSpeed: number; warningTime: number; rotation: number }
 export interface SwoopParams      { obstacleType: 'swoop';      patrolWidth: number; patrolHeight: number; diveDepth: number; patrolSpeed: number; rotation: number }
 export interface OrbiterParams    { obstacleType: 'orbiter';    orbitRadius: number; orbRadius: number; orbitSpeed: number; rotation: number }
-export interface BoulderParams    { obstacleType: 'boulder';    radius: number; rotation: number }
+export interface BoulderParams    { obstacleType: 'boulder';    radius: number; triggerRadius: number; dropDelay: number; fallTimeout: number; rotation: number }
 export interface MineParams       { obstacleType: 'mine';       triggerRadius: number; explosionRadius: number; rotation: number }
 export interface StalactiteParams { obstacleType: 'stalactite'; triggerRadius: number; dropZoneWidth: number; dropZoneHeight: number; rotation: number }
 
@@ -396,18 +396,36 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
     label: 'Boulder',
     emoji: '🪨',
     tileColor: 'rgba(140,120,80,0.3)',
-    defaultParams: { obstacleType: 'boulder', radius: 30, rotation: 0 } as BoulderParams,
+    defaultParams: { obstacleType: 'boulder', radius: 30, triggerRadius: 120, dropDelay: 0.5, fallTimeout: 4, rotation: 0 } as BoulderParams,
     paramMeta: {
-      radius:   { label: 'Boulder Radius', min: 8, max: 120, step: 2 },
-      rotation: { label: 'Initial Rotation (°)', min: 0, max: 360, step: 1 },
+      radius:        { label: 'Boulder Radius',    min: 8,   max: 120, step: 2   },
+      triggerRadius: { label: 'Trigger Radius',    min: 20,  max: 400, step: 5   },
+      dropDelay:     { label: 'Drop Delay (sec)',  min: 0,   max: 5,   step: 0.1 },
+      fallTimeout:   { label: 'Fall Timeout (sec)', min: 1,  max: 15,  step: 0.5 },
+      rotation:      { label: 'Initial Rotation (°)', min: 0, max: 360, step: 1 },
     },
     getReach(params: BoulderParams): ObstacleReachZone[] {
       return [
+        { kind: 'circle', radius: params.triggerRadius, color: '#ffaa00' },
         { kind: 'circle', radius: params.radius, color: '#8c7850' },
       ];
     },
     toGameObstacle(id, worldX, worldY, params: BoulderParams): Obstacle {
-      return { id, typeId: 'obstacle.boulder', type: 'boulder', x: worldX, y: worldY, radius: params.radius, angle: 0, rotation: (params.rotation ?? 0) * Math.PI / 180, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: 0, hit: false, hp: 1 };
+      return {
+        id, typeId: 'obstacle.boulder', type: 'boulder',
+        x: worldX, y: worldY,
+        radius: params.radius,
+        angle: 0,               // visual roll angle
+        rotation: (params.rotation ?? 0) * Math.PI / 180,
+        rotSpeed: 0,
+        baseY: worldY,          // original Y (unused at runtime but stored)
+        amplitude: 0,           // elapsed fall time during state 2
+        bounceSpeed: params.dropDelay ?? 0.5, // countdown timer (state 1) → fall velocity (state 2)
+        armLength: 0,           // state: 0=idle, 1=countdown, 2=falling
+        hit: false, hp: 1,
+        triggerRadius: params.triggerRadius ?? 120,
+        fallTimeout: params.fallTimeout ?? 4,
+      };
     },
   } as ObstacleDefinition<BoulderParams>,
 

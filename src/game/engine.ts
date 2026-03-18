@@ -591,6 +591,16 @@ export class GameEngine {
           this.hitPassenger(obs);
           return;
         }
+      } else if (obs.type === 'boulder') {
+        // Only collidable while falling
+        if (obs.armLength === 2) {
+          hitDist = Math.sqrt((cx - obs.x) ** 2 + (cy - obs.y) ** 2);
+          if (hitDist < HIT_RADIUS + obs.radius) {
+            obs.hit = true; // despawn on hit
+            this.hitPassenger(obs);
+            return;
+          }
+        }
       } else {
         hitDist = Math.sqrt((cx - obs.x) ** 2 + (cy - obs.y) ** 2);
         if (hitDist < HIT_RADIUS + obs.radius) {
@@ -1259,6 +1269,98 @@ export class GameEngine {
         ctx.beginPath();
         ctx.arc(-obs.radius * 0.3, -obs.radius * 0.35, obs.radius * 0.35, 0, Math.PI * 2);
         ctx.fill();
+        ctx.restore();
+
+      } else if (obs.type === 'boulder') {
+        const GRAVITY = 700; // px/s²
+
+        // ── State machine ──────────────────────────────────────────────────
+        if (obs.armLength === 0) {
+          // Idle: watch for player entering trigger radius
+          const gp = this.getGondolaPos();
+          const dx = gp.x - obs.x;
+          const dy = (gp.y + GONDOLA_HANG) - obs.y;
+          if (Math.sqrt(dx * dx + dy * dy) < (obs.triggerRadius ?? 120)) {
+            obs.armLength = 1; // start countdown
+          }
+        } else if (obs.armLength === 1) {
+          // Countdown: bounceSpeed holds remaining delay time
+          obs.bounceSpeed -= this.lastDt;
+          if (obs.bounceSpeed <= 0) {
+            obs.armLength = 2;  // start falling
+            obs.bounceSpeed = 0; // reset: now = fall velocity (px/s)
+            obs.amplitude = 0;   // reset: now = elapsed fall time
+          }
+        } else if (obs.armLength === 2) {
+          // Falling
+          obs.bounceSpeed += GRAVITY * this.lastDt; // accelerate downward
+          obs.y += obs.bounceSpeed * this.lastDt;
+          obs.angle += (obs.bounceSpeed / Math.max(obs.radius, 1)) * this.lastDt; // roll
+          obs.amplitude += this.lastDt;
+          if (obs.amplitude > (obs.fallTimeout ?? 4)) {
+            obs.hit = true; // despawn after timeout
+          }
+        }
+
+        if (obs.hit) continue; // skip render if just despawned
+
+        // ── Draw ──────────────────────────────────────────────────────────
+        const r = obs.radius;
+        const sy = obs.y - cy;
+        // Shake during countdown — intensifies as timer runs out
+        const shakeX = obs.armLength === 1
+          ? Math.sin(now * 45) * Math.max(0, 2.5 - obs.bounceSpeed) * 1.5
+          : 0;
+
+        ctx.save();
+        ctx.translate(screenX + shakeX, sy);
+        ctx.rotate(obs.angle);
+
+        // Shadow layer (darker offset circle)
+        ctx.fillStyle = '#3d2e12';
+        ctx.beginPath();
+        ctx.arc(r * 0.08, r * 0.08, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Main stone body
+        ctx.fillStyle = '#7a6438';
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Mid-tone face
+        ctx.fillStyle = '#9c8252';
+        ctx.beginPath();
+        ctx.arc(-r * 0.12, -r * 0.15, r * 0.8, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Bright highlight patch
+        ctx.fillStyle = '#b89a6a';
+        ctx.beginPath();
+        ctx.arc(-r * 0.22, -r * 0.28, r * 0.45, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Crack lines
+        ctx.strokeStyle = '#4a3820';
+        ctx.lineWidth = Math.max(1, r / 18);
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(-r * 0.1, -r * 0.45);
+        ctx.lineTo(r * 0.18, r * 0.08);
+        ctx.lineTo(r * 0.04, r * 0.52);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(-r * 0.55, r * 0.08);
+        ctx.lineTo(-r * 0.12, -r * 0.08);
+        ctx.stroke();
+
+        // Outline
+        ctx.strokeStyle = '#2a1e0a';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.stroke();
+
         ctx.restore();
 
       } else {
