@@ -24,7 +24,7 @@ export interface LaserParams      { obstacleType: 'laser';      beamLength: numb
 export interface SwoopParams      { obstacleType: 'swoop';      patrolWidth: number; patrolHeight: number; diveDepth: number; patrolSpeed: number; rotation: number }
 export interface OrbiterParams    { obstacleType: 'orbiter';    orbitRadius: number; orbRadius: number; orbitSpeed: number; rotation: number }
 export interface BoulderParams    { obstacleType: 'boulder';    radius: number; triggerRadius: number; dropDelay: number; fallTimeout: number; rotation: number }
-export interface MineParams       { obstacleType: 'mine';       triggerRadius: number; explosionRadius: number; rotation: number }
+export interface MineParams       { obstacleType: 'mine';       triggerRadius: number; explosionRadius: number; triggerDelay: number; rotation: number }
 export interface StalactiteParams { obstacleType: 'stalactite'; triggerRadius: number; dropZoneWidth: number; dropZoneHeight: number; rotation: number }
 
 export type ObstacleParams =
@@ -436,11 +436,12 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
     label: 'Mine',
     emoji: '💣',
     tileColor: 'rgba(255,220,0,0.3)',
-    defaultParams: { obstacleType: 'mine', triggerRadius: 40, explosionRadius: 80, rotation: 0 } as MineParams,
+    defaultParams: { obstacleType: 'mine', triggerRadius: 40, explosionRadius: 80, triggerDelay: 1.5, rotation: 0 } as MineParams,
     paramMeta: {
-      triggerRadius:   { label: 'Trigger Radius',   min: 5,  max: 200, step: 5 },
-      explosionRadius: { label: 'Explosion Radius', min: 10, max: 300, step: 5 },
-      rotation:        { label: 'Initial Rotation (°)', min: 0, max: 360, step: 1 },
+      triggerRadius:   { label: 'Trigger Radius',    min: 5,   max: 200, step: 5   },
+      explosionRadius: { label: 'Explosion Radius',  min: 10,  max: 300, step: 5   },
+      triggerDelay:    { label: 'Fuse Delay (sec)',   min: 0,   max: 10,  step: 0.1 },
+      rotation:        { label: 'Initial Rotation (°)', min: 0, max: 360, step: 1  },
     },
     getReach(params: MineParams): ObstacleReachZone[] {
       return [
@@ -449,7 +450,20 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
       ];
     },
     toGameObstacle(id, worldX, worldY, params: MineParams): Obstacle {
-      return { id, typeId: 'obstacle.mine', type: 'mine', x: worldX, y: worldY, radius: params.triggerRadius, angle: 0, rotation: (params.rotation ?? 0) * Math.PI / 180, rotSpeed: 0, baseY: 0, amplitude: 0, bounceSpeed: 0, armLength: 0, hit: false, hp: 1, triggerRadius: params.triggerRadius, explosionRadius: params.explosionRadius };
+      return {
+        id, typeId: 'obstacle.mine', type: 'mine',
+        x: worldX, y: worldY,
+        radius: params.triggerRadius,
+        angle: 0,
+        rotation: (params.rotation ?? 0) * Math.PI / 180,
+        rotSpeed: params.triggerDelay ?? 1.5, // store initial delay for progress indicator
+        baseY: 0, amplitude: 0,
+        bounceSpeed: params.triggerDelay ?? 1.5, // countdown remaining time
+        armLength: 0,  // state: 0=idle, 1=countdown, 2=exploding
+        hit: false, hp: 1,
+        triggerRadius: params.triggerRadius,
+        explosionRadius: params.explosionRadius,
+      };
     },
   } as ObstacleDefinition<MineParams>,
 

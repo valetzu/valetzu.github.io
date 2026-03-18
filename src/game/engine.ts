@@ -591,6 +591,8 @@ export class GameEngine {
           this.hitPassenger(obs);
           return;
         }
+      } else if (obs.type === 'mine') {
+        // Mine damage is dealt at explosion time inside renderObstacles; no contact collision
       } else if (obs.type === 'boulder') {
         // Only collidable while falling
         if (obs.armLength === 2) {
@@ -1362,6 +1364,154 @@ export class GameEngine {
         ctx.stroke();
 
         ctx.restore();
+
+      } else if (obs.type === 'mine') {
+        const EXPLOSION_DURATION = 0.55;
+        const sy = obs.y - cy;
+
+        // ── State machine ──────────────────────────────────────────────────
+        if (obs.armLength === 0) {
+          obs.angle += 0.4 * this.lastDt; // slow idle drift
+          const gp = this.getGondolaPos();
+          const dx = gp.x - obs.x;
+          const dy = (gp.y + GONDOLA_HANG) - obs.y;
+          if (Math.sqrt(dx * dx + dy * dy) < (obs.triggerRadius ?? 40)) {
+            obs.armLength = 1; // start fuse countdown
+          }
+        } else if (obs.armLength === 1) {
+          obs.angle += 2.5 * this.lastDt; // spin faster while armed
+          obs.bounceSpeed -= this.lastDt;
+          if (obs.bounceSpeed <= 0) {
+            obs.armLength = 2;
+            obs.amplitude = 0; // explosion timer
+            // Deal damage immediately if player is within explosion radius
+            const gp = this.getGondolaPos();
+            const dx = gp.x - obs.x;
+            const dy = (gp.y + GONDOLA_HANG) - obs.y;
+            if (Math.sqrt(dx * dx + dy * dy) < HIT_RADIUS + (obs.explosionRadius ?? 80)) {
+              this.hitPassenger(obs);
+            }
+          }
+        } else if (obs.armLength === 2) {
+          obs.amplitude += this.lastDt;
+          if (obs.amplitude > EXPLOSION_DURATION) {
+            obs.hit = true;
+          }
+        }
+
+        if (obs.hit) continue;
+
+        // ── Draw ──────────────────────────────────────────────────────────
+        if (obs.armLength === 2) {
+          // Explosion animation
+          const t = obs.amplitude / EXPLOSION_DURATION;
+          const expR = (obs.explosionRadius ?? 80) * (0.2 + t * 0.8);
+          const alpha = 1 - t;
+
+          ctx.save();
+          // Outer shockwave ring
+          ctx.strokeStyle = `rgba(255, 200, 50, ${alpha * 0.7})`;
+          ctx.lineWidth = 8 * (1 - t * 0.6);
+          ctx.beginPath();
+          ctx.arc(screenX, sy, expR, 0, Math.PI * 2);
+          ctx.stroke();
+
+          // Fire ball gradient
+          const grad = ctx.createRadialGradient(screenX, sy, 0, screenX, sy, expR * 0.8);
+          grad.addColorStop(0,   `rgba(255, 255, 180, ${alpha})`);
+          grad.addColorStop(0.35, `rgba(255, 140, 20, ${alpha * 0.95})`);
+          grad.addColorStop(0.75, `rgba(220, 50, 0, ${alpha * 0.6})`);
+          grad.addColorStop(1,    `rgba(100, 20, 0, 0)`);
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.arc(screenX, sy, expR * 0.8, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Second expanding ring (debris ring)
+          ctx.strokeStyle = `rgba(180, 80, 0, ${alpha * 0.4})`;
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(screenX, sy, expR * 1.25, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+
+        } else {
+          // Mine body — classic naval mine sphere with spikes
+          const BODY_R = 14;
+          const isArmed = obs.armLength === 1;
+          const pulse = isArmed
+            ? Math.sin(now * (6 + (1 - obs.bounceSpeed / Math.max(obs.rotSpeed, 0.01)) * 10)) * 0.5 + 0.5
+            : 0;
+
+          ctx.save();
+          ctx.translate(screenX, sy);
+          ctx.rotate(obs.angle + (obs.rotation ?? 0));
+
+          // Armed glow
+          if (isArmed) {
+            ctx.shadowColor = `rgba(255, 60, 60, ${0.5 + pulse * 0.5})`;
+            ctx.shadowBlur = 10 + pulse * 10;
+          }
+
+          // 6 conical spikes
+          const SPIKE_COUNT = 6;
+          const SPIKE_LEN = BODY_R * 0.85;
+          ctx.fillStyle = isArmed ? `rgb(${Math.round(180 + pulse * 60)}, 60, 60)` : '#3a3a3a';
+          for (let i = 0; i < SPIKE_COUNT; i++) {
+            const a = (i / SPIKE_COUNT) * Math.PI * 2;
+            ctx.beginPath();
+            ctx.moveTo(Math.cos(a - 0.2) * BODY_R, Math.sin(a - 0.2) * BODY_R);
+            ctx.lineTo(Math.cos(a + 0.2) * BODY_R, Math.sin(a + 0.2) * BODY_R);
+            ctx.lineTo(Math.cos(a) * (BODY_R + SPIKE_LEN), Math.sin(a) * (BODY_R + SPIKE_LEN));
+            ctx.closePath();
+            ctx.fill();
+          }
+
+          // Main sphere
+          ctx.shadowBlur = 0;
+          ctx.shadowColor = 'transparent';
+          const bodyGrad = ctx.createRadialGradient(-BODY_R * 0.3, -BODY_R * 0.35, 1, 0, 0, BODY_R);
+          if (isArmed) {
+            bodyGrad.addColorStop(0,   `rgba(220, ${Math.round(80 + pulse * 80)}, 80, 1)`);
+            bodyGrad.addColorStop(0.6, `rgba(160, 30, 30, 1)`);
+          } else {
+            bodyGrad.addColorStop(0, '#6a6a6a');
+            bodyGrad.addColorStop(0.6, '#3d3d3d');
+          }
+          bodyGrad.addColorStop(1, '#111');
+          ctx.fillStyle = bodyGrad;
+          ctx.beginPath();
+          ctx.arc(0, 0, BODY_R, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Specular highlight
+          ctx.fillStyle = `rgba(255, 255, 255, ${isArmed ? 0.12 : 0.22})`;
+          ctx.beginPath();
+          ctx.arc(-BODY_R * 0.28, -BODY_R * 0.32, BODY_R * 0.32, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Outline
+          ctx.strokeStyle = '#111';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(0, 0, BODY_R, 0, Math.PI * 2);
+          ctx.stroke();
+
+          ctx.restore();
+
+          // Fuse progress ring (countdown arc around the mine)
+          if (isArmed) {
+            const progress = 1 - obs.bounceSpeed / Math.max(obs.rotSpeed, 0.01);
+            ctx.save();
+            ctx.strokeStyle = `rgba(255, ${Math.round(220 - pulse * 180)}, 0, 0.85)`;
+            ctx.lineWidth = 3;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.arc(screenX, sy, BODY_R + 6, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
 
       } else {
         // Static - rock
