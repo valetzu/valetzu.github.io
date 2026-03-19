@@ -9,7 +9,7 @@ import {
   generateLevelId,
 } from '@/game/editorTypes';
 import { musicManager, getAvailableTracks, addToCatalog } from '@/game/musicManager';
-import { Point, Obstacle, WORLD_CONFIG } from '@/game/types';
+import { Point, Obstacle, WORLD_CONFIG, recordTime, getRecords, LevelRecord, formatTime } from '@/game/types';
 import { GameEngine } from '@/game/engine';
 import { OBSTACLE_DEFINITIONS, obstacleDefMap, resolveParams, ObstacleParams, drawReach, ParamFieldMeta } from '@/game/obstacleDefinitions';
 
@@ -125,7 +125,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const [showTilesMenu, setShowTilesMenu] = useState(false);
   const [showToolsMenu, setShowToolsMenu] = useState(false);
   const [showFileMenu, setShowFileMenu] = useState(false);
-  const [levelComplete, setLevelComplete] = useState<{ time: number } | null>(null);
+  const [levelComplete, setLevelComplete] = useState<{ time: number; records: LevelRecord[]; isNewBest: boolean } | null>(null);
   const testCanvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
   const gameOverRef = useRef(false);
@@ -1436,7 +1436,11 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     // Create a custom engine with pre-built rail
     const engine = new GameEngine(canvas, 'overworld', { motor: 0, health: 0, grip: 0, rocket: 0, shield: 0 }, {
       onGameOver: () => { gameOverRef.current = true; },
-      onLevelComplete: (time: number) => { setLevelComplete({ time }); },
+      onLevelComplete: (time: number) => {
+        const levelId = currentLevelId || 'unsaved';
+        const result = recordTime(levelId, time);
+        setLevelComplete({ time, records: result.records, isNewBest: result.isNewBest });
+      },
     });
 
     // Override the rail with our resampled one (already in world coordinates)
@@ -1644,14 +1648,32 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         {levelComplete && (
           <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-20">
             <div className="bg-game-card border-2 border-game-accent rounded-2xl p-8 w-96 text-center">
-              <h2 className="text-4xl font-bold text-game-accent mb-2">🎉 Congratulations!</h2>
-              <p className="text-game-subtitle text-lg mb-6">You reached the finish line!</p>
-              <div className="bg-game-bg rounded-xl p-4 mb-6">
+              <h2 className="text-4xl font-bold text-game-accent mb-2">
+                {levelComplete.isNewBest ? '🏆 New Best!' : '🎉 Congratulations!'}
+              </h2>
+              <p className="text-game-subtitle text-lg mb-4">You reached the finish line!</p>
+              <div className="bg-game-bg rounded-xl p-4 mb-4">
                 <p className="text-game-subtitle text-sm">Completion Time</p>
                 <p className="text-game-title text-3xl font-bold">
-                  {Math.floor(levelComplete.time / 60)}:{(Math.floor(levelComplete.time) % 60).toString().padStart(2, '0')}.{Math.floor((levelComplete.time % 1) * 100).toString().padStart(2, '0')}
+                  {formatTime(levelComplete.time)}
                 </p>
+                {levelComplete.records.length > 0 && levelComplete.records[0].time < levelComplete.time && (
+                  <p className="text-game-subtitle text-sm mt-1">
+                    Best: {formatTime(levelComplete.records[0].time)}
+                  </p>
+                )}
               </div>
+              {levelComplete.records.length > 1 && (
+                <div className="bg-game-bg rounded-xl p-3 mb-4 text-left">
+                  <p className="text-game-subtitle text-xs mb-2 text-center font-bold">Top Times</p>
+                  {levelComplete.records.map((r, i) => (
+                    <div key={i} className={`flex justify-between text-sm py-0.5 ${r.time === levelComplete.time && r.date === Math.max(...levelComplete.records.filter(x => x.time === levelComplete.time).map(x => x.date)) ? 'text-game-accent font-bold' : 'text-game-subtitle'}`}>
+                      <span>#{i + 1}</span>
+                      <span>{formatTime(r.time)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="flex gap-3">
                 <button
                   onClick={() => {

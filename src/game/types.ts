@@ -136,6 +136,51 @@ export const WORLD_CONFIG = {
   },
 } as const;
 
+export interface LevelRecord {
+  levelId: string;
+  time: number;
+  date: number;
+}
+
+export type Leaderboard = Record<string, LevelRecord[]>;
+
+export function loadLeaderboard(): Leaderboard {
+  try {
+    const raw = localStorage.getItem('cable-riders-leaderboards');
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return {};
+}
+
+export function saveLeaderboard(data: Leaderboard) {
+  localStorage.setItem('cable-riders-leaderboards', JSON.stringify(data));
+}
+
+/** Record a completion time. Returns the sorted top-5 list and whether this was a new personal best. */
+export function recordTime(levelId: string, time: number): { records: LevelRecord[]; isNewBest: boolean } {
+  const lb = loadLeaderboard();
+  const records = lb[levelId] || [];
+  const wasBest = records.length > 0 ? records[0].time : Infinity;
+  records.push({ levelId, time, date: Date.now() });
+  records.sort((a, b) => a.time - b.time);
+  lb[levelId] = records.slice(0, 5); // keep top 5
+  saveLeaderboard(lb);
+  return { records: lb[levelId], isNewBest: time < wasBest };
+}
+
+export function getRecords(levelId: string): LevelRecord[] {
+  const lb = loadLeaderboard();
+  return lb[levelId] || [];
+}
+
+/** Format seconds as M:SS.cc */
+export function formatTime(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds) % 60;
+  const centis = Math.floor((seconds % 1) * 100);
+  return `${mins}:${secs.toString().padStart(2, '0')}.${centis.toString().padStart(2, '0')}`;
+}
+
 export function loadSave(): SaveData {
   try {
     const raw = localStorage.getItem('cable-riders-save');

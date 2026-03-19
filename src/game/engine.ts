@@ -1,5 +1,7 @@
 import { WorldType, Upgrades, Point, Obstacle, WORLD_CONFIG } from './types';
 import { spriteManager } from './spriteManager';
+import { OBSTACLE_BEHAVIORS, GameUpdateContext } from './obstacleBehaviors';
+import { createRng } from './rng';
 
 const RAIL_SPACING = 100;
 const THROTTLE_BASE = 350;
@@ -71,10 +73,19 @@ export class GameEngine {
   gameOver = false;
   flashTimer = 0;
 
+  // Fixed timestep for deterministic physics
+  readonly FIXED_DT = 1 / 60;
+  accumulator = 0;
+  interpolationAlpha = 0;
+  prevGondolaX = 0;
+  prevGondolaY = 0;
+  frameDt = 0;
+
   clouds: Cloud[] = [];
   stars: Star[] = [];
   mountains: Mountain[] = [];
   nextObstacleX = 600;
+  rng: () => number;
 
   onUpdate?: (dist: number, passengers: number, speed: number) => void;
   onGameOver?: (dist: number, cash: number) => void;
@@ -97,6 +108,7 @@ export class GameEngine {
     this.onUpdate = callbacks.onUpdate;
     this.onGameOver = callbacks.onGameOver;
     this.onLevelComplete = callbacks.onLevelComplete;
+    this.rng = createRng(Date.now());
     this.passengers = 3 + upgrades.health;
     this.rocketCharges = upgrades.rocket > 0 ? 1 + upgrades.rocket : 0;
     this.shieldCharges = upgrades.shield > 0 ? 1 + upgrades.shield : 0;
@@ -116,13 +128,13 @@ export class GameEngine {
       // Smooth random walk for rail height
       const difficulty = Math.min(1, (idx * RAIL_SPACING) / 30000);
       const maxSlope = 25 + difficulty * 35;
-      const dy = (Math.random() - 0.48) * maxSlope;
+      const dy = (this.rng() - 0.48) * maxSlope;
       lastY = Math.max(120, Math.min(520, lastY + dy));
       this.rail.push({ x, y: lastY });
 
       // Ground follows below rail with variation
-      const isChasm = Math.random() < 0.04 + difficulty * 0.03;
-      const targetOffset = isChasm ? 400 + Math.random() * 200 : 100 + Math.random() * 120;
+      const isChasm = this.rng() < 0.04 + difficulty * 0.03;
+      const targetOffset = isChasm ? 400 + this.rng() * 200 : 100 + this.rng() * 120;
       lastGroundOffset += (targetOffset - lastGroundOffset) * 0.15;
       this.ground.push(lastY + lastGroundOffset);
     }
@@ -138,38 +150,38 @@ export class GameEngine {
 
       const railY = this.rail[i].y;
       const difficulty = Math.min(1, x / 30000);
-      const r = Math.random();
+      const r = this.rng();
 
       let obs: Obstacle;
       if (r < 0.5) {
         // Spinner
-        const armLen = (50 + Math.random() * 40) * 3;
+        const armLen = (50 + this.rng() * 40) * 3;
         obs = {
-          id: `obs_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          id: `obs_${Date.now()}_${this.rng().toString(36).slice(2, 7)}`,
           typeId: 'obstacle.spinner',
           type: 'spinner',
-          x, y: railY - 10 - Math.random() * 40,
-          radius: 12, angle: Math.random() * Math.PI * 2,
-          rotSpeed: -(0.3 + Math.random() * 0.4 + difficulty * 0.4),
+          x, y: railY - 10 - this.rng() * 40,
+          radius: 12, angle: this.rng() * Math.PI * 2,
+          rotSpeed: -(0.3 + this.rng() * 0.4 + difficulty * 0.4),
           baseY: 0, amplitude: 0, bounceSpeed: 0,
           armLength: armLen, hit: false, hp: 1,
         };
       } else {
         // Bouncer
         obs = {
-          id: `obs_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          id: `obs_${Date.now()}_${this.rng().toString(36).slice(2, 7)}`,
           typeId: 'obstacle.bouncer',
           type: 'bouncer',
           x, y: railY,
-          radius: 18, angle: Math.random() * Math.PI * 2,
+          radius: 18, angle: this.rng() * Math.PI * 2,
           rotSpeed: 0,
-          baseY: railY - 20, amplitude: 100 + Math.random() * 80,
-          bounceSpeed: 0.6 + Math.random() * 0.8,
+          baseY: railY - 20, amplitude: 100 + this.rng() * 80,
+          bounceSpeed: 0.6 + this.rng() * 0.8,
           armLength: 0, hit: false, hp: 1,
         };
       }
       this.obstacles.push(obs);
-      this.nextObstacleX = x + OBSTACLE_MIN_GAP + Math.random() * (OBSTACLE_MAX_GAP - OBSTACLE_MIN_GAP) * (1 - difficulty * 0.3);
+      this.nextObstacleX = x + OBSTACLE_MIN_GAP + this.rng() * (OBSTACLE_MAX_GAP - OBSTACLE_MIN_GAP) * (1 - difficulty * 0.3);
     }
   }
 
@@ -177,21 +189,21 @@ export class GameEngine {
     // Clouds or stars
     if (this.world === 'moon') {
       for (let i = 0; i < 200; i++) {
-        this.stars.push({ x: Math.random() * 10000, y: Math.random() * 400, s: 1 + Math.random() * 2 });
+        this.stars.push({ x: this.rng() * 10000, y: this.rng() * 400, s: 1 + this.rng() * 2 });
       }
     } else {
       for (let i = 0; i < 15; i++) {
         this.clouds.push({
-          x: Math.random() * 5000, y: 30 + Math.random() * 150,
-          w: 80 + Math.random() * 120, h: 30 + Math.random() * 40,
+          x: this.rng() * 5000, y: 30 + this.rng() * 150,
+          w: 80 + this.rng() * 120, h: 30 + this.rng() * 40,
         });
       }
     }
     // Mountains
     for (let i = 0; i < 20; i++) {
       this.mountains.push({
-        x: i * 500 + Math.random() * 200,
-        y: 0, w: 200 + Math.random() * 300, h: 150 + Math.random() * 200,
+        x: i * 500 + this.rng() * 200,
+        y: 0, w: 200 + this.rng() * 300, h: 150 + this.rng() * 200,
       });
     }
   }
@@ -244,18 +256,36 @@ export class GameEngine {
   resume() {
     this.paused = false;
     this.lastTime = performance.now(); // prevent dt spike after pause
+    this.accumulator = 0; // reset accumulator to prevent catch-up steps after pause
   }
 
   loop = () => {
     if (!this.running) return;
     const now = performance.now();
-    const dt = Math.min((now - this.lastTime) / 1000, 0.05);
+    const frameDt = Math.min((now - this.lastTime) / 1000, 0.1);
     this.lastTime = now;
-    this.lastDt = dt;
+
+    this.frameDt = frameDt;
 
     if (!this.paused && !this.gameOver && !this.levelCompleted) {
-      this.update(dt);
+      this.accumulator += frameDt;
+      // Cap accumulator to prevent spiral of death (max 12 steps at 60Hz)
+      this.accumulator = Math.min(this.accumulator, 0.2);
+
+      while (this.accumulator >= this.FIXED_DT) {
+        // Save previous gondola position for render interpolation
+        const prevPos = this.getGondolaPos();
+        this.prevGondolaX = prevPos.x;
+        this.prevGondolaY = prevPos.y;
+
+        this.lastDt = this.FIXED_DT;
+        this.update(this.FIXED_DT);
+        this.accumulator -= this.FIXED_DT;
+      }
+
+      this.interpolationAlpha = this.accumulator / this.FIXED_DT;
     }
+
     this.render();
     this.animFrame = requestAnimationFrame(this.loop);
   };
@@ -343,11 +373,6 @@ export class GameEngine {
           this.onLevelComplete?.(this.elapsedTime);
         }
       }
-
-      // Camera follows airborne gondola
-      const gondolaWorld = this.getGondolaPos();
-      this.camera.x += (gondolaWorld.x - this.canvas.width * 0.35 - this.camera.x) * (1 - Math.exp(-5.0 * dt));
-      this.camera.y += (gondolaWorld.y - this.canvas.height * 0.45 - this.camera.y) * (1 - Math.exp(-3.7 * dt));
 
       // Timers
       if (this.invulnTimer > 0) this.invulnTimer -= dt;
@@ -449,10 +474,8 @@ export class GameEngine {
     // Collision
     this.checkCollisions();
 
-    // Camera
-    const gondolaWorld = this.getGondolaPos();
-    this.camera.x += (gondolaWorld.x - this.canvas.width * 0.35 - this.camera.x) * (1 - Math.exp(-5.0 * dt));
-    this.camera.y += (gondolaWorld.y - this.canvas.height * 0.45 - this.camera.y) * (1 - Math.exp(-3.7 * dt));
+    // Update obstacle state machines and animations
+    this.updateObstacles(dt);
 
     // Callbacks
     this.onUpdate?.(this.distance, this.passengers, Math.abs(this.speed) * 0.1);
@@ -479,6 +502,24 @@ export class GameEngine {
     return this.pos >= this.endPointIndex - 0.01;
   }
 
+  getGameUpdateContext(): GameUpdateContext {
+    return {
+      getGondolaPos: () => this.getGondolaPos(),
+      gondolaHang: GONDOLA_HANG,
+      hitRadius: HIT_RADIUS,
+      dealDamage: (obs: Obstacle) => this.hitPassenger(obs),
+    };
+  }
+
+  updateObstacles(dt: number) {
+    const ctx = this.getGameUpdateContext();
+    for (const obs of this.obstacles) {
+      if (obs.hit) continue;
+      const behavior = OBSTACLE_BEHAVIORS[obs.type];
+      if (behavior) behavior.update(obs, dt, ctx);
+    }
+  }
+
   checkCollisions() {
     if (this.invulnTimer > 0 || this.shieldTimer > 0) return;
     const gp = this.getGondolaPos();
@@ -487,128 +528,10 @@ export class GameEngine {
 
     for (const obs of this.obstacles) {
       if (obs.hit) continue;
-      let hitDist: number;
-
-      if (obs.type === 'spinner') {
-        // Point-to-segment distance squared helper
-        const ptSegDistSq = (px: number, py: number, ax: number, ay: number, bx: number, by: number) => {
-          const dx = bx - ax, dy = by - ay;
-          const lenSq = dx * dx + dy * dy;
-          if (lenSq === 0) return (px - ax) ** 2 + (py - ay) ** 2;
-          const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
-          return (px - ax - t * dx) ** 2 + (py - ay - t * dy) ** 2;
-        };
-        const ARM_HALF = 9;  // half of arm lineWidth 18
-        const POLE_HALF = 5; // half of pole lineWidth 10
-        const spinRot = obs.rotation ?? 0;
-        // Check arm segments (capsule collision) — rotation-aware
-        for (let a = 0; a < 4; a++) {
-          const armAngle = obs.angle + spinRot + (a * Math.PI) / 2;
-          const tipX = obs.x + Math.cos(armAngle) * obs.armLength;
-          const tipY = obs.y + Math.sin(armAngle) * obs.armLength;
-          const dSq = ptSegDistSq(cx, cy, obs.x, obs.y, tipX, tipY);
-          if (dSq < (HIT_RADIUS + ARM_HALF) ** 2) {
-            this.hitPassenger(obs);
-            return;
-          }
-        }
-        // Check pole segment — rotated endpoint
-        const poleEndX = obs.x - 60 * Math.sin(spinRot);
-        const poleEndY = obs.y + 60 * Math.cos(spinRot);
-        const dPoleSq = ptSegDistSq(cx, cy, obs.x, obs.y, poleEndX, poleEndY);
-        if (dPoleSq < (HIT_RADIUS + POLE_HALF) ** 2) {
-          this.hitPassenger(obs);
-          return;
-        }
-        // Check center hub
-        hitDist = Math.sqrt((cx - obs.x) ** 2 + (cy - obs.y) ** 2);
-        if (hitDist < HIT_RADIUS + obs.radius) {
-          this.hitPassenger(obs);
-          return;
-        }
-      } else if (obs.type === 'bouncer') {
-        // Rotate player offset into bouncer-local space
-        const bRot = obs.rotation ?? 0;
-        const bdx = cx - obs.x, bdy = cy - obs.baseY;
-        const bldx =  bdx * Math.cos(bRot) + bdy * Math.sin(bRot);
-        const bldy = -bdx * Math.sin(bRot) + bdy * Math.cos(bRot);
-        const localOffset = Math.sin(obs.angle) * obs.amplitude;
-        hitDist = Math.sqrt(bldx ** 2 + (bldy - localOffset) ** 2);
-        if (hitDist < HIT_RADIUS + obs.radius) {
-          this.hitPassenger(obs);
-          return;
-        }
-      } else if (obs.type === 'pendulum') {
-        // Rotate player offset into pendulum-local space
-        const pRot = obs.rotation ?? 0;
-        const pdx = cx - obs.x, pdy = cy - obs.y;
-        const pldx =  pdx * Math.cos(pRot) + pdy * Math.sin(pRot);
-        const pldy = -pdx * Math.sin(pRot) + pdy * Math.cos(pRot);
-        const currentSwing = (obs.swingAngle ?? 0.8) * Math.sin(obs.angle);
-        const cableLen = obs.cableLength ?? 120;
-        const localBobX = Math.sin(currentSwing) * cableLen;
-        const localBobY = Math.cos(currentSwing) * cableLen;
-        hitDist = Math.sqrt((pldx - localBobX) ** 2 + (pldy - localBobY) ** 2);
-        if (hitDist < HIT_RADIUS + (obs.bobRadius ?? obs.radius)) {
-          this.hitPassenger(obs);
-          return;
-        }
-      } else if (obs.type === 'laser') {
-        const warnRadC = obs.bounceSpeed * (obs.warningTime ?? 2.0);
-        const phaseC = (obs.angle ?? 0) % (warnRadC + Math.PI);
-        if (phaseC < warnRadC) continue; // still in warning phase — beam off
-        const ptSegDistSqL = (px: number, py: number, ax: number, ay: number, bx: number, by: number) => {
-          const dx = bx - ax, dy = by - ay;
-          const lenSq = dx * dx + dy * dy;
-          if (lenSq === 0) return (px - ax) ** 2 + (py - ay) ** 2;
-          const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
-          return (px - ax - t * dx) ** 2 + (py - ay - t * dy) ** 2;
-        };
-        const baseDir = obs.beamDirection === 'left' ? Math.PI : 0;
-        const beamAngle = baseDir + (obs.rotation ?? 0);
-        const beamLen = obs.beamLength ?? obs.armLength;
-        const beamEndX = obs.x + Math.cos(beamAngle) * beamLen;
-        const beamEndY = obs.y + Math.sin(beamAngle) * beamLen;
-        const BEAM_HALF = 5;
-        const dSq = ptSegDistSqL(cx, cy, obs.x, obs.y, beamEndX, beamEndY);
-        if (dSq < (HIT_RADIUS + BEAM_HALF) ** 2) {
-          this.hitPassenger(obs);
-          return;
-        }
-      } else if (obs.type === 'swoop') {
-        const birdWorldX = obs.x + Math.sin(obs.angle) * (obs.patrolWidth ?? 160) / 2;
-        const birdWorldY = obs.baseY + obs.amplitude;
-        hitDist = Math.sqrt((cx - birdWorldX) ** 2 + (cy - birdWorldY) ** 2);
-        if (hitDist < HIT_RADIUS + obs.radius) {
-          this.hitPassenger(obs);
-          return;
-        }
-      } else if (obs.type === 'orbiter') {
-        const ballX = obs.x + Math.cos(obs.angle + (obs.rotation ?? 0)) * obs.armLength;
-        const ballY = obs.y + Math.sin(obs.angle + (obs.rotation ?? 0)) * obs.armLength;
-        hitDist = Math.sqrt((cx - ballX) ** 2 + (cy - ballY) ** 2);
-        if (hitDist < HIT_RADIUS + obs.radius) {
-          this.hitPassenger(obs);
-          return;
-        }
-      } else if (obs.type === 'mine') {
-        // Mine damage is dealt at explosion time inside renderObstacles; no contact collision
-      } else if (obs.type === 'boulder') {
-        // Only collidable while falling
-        if (obs.armLength === 2) {
-          hitDist = Math.sqrt((cx - obs.x) ** 2 + (cy - obs.y) ** 2);
-          if (hitDist < HIT_RADIUS + obs.radius) {
-            obs.hit = true; // despawn on hit
-            this.hitPassenger(obs);
-            return;
-          }
-        }
-      } else {
-        hitDist = Math.sqrt((cx - obs.x) ** 2 + (cy - obs.y) ** 2);
-        if (hitDist < HIT_RADIUS + obs.radius) {
-          this.hitPassenger(obs);
-          return;
-        }
+      const behavior = OBSTACLE_BEHAVIORS[obs.type];
+      if (behavior && behavior.checkCollision(obs, cx, cy, HIT_RADIUS)) {
+        this.hitPassenger(obs);
+        return;
       }
     }
   }
@@ -630,6 +553,13 @@ export class GameEngine {
     const w = canvas.width;
     const h = canvas.height;
     const cfg = WORLD_CONFIG[this.world];
+
+    // Camera tracks interpolated gondola position (per-frame, not per-tick)
+    const gondolaWorld = this.getInterpolatedGondolaPos();
+    const dt = this.frameDt;
+    this.camera.x += (gondolaWorld.x - canvas.width * 0.35 - this.camera.x) * (1 - Math.exp(-5.0 * dt));
+    this.camera.y += (gondolaWorld.y - canvas.height * 0.45 - this.camera.y) * (1 - Math.exp(-3.7 * dt));
+
     const cx = this.camera.x;
     const cy = this.camera.y;
 
@@ -841,702 +771,29 @@ export class GameEngine {
       );
 
       if (usedSprite) {
-        // Sprite handled; continue to next obstacle.
-        if (obs.type === 'spinner') {
-          obs.angle += obs.rotSpeed * this.lastDt;
-        } else if (obs.type === 'bouncer' || obs.type === 'pendulum') {
-          obs.angle += obs.bounceSpeed * this.lastDt;
-        }
         continue;
       }
 
-      if (obs.type === 'spinner') {
-        obs.angle += obs.rotSpeed * this.lastDt;
-        ctx.save();
-        ctx.translate(screenX, obs.y - cy);
-        ctx.rotate(obs.rotation ?? 0);
-
-        // Non-hitbox structural parts — gray, reduced opacity (background feel)
-        ctx.globalAlpha = 0.35;
-
-        // Pole (local: 0,0 → 0,60)
-        ctx.strokeStyle = '#888';
-        ctx.lineWidth = 10;
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(0, 60);
-        ctx.stroke();
-
-        // Arms
-        ctx.lineWidth = 18;
-        ctx.lineCap = 'round';
-        for (let a = 0; a < 4; a++) {
-          const armAngle = obs.angle + (a * Math.PI) / 2;
-          ctx.strokeStyle = '#999';
-          ctx.beginPath();
-          ctx.moveTo(0, 0);
-          ctx.lineTo(Math.cos(armAngle) * obs.armLength, Math.sin(armAngle) * obs.armLength);
-          ctx.stroke();
-        }
-
-        // Center hub
-        ctx.fillStyle = '#aaa';
-        ctx.beginPath();
-        ctx.arc(0, 0, obs.radius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#777';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        ctx.globalAlpha = 1.0;
-
-        // Tip balls — hitbox, full opacity
-        for (let a = 0; a < 4; a++) {
-          const armAngle = obs.angle + (a * Math.PI) / 2;
-          const tipLX = Math.cos(armAngle) * obs.armLength;
-          const tipLY = Math.sin(armAngle) * obs.armLength;
-          ctx.fillStyle = '#cc3333';
-          ctx.beginPath();
-          ctx.arc(tipLX, tipLY, 7, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.strokeStyle = '#ff6666';
-          ctx.lineWidth = 2;
-          ctx.stroke();
-        }
-
-        ctx.restore();
-
-      } else if (obs.type === 'bouncer') {
-        obs.angle += obs.bounceSpeed * this.lastDt;
-        const localOffset = Math.sin(obs.angle) * obs.amplitude;
-        ctx.save();
-        ctx.translate(screenX, obs.baseY - cy);
-        ctx.rotate(obs.rotation ?? 0);
-
-        // Spring (local: from ball bottom to spring mount)
-        const springBottomLocal = obs.amplitude + 30;
-        ctx.strokeStyle = '#FFD700';
-        ctx.lineWidth = 3;
-        for (let s = 0; s < 6; s++) {
-          const t = s / 6;
-          const lz = localOffset + (springBottomLocal - localOffset) * t;
-          const lx = Math.sin(t * Math.PI * 4) * 10;
-          if (s === 0) { ctx.beginPath(); ctx.moveTo(0, localOffset + obs.radius); }
-          ctx.lineTo(lx, lz);
-        }
-        ctx.lineTo(0, springBottomLocal);
-        ctx.stroke();
-
-        // Ball
-        ctx.fillStyle = '#E53935';
-        ctx.beginPath();
-        ctx.arc(0, localOffset, obs.radius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#B71C1C';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        // Spikes
-        for (let s = 0; s < 8; s++) {
-          const sa = (s / 8) * Math.PI * 2;
-          ctx.fillStyle = '#B71C1C';
-          ctx.beginPath();
-          ctx.moveTo(Math.cos(sa) * obs.radius, localOffset + Math.sin(sa) * obs.radius);
-          ctx.lineTo(Math.cos(sa + 0.15) * (obs.radius + 8), localOffset + Math.sin(sa + 0.15) * (obs.radius + 8));
-          ctx.lineTo(Math.cos(sa - 0.15) * (obs.radius + 8), localOffset + Math.sin(sa - 0.15) * (obs.radius + 8));
-          ctx.closePath();
-          ctx.fill();
-        }
-
-        ctx.restore();
-
-      } else if (obs.type === 'pendulum') {
-        obs.angle += obs.bounceSpeed * this.lastDt;
-        const currentSwing = (obs.swingAngle ?? 0.8) * Math.sin(obs.angle);
-        const cableLen = obs.cableLength ?? 120;
-        const bobR = obs.bobRadius ?? obs.radius;
-        const bLX = Math.sin(currentSwing) * cableLen;
-        const bLY = Math.cos(currentSwing) * cableLen;
-
-        ctx.save();
-        ctx.translate(screenX, obs.y - cy);
-        ctx.rotate(obs.rotation ?? 0);
-
-        // Anchor mount
-        ctx.fillStyle = '#888';
-        ctx.beginPath();
-        ctx.arc(0, 0, 6, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Cable
-        ctx.strokeStyle = '#888';
-        ctx.lineWidth = 3;
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(bLX, bLY);
-        ctx.stroke();
-
-        // Bob spikes
-        for (let s = 0; s < 6; s++) {
-          const sa = (s / 6) * Math.PI * 2;
-          ctx.fillStyle = '#555';
-          ctx.beginPath();
-          ctx.moveTo(bLX + Math.cos(sa) * bobR, bLY + Math.sin(sa) * bobR);
-          ctx.lineTo(bLX + Math.cos(sa + 0.2) * (bobR + 7), bLY + Math.sin(sa + 0.2) * (bobR + 7));
-          ctx.lineTo(bLX + Math.cos(sa - 0.2) * (bobR + 7), bLY + Math.sin(sa - 0.2) * (bobR + 7));
-          ctx.closePath();
-          ctx.fill();
-        }
-
-        // Bob
-        ctx.fillStyle = '#444';
-        ctx.beginPath();
-        ctx.arc(bLX, bLY, bobR, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#666';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        ctx.restore();
-
-      } else if (obs.type === 'laser') {
-        obs.angle += obs.bounceSpeed * this.lastDt;
-        // Cycle = [warning: warningTime s] + [active beam: π/bounceSpeed s]
-        // angle advances at ~bounceSpeed rad/s, so warningTime s = bounceSpeed*warningTime rad
-        const warnRad = obs.bounceSpeed * (obs.warningTime ?? 2.0);
-        const activeRad = Math.PI;
-        const totalCycle = warnRad + activeRad;
-        const phase = obs.angle % totalCycle;
-        const isActive = phase >= warnRad;
-        const isWarning = !isActive;
-
-        const baseDir = obs.beamDirection === 'left' ? Math.PI : 0;
-        const beamAngle = baseDir + (obs.rotation ?? 0);
-        const beamLen = obs.beamLength ?? obs.armLength;
-        const pivotX = screenX;
-        const pivotY = obs.y - cy;
-        const beamEndX = pivotX + Math.cos(beamAngle) * beamLen;
-        const beamEndY = pivotY + Math.sin(beamAngle) * beamLen;
-
-        // Emitter body (rotated to face beam direction)
-        ctx.save();
-        ctx.translate(pivotX, pivotY);
-        ctx.rotate(beamAngle);
-        ctx.fillStyle = '#444';
-        ctx.fillRect(-10, -8, 18, 16);
-        ctx.fillStyle = '#777';
-        ctx.fillRect(6, -5, 8, 10);
-        ctx.strokeStyle = '#999';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(-10, -8, 18, 16);
-        // Lens dot
-        ctx.fillStyle = isActive ? '#ff4444' : (isWarning ? '#ff9944' : '#888');
-        ctx.beginPath();
-        ctx.arc(13, 0, 4, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-
-        // Warning flicker (dashed preview)
-        if (isWarning) {
-          const wAlpha = 0.2 + Math.random() * 0.25;
-          ctx.strokeStyle = `rgba(255, 80, 80, ${wAlpha})`;
-          ctx.lineWidth = 2;
-          ctx.setLineDash([10, 10]);
-          ctx.beginPath();
-          ctx.moveTo(pivotX, pivotY);
-          ctx.lineTo(beamEndX, beamEndY);
-          ctx.stroke();
-          ctx.setLineDash([]);
-        }
-
-        // Active beam with glow
-        if (isActive) {
-          ctx.save();
-          ctx.shadowColor = '#ff0000';
-          ctx.shadowBlur = 14;
-          ctx.lineCap = 'round';
-          // Outer glow
-          ctx.strokeStyle = 'rgba(255, 40, 40, 0.3)';
-          ctx.lineWidth = 16;
-          ctx.beginPath();
-          ctx.moveTo(pivotX, pivotY);
-          ctx.lineTo(beamEndX, beamEndY);
-          ctx.stroke();
-          // Core beam
-          ctx.strokeStyle = '#ff3030';
-          ctx.lineWidth = 5;
-          ctx.beginPath();
-          ctx.moveTo(pivotX, pivotY);
-          ctx.lineTo(beamEndX, beamEndY);
-          ctx.stroke();
-          // Bright center line
-          ctx.strokeStyle = '#ffaaaa';
-          ctx.lineWidth = 1.5;
-          ctx.beginPath();
-          ctx.moveTo(pivotX, pivotY);
-          ctx.lineTo(beamEndX, beamEndY);
-          ctx.stroke();
-          ctx.restore();
-        }
-
-      } else if (obs.type === 'swoop') {
-        const pw    = obs.patrolWidth  ?? 160;
-        const ph    = obs.patrolHeight ?? 80;
-        const dd    = obs.diveDepth    ?? 120;
-        const DIVE_SPEED = 320; // px/s downward
-        const RISE_SPEED = 160; // px/s upward
-
-        // Current world position
-        const birdWorldX = obs.x + Math.sin(obs.angle) * pw / 2;
-        const birdWorldY = obs.baseY + obs.amplitude;
-
-        // State machine via armLength: 0=patrol, >0=diving, <0=rising
-        if (obs.armLength > 0) {
-          obs.amplitude += DIVE_SPEED * this.lastDt;
-          if (obs.amplitude >= dd) {
-            obs.amplitude = dd;
-            obs.armLength = -1;
-          }
-        } else if (obs.armLength < 0) {
-          obs.amplitude -= RISE_SPEED * this.lastDt;
-          if (obs.amplitude <= 0) {
-            obs.amplitude = 0;
-            obs.armLength = 0;
-          }
-        } else {
-          // Patrol: advance horizontal oscillation
-          obs.angle += obs.bounceSpeed * this.lastDt;
-          // Detect player: dive if player is within detection zone below bird
-          const gp = this.getGondolaPos();
-          const px = gp.x;
-          const py = gp.y + GONDOLA_HANG;
-          const dxP = px - birdWorldX;
-          const dyP = py - birdWorldY;
-          if (Math.abs(dxP) < pw / 2 && dyP > -obs.radius && dyP < ph) {
-            obs.armLength = 1;
-          }
-        }
-
-        // ── Draw ──────────────────────────────────────────────────────────
-        const bSX = birdWorldX - cx;
-        const bSY = birdWorldY - cy;
-        const isDiving = obs.armLength !== 0;
-        const movingRight = Math.cos(obs.angle) >= 0;
-        const dir = movingRight ? 1 : -1;
-        const flap = isDiving ? 0 : Math.sin(obs.angle * 5) * 5;
-
-        ctx.save();
-        ctx.translate(bSX, bSY);
-
-        // Tail feathers
-        ctx.fillStyle = '#4a3020';
-        ctx.beginPath();
-        if (isDiving) {
-          ctx.moveTo(-dir * 8, 0);
-          ctx.lineTo(-dir * 20, 14);
-          ctx.lineTo(-dir * 16, 6);
-          ctx.lineTo(-dir * 12, 14);
-          ctx.lineTo(-dir * 8, 4);
-        } else {
-          ctx.moveTo(-dir * 8, 0);
-          ctx.lineTo(-dir * 22, 4);
-          ctx.lineTo(-dir * 18, 8);
-          ctx.lineTo(-dir * 14, 4);
-          ctx.lineTo(-dir * 8, 6);
-        }
-        ctx.closePath();
-        ctx.fill();
-
-        // Wing
-        ctx.fillStyle = '#7a5030';
-        if (isDiving) {
-          // Tucked wings sweeping back
-          ctx.beginPath();
-          ctx.moveTo(0, -4);
-          ctx.lineTo(-dir * 18, -2);
-          ctx.lineTo(-dir * 16, 8);
-          ctx.lineTo(0, 6);
-          ctx.closePath();
-          ctx.fill();
-          ctx.fillStyle = '#9a6840';
-          ctx.beginPath();
-          ctx.moveTo(0, -4);
-          ctx.lineTo(-dir * 18, -10);
-          ctx.lineTo(-dir * 20, -2);
-          ctx.lineTo(-dir * 8, -2);
-          ctx.closePath();
-          ctx.fill();
-        } else {
-          // Spread wings with flap
-          ctx.beginPath();
-          ctx.moveTo(-dir * 2, 2);
-          ctx.lineTo(-dir * 28, -6 + flap);
-          ctx.lineTo(-dir * 24, 6 + flap);
-          ctx.lineTo(-dir * 4, 6);
-          ctx.closePath();
-          ctx.fill();
-          // Wing tip lighter
-          ctx.fillStyle = '#9a6840';
-          ctx.beginPath();
-          ctx.moveTo(-dir * 22, -5 + flap);
-          ctx.lineTo(-dir * 32, -2 + flap);
-          ctx.lineTo(-dir * 28, 5 + flap);
-          ctx.closePath();
-          ctx.fill();
-        }
-
-        // Body
-        ctx.fillStyle = '#4a3020';
-        ctx.beginPath();
-        ctx.ellipse(dir * 2, 0, 12, 7, isDiving ? dir * 0.4 : 0, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Head
-        ctx.fillStyle = '#3a2010';
-        ctx.beginPath();
-        ctx.arc(dir * 12, -3, 6, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Beak
-        ctx.fillStyle = '#bb8800';
-        ctx.beginPath();
-        ctx.moveTo(dir * 17, -3);
-        ctx.lineTo(dir * 25, -1);
-        ctx.lineTo(dir * 17, 1);
-        ctx.fill();
-
-        // Eye
-        ctx.fillStyle = '#ffaa00';
-        ctx.beginPath();
-        ctx.arc(dir * 13, -4, 2.5, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#111';
-        ctx.beginPath();
-        ctx.arc(dir * 13.5, -4, 1.2, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.restore();
-
-      } else if (obs.type === 'orbiter') {
-        obs.angle += obs.rotSpeed * this.lastDt;
-        const orbitR = obs.armLength;
-        const rot = obs.rotation ?? 0;
-        const ballSX = screenX + Math.cos(obs.angle + rot) * orbitR;
-        const ballSY = (obs.y - cy) + Math.sin(obs.angle + rot) * orbitR;
-
-        // Orbit ring (dashed)
-        ctx.save();
-        ctx.translate(screenX, obs.y - cy);
-        ctx.strokeStyle = 'rgba(180, 80, 255, 0.3)';
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([6, 4]);
-        ctx.beginPath();
-        ctx.arc(0, 0, orbitR, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.setLineDash([]);
-
-        // Center anchor
-        ctx.fillStyle = '#7030aa';
-        ctx.beginPath();
-        ctx.arc(0, 0, 5, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#9050cc';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-        ctx.restore();
-
-        // Arm line
-        ctx.save();
-        ctx.strokeStyle = 'rgba(180, 80, 255, 0.45)';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(screenX, obs.y - cy);
-        ctx.lineTo(ballSX, ballSY);
-        ctx.stroke();
-        ctx.restore();
-
-        // Orbiting ball
-        ctx.save();
-        ctx.translate(ballSX, ballSY);
-        ctx.fillStyle = '#b450ff';
-        ctx.beginPath();
-        ctx.arc(0, 0, obs.radius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#d890ff';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        // Highlight
-        ctx.fillStyle = 'rgba(255, 220, 255, 0.6)';
-        ctx.beginPath();
-        ctx.arc(-obs.radius * 0.3, -obs.radius * 0.35, obs.radius * 0.35, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-
-      } else if (obs.type === 'boulder') {
-        const GRAVITY = 700; // px/s²
-
-        // ── State machine ──────────────────────────────────────────────────
-        if (obs.armLength === 0) {
-          // Idle: watch for player entering trigger radius
-          const gp = this.getGondolaPos();
-          const dx = gp.x - obs.x;
-          const dy = (gp.y + GONDOLA_HANG) - obs.y;
-          if (Math.sqrt(dx * dx + dy * dy) < (obs.triggerRadius ?? 120)) {
-            obs.armLength = 1; // start countdown
-          }
-        } else if (obs.armLength === 1) {
-          // Countdown: bounceSpeed holds remaining delay time
-          obs.bounceSpeed -= this.lastDt;
-          if (obs.bounceSpeed <= 0) {
-            obs.armLength = 2;  // start falling
-            obs.bounceSpeed = 0; // reset: now = fall velocity (px/s)
-            obs.amplitude = 0;   // reset: now = elapsed fall time
-          }
-        } else if (obs.armLength === 2) {
-          // Falling
-          obs.bounceSpeed += GRAVITY * this.lastDt; // accelerate downward
-          obs.y += obs.bounceSpeed * this.lastDt;
-          obs.angle += (obs.bounceSpeed / Math.max(obs.radius, 1)) * this.lastDt; // roll
-          obs.amplitude += this.lastDt;
-          if (obs.amplitude > (obs.fallTimeout ?? 4)) {
-            obs.hit = true; // despawn after timeout
-          }
-        }
-
-        if (obs.hit) continue; // skip render if just despawned
-
-        // ── Draw ──────────────────────────────────────────────────────────
-        const r = obs.radius;
-        const sy = obs.y - cy;
-        // Shake during countdown — intensifies as timer runs out
-        const shakeX = obs.armLength === 1
-          ? Math.sin(now * 45) * Math.max(0, 2.5 - obs.bounceSpeed) * 1.5
-          : 0;
-
-        ctx.save();
-        ctx.translate(screenX + shakeX, sy);
-        ctx.rotate(obs.angle);
-
-        // Shadow layer (darker offset circle)
-        ctx.fillStyle = '#3d2e12';
-        ctx.beginPath();
-        ctx.arc(r * 0.08, r * 0.08, r, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Main stone body
-        ctx.fillStyle = '#7a6438';
-        ctx.beginPath();
-        ctx.arc(0, 0, r, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Mid-tone face
-        ctx.fillStyle = '#9c8252';
-        ctx.beginPath();
-        ctx.arc(-r * 0.12, -r * 0.15, r * 0.8, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Bright highlight patch
-        ctx.fillStyle = '#b89a6a';
-        ctx.beginPath();
-        ctx.arc(-r * 0.22, -r * 0.28, r * 0.45, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Crack lines
-        ctx.strokeStyle = '#4a3820';
-        ctx.lineWidth = Math.max(1, r / 18);
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(-r * 0.1, -r * 0.45);
-        ctx.lineTo(r * 0.18, r * 0.08);
-        ctx.lineTo(r * 0.04, r * 0.52);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(-r * 0.55, r * 0.08);
-        ctx.lineTo(-r * 0.12, -r * 0.08);
-        ctx.stroke();
-
-        // Outline
-        ctx.strokeStyle = '#2a1e0a';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(0, 0, r, 0, Math.PI * 2);
-        ctx.stroke();
-
-        ctx.restore();
-
-      } else if (obs.type === 'mine') {
-        const EXPLOSION_DURATION = 0.55;
-        const sy = obs.y - cy;
-
-        // ── State machine ──────────────────────────────────────────────────
-        if (obs.armLength === 0) {
-          obs.angle += 0.4 * this.lastDt; // slow idle drift
-          const gp = this.getGondolaPos();
-          const dx = gp.x - obs.x;
-          const dy = (gp.y + GONDOLA_HANG) - obs.y;
-          if (Math.sqrt(dx * dx + dy * dy) < (obs.triggerRadius ?? 40)) {
-            obs.armLength = 1; // start fuse countdown
-          }
-        } else if (obs.armLength === 1) {
-          obs.angle += 2.5 * this.lastDt; // spin faster while armed
-          obs.bounceSpeed -= this.lastDt;
-          if (obs.bounceSpeed <= 0) {
-            obs.armLength = 2;
-            obs.amplitude = 0; // explosion timer
-            // Deal damage immediately if player is within explosion radius
-            const gp = this.getGondolaPos();
-            const dx = gp.x - obs.x;
-            const dy = (gp.y + GONDOLA_HANG) - obs.y;
-            if (Math.sqrt(dx * dx + dy * dy) < HIT_RADIUS + (obs.explosionRadius ?? 80)) {
-              this.hitPassenger(obs);
-            }
-          }
-        } else if (obs.armLength === 2) {
-          obs.amplitude += this.lastDt;
-          if (obs.amplitude > EXPLOSION_DURATION) {
-            obs.hit = true;
-          }
-        }
-
-        if (obs.hit) continue;
-
-        // ── Draw ──────────────────────────────────────────────────────────
-        if (obs.armLength === 2) {
-          // Explosion animation
-          const t = obs.amplitude / EXPLOSION_DURATION;
-          const expR = (obs.explosionRadius ?? 80) * (0.2 + t * 0.8);
-          const alpha = 1 - t;
-
-          ctx.save();
-          // Outer shockwave ring
-          ctx.strokeStyle = `rgba(255, 200, 50, ${alpha * 0.7})`;
-          ctx.lineWidth = 8 * (1 - t * 0.6);
-          ctx.beginPath();
-          ctx.arc(screenX, sy, expR, 0, Math.PI * 2);
-          ctx.stroke();
-
-          // Fire ball gradient
-          const grad = ctx.createRadialGradient(screenX, sy, 0, screenX, sy, expR * 0.8);
-          grad.addColorStop(0,   `rgba(255, 255, 180, ${alpha})`);
-          grad.addColorStop(0.35, `rgba(255, 140, 20, ${alpha * 0.95})`);
-          grad.addColorStop(0.75, `rgba(220, 50, 0, ${alpha * 0.6})`);
-          grad.addColorStop(1,    `rgba(100, 20, 0, 0)`);
-          ctx.fillStyle = grad;
-          ctx.beginPath();
-          ctx.arc(screenX, sy, expR * 0.8, 0, Math.PI * 2);
-          ctx.fill();
-
-          // Second expanding ring (debris ring)
-          ctx.strokeStyle = `rgba(180, 80, 0, ${alpha * 0.4})`;
-          ctx.lineWidth = 3;
-          ctx.beginPath();
-          ctx.arc(screenX, sy, expR * 1.25, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.restore();
-
-        } else {
-          // Mine body — classic naval mine sphere with spikes
-          const BODY_R = 14;
-          const isArmed = obs.armLength === 1;
-          const pulse = isArmed
-            ? Math.sin(now * (6 + (1 - obs.bounceSpeed / Math.max(obs.rotSpeed, 0.01)) * 10)) * 0.5 + 0.5
-            : 0;
-
-          ctx.save();
-          ctx.translate(screenX, sy);
-          ctx.rotate(obs.angle + (obs.rotation ?? 0));
-
-          // Armed glow
-          if (isArmed) {
-            ctx.shadowColor = `rgba(255, 60, 60, ${0.5 + pulse * 0.5})`;
-            ctx.shadowBlur = 10 + pulse * 10;
-          }
-
-          // 6 conical spikes
-          const SPIKE_COUNT = 6;
-          const SPIKE_LEN = BODY_R * 0.85;
-          ctx.fillStyle = isArmed ? `rgb(${Math.round(180 + pulse * 60)}, 60, 60)` : '#3a3a3a';
-          for (let i = 0; i < SPIKE_COUNT; i++) {
-            const a = (i / SPIKE_COUNT) * Math.PI * 2;
-            ctx.beginPath();
-            ctx.moveTo(Math.cos(a - 0.2) * BODY_R, Math.sin(a - 0.2) * BODY_R);
-            ctx.lineTo(Math.cos(a + 0.2) * BODY_R, Math.sin(a + 0.2) * BODY_R);
-            ctx.lineTo(Math.cos(a) * (BODY_R + SPIKE_LEN), Math.sin(a) * (BODY_R + SPIKE_LEN));
-            ctx.closePath();
-            ctx.fill();
-          }
-
-          // Main sphere
-          ctx.shadowBlur = 0;
-          ctx.shadowColor = 'transparent';
-          const bodyGrad = ctx.createRadialGradient(-BODY_R * 0.3, -BODY_R * 0.35, 1, 0, 0, BODY_R);
-          if (isArmed) {
-            bodyGrad.addColorStop(0,   `rgba(220, ${Math.round(80 + pulse * 80)}, 80, 1)`);
-            bodyGrad.addColorStop(0.6, `rgba(160, 30, 30, 1)`);
-          } else {
-            bodyGrad.addColorStop(0, '#6a6a6a');
-            bodyGrad.addColorStop(0.6, '#3d3d3d');
-          }
-          bodyGrad.addColorStop(1, '#111');
-          ctx.fillStyle = bodyGrad;
-          ctx.beginPath();
-          ctx.arc(0, 0, BODY_R, 0, Math.PI * 2);
-          ctx.fill();
-
-          // Specular highlight
-          ctx.fillStyle = `rgba(255, 255, 255, ${isArmed ? 0.12 : 0.22})`;
-          ctx.beginPath();
-          ctx.arc(-BODY_R * 0.28, -BODY_R * 0.32, BODY_R * 0.32, 0, Math.PI * 2);
-          ctx.fill();
-
-          // Outline
-          ctx.strokeStyle = '#111';
-          ctx.lineWidth = 1.5;
-          ctx.beginPath();
-          ctx.arc(0, 0, BODY_R, 0, Math.PI * 2);
-          ctx.stroke();
-
-          ctx.restore();
-
-          // Fuse progress ring (countdown arc around the mine)
-          if (isArmed) {
-            const progress = 1 - obs.bounceSpeed / Math.max(obs.rotSpeed, 0.01);
-            ctx.save();
-            ctx.strokeStyle = `rgba(255, ${Math.round(220 - pulse * 180)}, 0, 0.85)`;
-            ctx.lineWidth = 3;
-            ctx.lineCap = 'round';
-            ctx.beginPath();
-            ctx.arc(screenX, sy, BODY_R + 6, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
-            ctx.stroke();
-            ctx.restore();
-          }
-        }
-
-      } else {
-        // Static - rock
-        const sx = screenX;
-        const sy = obs.y - cy;
-        ctx.fillStyle = '#777';
-        ctx.beginPath();
-        ctx.arc(sx, sy, obs.radius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#666';
-        ctx.beginPath();
-        ctx.arc(sx - 3, sy - 3, obs.radius * 0.7, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#555';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(sx, sy, obs.radius, 0, Math.PI * 2);
-        ctx.stroke();
+      const behavior = OBSTACLE_BEHAVIORS[obs.type];
+      if (behavior) {
+        behavior.render(obs, ctx, screenX, obs.y - cy, now);
       }
     }
   }
 
+
+  getInterpolatedGondolaPos(): Point {
+    const current = this.getGondolaPos();
+    const alpha = this.interpolationAlpha;
+    return {
+      x: this.prevGondolaX + (current.x - this.prevGondolaX) * alpha,
+      y: this.prevGondolaY + (current.y - this.prevGondolaY) * alpha,
+    };
+  }
+
   renderGondola(cx: number, cy: number) {
     const { ctx } = this;
-    const gp = this.getGondolaPos();
+    const gp = this.getInterpolatedGondolaPos();
     const sx = gp.x - cx;
     const sy = gp.y - cy;
 
