@@ -27,6 +27,7 @@ const TOOLS: { tool: EditorTool; label: string; emoji: string }[] = [
   { tool: 'rail_start', label: 'Start', emoji: '🟢' },
   { tool: 'rail_end', label: 'End', emoji: '🏁' },
   { tool: 'rail', label: 'Rail', emoji: '🛤️' },
+  { tool: 'rail_crossing', label: 'Crossing', emoji: '✖️' },
   ...OBSTACLE_TOOLS,
   { tool: 'eraser', label: 'Eraser', emoji: '🧹' },
   { tool: 'arc', label: 'Arc Tool', emoji: '🔄' },
@@ -37,7 +38,7 @@ const TOOLS: { tool: EditorTool; label: string; emoji: string }[] = [
   { tool: 'line2', label: 'Free Line', emoji: '📐' },
 ];
 
-const TILE_TOOL_TYPES = new Set<EditorTool>(['rail', 'rail_start', 'rail_end', ...OBSTACLE_DEFINITIONS.map(d => d.tileType as EditorTool)]);
+const TILE_TOOL_TYPES = new Set<EditorTool>(['rail', 'rail_start', 'rail_end', 'rail_crossing', ...OBSTACLE_DEFINITIONS.map(d => d.tileType as EditorTool)]);
 const SHAPE_TOOL_TYPES = new Set<EditorTool>(['arc', 'curve', 'circular_curve', 'circle']);
 
 const OBSTACLE_COLORS: Record<string, string> = Object.fromEntries(
@@ -49,6 +50,7 @@ const TILE_COLORS: Record<string, string> = {
   rail: '#FFD700',
   rail_start: '#00E676',
   rail_end: '#FF4081',
+  rail_crossing: '#FFA500',
   ...OBSTACLE_COLORS,
 };
 
@@ -65,8 +67,9 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     const conns = railConnectionsRef.current;
     if (!conns[keyA]) conns[keyA] = new Set();
     if (!conns[keyB]) conns[keyB] = new Set();
-    // Only connect if each has fewer than 2 connections
-    if (conns[keyA].size < 2 && conns[keyB].size < 2) {
+    const maxA = tiles[keyA] === 'rail_crossing' ? 4 : 2;
+    const maxB = tiles[keyB] === 'rail_crossing' ? 4 : 2;
+    if (conns[keyA].size < maxA && conns[keyB].size < maxB) {
       conns[keyA].add(keyB);
       conns[keyB].add(keyA);
     }
@@ -85,7 +88,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
 
   const rebuildConnectionsFromTiles = (tilesData: Record<string, TileType>) => {
     const conns: Record<string, Set<string>> = {};
-    const isRailLike = (t: TileType | undefined) => t === 'rail' || t === 'rail_start' || t === 'rail_end';
+    const isRailLike = (t: TileType | undefined) => t === 'rail' || t === 'rail_start' || t === 'rail_end' || t === 'rail_crossing';
     const keys = Object.keys(tilesData).filter(k => isRailLike(tilesData[k]));
     for (const key of keys) {
       const [gx, gy] = parseTileKey(key);
@@ -102,7 +105,9 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         if (isRailLike(tilesData[nk])) {
           if (!conns[key]) conns[key] = new Set();
           if (!conns[nk]) conns[nk] = new Set();
-          if (conns[key].size < 2 && conns[nk].size < 2) {
+          const maxKey = tilesData[key] === 'rail_crossing' ? 4 : 2;
+          const maxNk = tilesData[nk] === 'rail_crossing' ? 4 : 2;
+          if (conns[key].size < maxKey && conns[nk].size < maxNk) {
             conns[key].add(nk);
             conns[nk].add(key);
           }
@@ -148,6 +153,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const [freeLines, setFreeLines] = useState<FreeLineSegment[]>([]);
   const [line2Start, setLine2Start] = useState<{ attach: import('@/game/editorTypes').FreeLineAttach; start: { x: number; y: number } } | null>(null);
   const [mouseWorld, setMouseWorld] = useState<{ x: number; y: number } | null>(null);
+  // Snap cycling: when multiple snap points overlap, scroll wheel cycles through them
+  const snapCycleRef = useRef<{ worldX: number; worldY: number; index: number }>({ worldX: -999, worldY: -999, index: 0 });
 
   const hasUnsavedChanges = () =>
     JSON.stringify(tiles) !== lastSavedTilesRef.current ||
@@ -281,9 +288,9 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       const sy = gy * GRID_SIZE - cy;
       if (sx < -GRID_SIZE || sx > vw + GRID_SIZE || sy < -GRID_SIZE || sy > vh + GRID_SIZE) continue;
 
-      if (type === 'rail' || type === 'rail_start' || type === 'rail_end') {
+      if (type === 'rail' || type === 'rail_start' || type === 'rail_end' || type === 'rail_crossing') {
         // Background color
-        ctx.fillStyle = type === 'rail_start' ? '#00E676' : type === 'rail_end' ? '#FF4081' : '#FFD700';
+        ctx.fillStyle = type === 'rail_start' ? '#00E676' : type === 'rail_end' ? '#FF4081' : type === 'rail_crossing' ? '#FFA500' : '#FFD700';
         ctx.fillRect(sx + 2, sy + 2, GRID_SIZE - 4, GRID_SIZE - 4);
 
         // Draw rail connections using explicit connection map (skip straight line if smooth segment exists)
@@ -310,13 +317,24 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           ctx.stroke();
         }
 
-        // Label for start/end
+        // Label for start/end/crossing
         if (type === 'rail_start' || type === 'rail_end') {
           ctx.font = `bold ${GRID_SIZE * 0.3}px system-ui`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillStyle = '#000';
           ctx.fillText(type === 'rail_start' ? 'START' : 'END', centerX, centerY);
+        } else if (type === 'rail_crossing') {
+          // Draw X symbol for crossing
+          const m = GRID_SIZE * 0.25;
+          ctx.strokeStyle = '#000';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(sx + m, sy + m);
+          ctx.lineTo(sx + GRID_SIZE - m, sy + GRID_SIZE - m);
+          ctx.moveTo(sx + GRID_SIZE - m, sy + m);
+          ctx.lineTo(sx + m, sy + GRID_SIZE - m);
+          ctx.stroke();
         } else {
           ctx.fillStyle = '#333';
           ctx.beginPath();
@@ -540,23 +558,65 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         }
       }
 
-      let hover: { x: number; y: number } | null = null;
-      let bestD = Infinity;
+      // Find hover target with cycle disambiguation for overlapping points
+      let hoverHint: (typeof hints)[0] | null = null;
+      let hoverOverlapCount = 0;
       if (mouseWorld) {
-        for (const h of hints) {
-          const d = Math.hypot(mouseWorld.x - h.pt.x, mouseWorld.y - h.pt.y);
-          if (d < bestD) { bestD = d; hover = { x: h.pt.x, y: h.pt.y }; }
+        const withDist = hints.map(h => ({ ...h, dist: Math.hypot(mouseWorld.x - h.pt.x, mouseWorld.y - h.pt.y) }));
+        const inRange = withDist.filter(h => h.dist <= 45).sort((a, b) => a.dist - b.dist);
+        if (inRange.length > 0) {
+          const best = inRange[0];
+          const overlapping = inRange.filter(h => Math.hypot(h.pt.x - best.pt.x, h.pt.y - best.pt.y) < 5);
+          hoverOverlapCount = overlapping.length;
+          // Update snap cycle position tracking
+          const sc = snapCycleRef.current;
+          const nearPrev = Math.hypot(mouseWorld.x - sc.worldX, mouseWorld.y - sc.worldY) < 30;
+          if (!nearPrev) { sc.worldX = mouseWorld.x; sc.worldY = mouseWorld.y; sc.index = 0; }
+          if (overlapping.length > 1) {
+            const idx = ((sc.index % overlapping.length) + overlapping.length) % overlapping.length;
+            hoverHint = overlapping[idx];
+          } else {
+            hoverHint = best;
+          }
         }
-        if (bestD > 45) hover = null;
+      }
+      const hoverSegId = hoverHint ? ('segmentId' in hoverHint.attach ? hoverHint.attach.segmentId : null) : null;
+
+      // Highlight the segment that the current hover target belongs to
+      if (hoverSegId) {
+        const segIdx = segIdToIdx[hoverSegId];
+        if (segIdx != null) {
+          const seg = baseForLines[segIdx];
+          if (seg && seg.length > 1) {
+            ctx.strokeStyle = 'rgba(0, 200, 255, 0.5)';
+            ctx.lineWidth = 6;
+            ctx.beginPath();
+            ctx.moveTo(seg[0].x - cx, seg[0].y - cy);
+            for (let i = 1; i < seg.length; i++) ctx.lineTo(seg[i].x - cx, seg[i].y - cy);
+            ctx.stroke();
+          }
+        }
       }
 
       for (const h of hints) {
-        const isHover = !!hover && Math.hypot(hover.x - h.pt.x, hover.y - h.pt.y) < 1;
-        ctx.strokeStyle = isHover ? 'rgba(0, 255, 136, 0.9)' : 'rgba(0, 255, 136, 0.35)';
-        ctx.lineWidth = isHover ? 3 : 2;
+        const isActive = hoverHint && h === hoverHint;
+        const isOverlap = hoverHint && !isActive && Math.hypot(h.pt.x - hoverHint.pt.x, h.pt.y - hoverHint.pt.y) < 5;
+        ctx.strokeStyle = isActive ? 'rgba(0, 255, 136, 0.9)' : isOverlap ? 'rgba(255, 200, 0, 0.6)' : 'rgba(0, 255, 136, 0.35)';
+        ctx.lineWidth = isActive ? 3 : 2;
         ctx.beginPath();
-        ctx.arc(h.pt.x - cx, h.pt.y - cy, isHover ? 9 : 7, 0, Math.PI * 2);
+        ctx.arc(h.pt.x - cx, h.pt.y - cy, isActive ? 9 : 7, 0, Math.PI * 2);
         ctx.stroke();
+      }
+
+      // Show cycle indicator when multiple snap points overlap
+      if (hoverHint && hoverOverlapCount > 1) {
+        const sc = snapCycleRef.current;
+        const idx = ((sc.index % hoverOverlapCount) + hoverOverlapCount) % hoverOverlapCount;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.font = 'bold 12px system-ui';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(`${idx + 1}/${hoverOverlapCount} (scroll to switch)`, hoverHint.pt.x - cx + 14, hoverHint.pt.y - cy - 4);
       }
     }
 
@@ -1075,42 +1135,60 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
               hints.push({ attach: { segmentId: fl.attach.segmentId, atWorld: fl.attachWorld }, pt: fl.attachWorld, dist: Math.hypot(world.x - fl.attachWorld.x, world.y - fl.attachWorld.y) });
             }
           }
-          const best = hints.length === 0 ? null : hints.reduce((acc, h) => (h.dist <= acc.dist ? h : acc), hints[0]);
-          if (!best || best.dist > 45) return;
-          setLine2Start({ attach: best.attach, start: best.pt });
+          // Find all candidates within snap radius, then use cycle index to disambiguate overlapping ones
+          const candidates = hints.filter(h => h.dist <= 45).sort((a, b) => a.dist - b.dist);
+          if (candidates.length === 0) return;
+          // Group candidates that are at nearly the same position (within 5px)
+          const best = candidates[0];
+          const overlapping = candidates.filter(c => Math.hypot(c.pt.x - best.pt.x, c.pt.y - best.pt.y) < 5);
+          let chosen: typeof best;
+          if (overlapping.length > 1) {
+            const sc = snapCycleRef.current;
+            const idx = ((sc.index % overlapping.length) + overlapping.length) % overlapping.length;
+            chosen = overlapping[idx];
+          } else {
+            chosen = best;
+          }
+          setLine2Start({ attach: chosen.attach, start: chosen.pt });
         } else {
           // Second click: free end point anywhere in world space (with snapping to any endpoint)
         const { allSegments, segmentIdByIndex } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, freeLines);
-          let snapEnd: { x: number; y: number } | null = null;
-          let snapTarget: { segmentId: string; endpoint: 'start' | 'end' } | null = null;
-          let bestD = Infinity;
+          type SnapCandidate = { pt: { x: number; y: number }; target: { segmentId: string; endpoint: 'start' | 'end' }; dist: number };
+          const endCandidates: SnapCandidate[] = [];
           for (let si = 0; si < allSegments.length; si++) {
             const seg = allSegments[si];
             if (!seg || seg.length < 1) continue;
             const id = segmentIdByIndex[si];
             const a = seg[0];
             const b = seg[seg.length - 1];
-            const da = Math.hypot(world.x - a.x, world.y - a.y);
-            const db = Math.hypot(world.x - b.x, world.y - b.y);
-            if (da < bestD) {
-              bestD = da;
-              snapEnd = { x: a.x, y: a.y };
-              snapTarget = { segmentId: id, endpoint: 'start' };
-            }
-            if (db < bestD) {
-              bestD = db;
-              snapEnd = { x: b.x, y: b.y };
-              snapTarget = { segmentId: id, endpoint: 'end' };
-            }
+            endCandidates.push({ pt: { x: a.x, y: a.y }, target: { segmentId: id, endpoint: 'start' }, dist: Math.hypot(world.x - a.x, world.y - a.y) });
+            endCandidates.push({ pt: { x: b.x, y: b.y }, target: { segmentId: id, endpoint: 'end' }, dist: Math.hypot(world.x - b.x, world.y - b.y) });
           }
-          const endPoint = bestD <= 45 && snapEnd ? snapEnd : world;
+          const validEnd = endCandidates.filter(c => c.dist <= 45).sort((a, b) => a.dist - b.dist);
+          let snapEnd: { x: number; y: number } | null = null;
+          let snapTarget: { segmentId: string; endpoint: 'start' | 'end' } | null = null;
+          if (validEnd.length > 0) {
+            const bestEnd = validEnd[0];
+            const overlappingEnd = validEnd.filter(c => Math.hypot(c.pt.x - bestEnd.pt.x, c.pt.y - bestEnd.pt.y) < 5);
+            let chosenEnd: SnapCandidate;
+            if (overlappingEnd.length > 1) {
+              const sc = snapCycleRef.current;
+              const idx = ((sc.index % overlappingEnd.length) + overlappingEnd.length) % overlappingEnd.length;
+              chosenEnd = overlappingEnd[idx];
+            } else {
+              chosenEnd = bestEnd;
+            }
+            snapEnd = chosenEnd.pt;
+            snapTarget = chosenEnd.target;
+          }
+          const endPoint = snapEnd ? snapEnd : world;
           setFreeLines(prev => [
             ...prev,
             {
               attach: line2Start.attach,
               attachWorld: line2Start.start,
               end: endPoint,
-              target: bestD <= 45 && snapTarget ? snapTarget : undefined,
+              target: snapTarget || undefined,
             },
           ]);
           setLine2Start(null);
@@ -1204,7 +1282,18 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           const conns = railConnectionsRef.current;
           conns[seg.startKey]?.delete(seg.endKey);
           conns[seg.endKey]?.delete(seg.startKey);
+          // Also remove both endpoint tiles of the curve
+          for (const k of [seg.startKey, seg.endKey]) {
+            removeRailConnections(k);
+            if (lastPlacedRailRef.current === k) lastPlacedRailRef.current = null;
+          }
           setSmoothSegments(prev => prev.filter((_, i) => i !== hitSmooth));
+          setTiles(prev => {
+            const next = { ...prev };
+            delete next[seg.startKey];
+            delete next[seg.endKey];
+            return next;
+          });
           return;
         }
       }
@@ -1237,6 +1326,15 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
 
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
+    // When using line2 tool, scroll cycles through overlapping snap candidates
+    if (tool === 'line2' && mouseWorld) {
+      const sc = snapCycleRef.current;
+      const nearPrev = Math.hypot(mouseWorld.x - sc.worldX, mouseWorld.y - sc.worldY) < 30;
+      if (nearPrev) {
+        sc.index += e.deltaY > 0 ? 1 : -1;
+        return; // don't zoom, just cycle
+      }
+    }
     const delta = e.deltaY;
     if (delta < 0) zoomToCenter(Math.min(3, zoom + 0.25));
     else if (delta > 0) zoomToCenter(Math.max(0.25, zoom - 0.25));
@@ -1323,12 +1421,28 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       removeRailConnections(key);
       if (lastPlacedRailRef.current === key) lastPlacedRailRef.current = null;
       setSelectedObstacleKey(prev => prev === key ? null : prev);
+      // Remove any smooth segments anchored to this tile + the other endpoint tile
+      const removedSegs = smoothSegments.filter(s => s.startKey === key || s.endKey === key);
+      const otherKeys: string[] = [];
+      if (removedSegs.length > 0) {
+        const conns = railConnectionsRef.current;
+        for (const s of removedSegs) {
+          conns[s.startKey]?.delete(s.endKey);
+          conns[s.endKey]?.delete(s.startKey);
+          const other = s.startKey === key ? s.endKey : s.startKey;
+          otherKeys.push(other);
+          removeRailConnections(other);
+          if (lastPlacedRailRef.current === other) lastPlacedRailRef.current = null;
+        }
+        setSmoothSegments(prev => prev.filter(s => s.startKey !== key && s.endKey !== key));
+      }
       setTiles(prev => {
         const next = { ...prev };
         delete next[key];
+        for (const k of otherKeys) delete next[k];
         return next;
       });
-    } else if (tool === 'rail' || obstacleDefMap.has(tool)) {
+    } else if (tool === 'rail' || tool === 'rail_crossing' || obstacleDefMap.has(tool)) {
       // Apply carried params if this is the first placement after a "pick up"
       const isRelocation = obstacleDefMap.has(tool) && pendingObstacleParamsRef.current !== null;
       if (isRelocation) {
@@ -1340,7 +1454,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         setSelectedObstacleKey(key);
         return;
       }
-      const isRail = tool === 'rail';
+      const isRail = tool === 'rail' || tool === 'rail_crossing';
       if (isRail) {
         // Connect to last placed rail if adjacent
         const last = lastPlacedRailRef.current;
@@ -1350,6 +1464,23 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           const dy = Math.abs(gy - ly);
           if (dx <= 1 && dy <= 1 && (dx + dy > 0)) {
             addRailConnection(last, key);
+          }
+        }
+        // Auto-connect to any adjacent crossing tiles (so building through a crossing works)
+        const neighborDirs: [number, number][] = [
+          [1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]
+        ];
+        for (const [ndx, ndy] of neighborDirs) {
+          const nk = tileKey(gx + ndx, gy + ndy);
+          if (nk !== last && tiles[nk] === 'rail_crossing') {
+            addRailConnection(key, nk);
+          }
+          // Also connect if WE are a crossing and neighbor is any rail-like tile
+          if (tool === 'rail_crossing' && nk !== last) {
+            const nt = tiles[nk];
+            if (nt === 'rail' || nt === 'rail_start' || nt === 'rail_end' || nt === 'rail_crossing') {
+              addRailConnection(key, nk);
+            }
           }
         }
         lastPlacedRailRef.current = key;
@@ -1426,7 +1557,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     window.addEventListener('resize', resize);
 
     // Convert tiles to engine-compatible format (already resampled at RAIL_SPACING)
-    const { railPoints, allSegments, obstacles: obsData, endSegmentIndex, endPointIndex } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, freeLines, obstacleParams);
+    const { railPoints, allSegments, obstacles: obsData, endTileWorldPos, isLoop } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, freeLines, obstacleParams);
 
     // Start level music if configured
     if (currentMusicFile) {
@@ -1447,15 +1578,11 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     engine.rail = railPoints;
     engine.allRailSegments = allSegments;
     (engine as any).hasFinitePath = true;
-    (engine as any).endSegmentIndex = endSegmentIndex;
-    (engine as any).endPointIndex = endPointIndex;
+    (engine as any).isLoop = isLoop;
     // Start tile is the beginning of the main rail path
     (engine as any).startTilePos = railPoints.length > 0 ? railPoints[0] : null;
-    // End tile, if present on the main path, is at endPointIndex
-    (engine as any).endTilePos =
-      endPointIndex != null && endPointIndex >= 0 && endPointIndex < railPoints.length
-        ? railPoints[endPointIndex]
-        : null;
+    // End tile world position for proximity-based trigger
+    (engine as any).endTilePos = endTileWorldPos;
     engine.ground = engine.rail.map(p => p.y + 150);
     engine.noBackground = skyOnly;
     engine.obstacles = [];

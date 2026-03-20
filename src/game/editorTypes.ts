@@ -5,7 +5,7 @@ export const EDITOR_WIDTH = 200; // grid cells wide
 export const EDITOR_HEIGHT = 16; // grid cells tall
 
 export type TileType =
-  | 'empty' | 'rail' | 'rail_start' | 'rail_end'
+  | 'empty' | 'rail' | 'rail_start' | 'rail_end' | 'rail_crossing'
   | 'spinner' | 'bouncer'
   | 'pendulum' | 'crusher' | 'laser' | 'swoop'
   | 'orbiter' | 'boulder' | 'mine' | 'stalactite';
@@ -15,6 +15,7 @@ export type EditorTool =
   | 'rail'
   | 'rail_start'
   | 'rail_end'
+  | 'rail_crossing'
   | 'spinner'
   | 'bouncer'
   | 'pendulum'
@@ -226,12 +227,16 @@ export function expandPathWithSmoothSegments(
     const keyB = orderedKeys[i];
     const seg = getSmoothSegment(smoothSegments, keyA, keyB);
     if (seg) {
-      const worldA = keyToWorldPt(keyA);
-      const worldB = keyToWorldPt(keyB);
+      // Always sample using the segment's stored direction so the arc shape is stable
+      const worldStart = keyToWorldPt(seg.startKey);
+      const worldEnd = keyToWorldPt(seg.endKey);
       const worldPivot = { x: seg.pivotGx * GRID_SIZE, y: seg.pivotGy * GRID_SIZE };
-      const arcPts = seg.type === 'circular'
-        ? sampleCircularArcWorld(worldA, worldB, worldPivot)
-        : sampleBezierWorld(worldA, worldB, worldPivot);
+      let arcPts = seg.type === 'circular'
+        ? sampleCircularArcWorld(worldStart, worldEnd, worldPivot)
+        : sampleBezierWorld(worldStart, worldEnd, worldPivot);
+      // If walk direction is opposite to stored direction, reverse the sampled points
+      const reversed = seg.startKey === keyB;
+      if (reversed) arcPts = [...arcPts].reverse();
       for (let j = 1; j < arcPts.length; j++) {
         points.push(arcPts[j]);
       }
@@ -264,10 +269,13 @@ export function deleteCustomLevel(name: string) {
   localStorage.setItem('cable-riders-custom-levels', JSON.stringify(levels));
 }
 
-// Walk one connected component from startKey, return ordered keys
+// Walk one connected component from startKey, return ordered keys.
+// crossingKeys: tiles that allow 4 connections; at crossings, the walker
+// picks the neighbor most collinear with its approach direction ("straight through").
 function walkRailComponent(
   startKey: string,
-  connections: Record<string, Set<string>>
+  connections: Record<string, Set<string>>,
+  crossingKeys?: Set<string>
 ): string[] {
   const visited = new Set<string>();
   const ordered: string[] = [];
@@ -277,29 +285,69 @@ function walkRailComponent(
     ordered.push(current);
     const neighbors = connections[current];
     if (!neighbors) break;
+
     let next: string | null = null;
-    for (const n of neighbors) {
-      if (!visited.has(n)) {
-        next = n;
-        break;
+    const isCrossing = crossingKeys && crossingKeys.has(current) && neighbors.size > 2;
+
+    if (isCrossing && ordered.length >= 2) {
+      // Direction-aware: pick neighbor that continues "straight through"
+      const prev = ordered[ordered.length - 2];
+      const [cx, cy] = parseTileKey(current);
+      const [px, py] = parseTileKey(prev);
+      const dx = cx - px;
+      const dy = cy - py;
+      let bestDot = -Infinity;
+      for (const n of neighbors) {
+        if (visited.has(n)) continue;
+        const [nx, ny] = parseTileKey(n);
+        const ndx = nx - cx;
+        const ndy = ny - cy;
+        const dot = dx * ndx + dy * ndy;
+        if (dot > bestDot) {
+          bestDot = dot;
+          next = n;
+        }
+      }
+    } else {
+      for (const n of neighbors) {
+        if (!visited.has(n)) {
+          next = n;
+          break;
+        }
       }
     }
     current = next;
   }
+  // Close the loop if the last tile connects back to the start
+  if (ordered.length > 2) {
+    const lastKey = ordered[ordered.length - 1];
+    const lastNeighbors = connections[lastKey];
+    if (lastNeighbors && lastNeighbors.has(startKey)) {
+      ordered.push(startKey);
+    }
+  }
   return ordered;
 }
 
-// Find connected components of the rail graph
+// Find connected components of the rail graph.
+// Crossing tiles are NOT added to the global seen set so multiple
+// components can traverse through the same crossing.
 function getRailComponents(
   railKeys: string[],
-  connections: Record<string, Set<string>>
+  connections: Record<string, Set<string>>,
+  crossingKeys?: Set<string>
 ): string[][] {
   const seen = new Set<string>();
   const components: string[][] = [];
   for (const key of railKeys) {
     if (seen.has(key)) continue;
-    const comp = walkRailComponent(key, connections);
-    for (const k of comp) seen.add(k);
+    const comp = walkRailComponent(key, connections, crossingKeys);
+    for (const k of comp) {
+      // Don't mark crossings as seen — they belong to multiple components
+      if (!crossingKeys || !crossingKeys.has(k)) {
+        seen.add(k);
+      }
+    }
     components.push(comp);
   }
   return components;
@@ -319,14 +367,14 @@ export function convertLevelToGameData(
   /** Stable segment id per index (so Line 2 doesn't break when start tile moves) */
   segmentIdByIndex: string[];
   obstacles: { tileType: string; gx: number; gy: number; params: ObstacleParams }[];
-  endSegmentIndex: number | null;
-  endPointIndex: number | null;
+  endTileWorldPos: { x: number; y: number } | null;
+  isLoop: boolean;
 } {
   const obstacles: { tileType: string; gx: number; gy: number; params: ObstacleParams }[] = [];
   const railKeys: string[] = [];
 
   for (const [key, type] of Object.entries(tiles)) {
-    if (type === 'rail' || type === 'rail_start' || type === 'rail_end') {
+    if (type === 'rail' || type === 'rail_start' || type === 'rail_end' || type === 'rail_crossing') {
       railKeys.push(key);
     } else if (obstacleDefMap.has(type)) {
       const [gx, gy] = parseTileKey(key);
@@ -339,18 +387,25 @@ export function convertLevelToGameData(
   if (railKeys.length < 2) {
     const rawRail = railKeys.map(k => keyToWorld(k));
     const segmentIdByIndex = rawRail.length > 0 ? [componentId(railKeys)] : [];
-    return { railPoints: rawRail, allSegments: rawRail.length > 0 ? [rawRail] : [], segmentIdByIndex, obstacles, endSegmentIndex: null, endPointIndex: null };
+    return { railPoints: rawRail, allSegments: rawRail.length > 0 ? [rawRail] : [], segmentIdByIndex, obstacles, endTileWorldPos: null, isLoop: false };
   }
 
   const conns = connections && Object.keys(connections).length > 0 ? connections : ({} as Record<string, Set<string>>);
-  const components = getRailComponents(railKeys, conns);
+  // Build set of crossing tile keys for direction-aware traversal
+  const crossingKeys = new Set<string>();
+  for (const key of railKeys) {
+    if (tiles[key] === 'rail_crossing') crossingKeys.add(key);
+  }
+  const hasCrossings = crossingKeys.size > 0;
+  const components = getRailComponents(railKeys, conns, hasCrossings ? crossingKeys : undefined);
 
   // Hoist endKey so it's available in the freeLine post-processing block
   const endKey = railKeys.find(k => tiles[k] === 'rail_end');
 
   let railPoints: { x: number; y: number }[] = [];
-  let endSegmentIndex: number | null = null;
-  let endPointIndex: number | null = null;
+  // End tile world position for proximity-based trigger (no fragile index tracking)
+  const endTileWorldPos = endKey ? keyToWorld(endKey) : null;
+  let isLoop = false;
   const allSegments: { x: number; y: number }[][] = [];
   const segmentIdByIndex: string[] = [];
 
@@ -359,31 +414,22 @@ export function convertLevelToGameData(
       || railKeys.find(k => conns[k] && conns[k].size === 1)
       || railKeys[0];
 
-    const startOrdered = walkRailComponent(startKey, conns);
+    const startOrdered = walkRailComponent(startKey, conns, hasCrossings ? crossingKeys : undefined);
+    isLoop = startOrdered.length > 2 && startOrdered[0] === startOrdered[startOrdered.length - 1];
     const expanded = expandPathWithSmoothSegments(startOrdered, smoothSegments);
     railPoints = expanded.points;
-    if (endKey && expanded.keyToLastIndex[endKey] != null) {
-      endSegmentIndex = 0;
-      endPointIndex = expanded.keyToLastIndex[endKey];
-    }
 
     allSegments.push(railPoints);
     segmentIdByIndex.push(componentId(startOrdered));
     const startSet = new Set(startOrdered);
-    let segIdx = 1;
     for (const comp of components) {
       if (comp.some(k => startSet.has(k))) continue;
-      const { points: pts, keyToLastIndex: compKeyToIdx } = expandPathWithSmoothSegments(comp, smoothSegments);
+      const { points: pts } = expandPathWithSmoothSegments(comp, smoothSegments);
       // Include even single-tile components so Line 2 can reliably
       // target hand-placed isolated rail tiles.
       if (pts.length >= 1) {
-        if (endKey && endSegmentIndex === null && comp.includes(endKey)) {
-          endSegmentIndex = segIdx;
-          endPointIndex = compKeyToIdx[endKey] ?? comp.indexOf(endKey);
-        }
         allSegments.push(pts);
         segmentIdByIndex.push(componentId(comp));
-        segIdx++;
       }
     }
   } else {
@@ -396,10 +442,6 @@ export function convertLevelToGameData(
     railPoints = expanded.points;
     allSegments.push(railPoints);
     segmentIdByIndex.push(componentId(sorted));
-    if (endKey && expanded.keyToLastIndex[endKey] != null) {
-      endSegmentIndex = 0;
-      endPointIndex = expanded.keyToLastIndex[endKey];
-    }
   }
 
   // Apply each freeLine independently per chain.
@@ -480,7 +522,14 @@ export function convertLevelToGameData(
       let startPt: { x: number; y: number };
       let appendToEnd: boolean;
 
-      if ('endpoint' in fl.attach) {
+      if ('endpoint' in fl.attach && fl.attachWorld) {
+        // The segment may have been merged into a larger chain, so 'start'/'end'
+        // no longer map to pts[0]/pts[last]. Use the cached world position to find
+        // the actual attach point within the (possibly merged) chain.
+        const bestI = closestIndex(pts, fl.attachWorld);
+        appendToEnd = bestI >= pts.length / 2;
+        startPt = pts[bestI];
+      } else if ('endpoint' in fl.attach) {
         appendToEnd = fl.attach.endpoint === 'end';
         startPt = appendToEnd ? pts[pts.length - 1] : pts[0];
       } else {
@@ -584,24 +633,7 @@ export function convertLevelToGameData(
     }
     segmentIdByIndex.splice(0, segmentIdByIndex.length, ...newSegIds);
 
-    // Recompute endSegmentIndex/endPointIndex against the rebuilt segments
-    // (a freeLine merge may have moved the end tile into a different segment)
-    if (endKey) {
-      const endWorld = keyToWorld(endKey);
-      endSegmentIndex = null;
-      endPointIndex = null;
-      outer: for (let si = 0; si < newAllSegs.length; si++) {
-        const seg = newAllSegs[si];
-        for (let pi = 0; pi < seg.length; pi++) {
-          if (Math.hypot(seg[pi].x - endWorld.x, seg[pi].y - endWorld.y) < GRID_SIZE * 0.6) {
-            endSegmentIndex = si;
-            endPointIndex = pi;
-            break outer;
-          }
-        }
-      }
-    }
   }
 
-  return { railPoints, allSegments, segmentIdByIndex, obstacles, endSegmentIndex, endPointIndex };
+  return { railPoints, allSegments, segmentIdByIndex, obstacles, endTileWorldPos, isLoop };
 }

@@ -38,9 +38,9 @@ export class GameEngine {
   keys = { up: false, down: false, left: false, right: false, space: false, shift: false };
   noBackground = false;
   hasFinitePath = false;
-  // For editor-defined finite levels: which segment + point is the end tile (complete when touching it)
-  endSegmentIndex: number | null = null;
-  endPointIndex: number | null = null;
+  isLoop = false;
+  /** Trigger radius for end tile proximity check (world pixels) */
+  static END_TRIGGER_RADIUS = 60;
   onRail = true;
 
   // Optional world positions for explicit start/end tiles in finite/editor levels
@@ -367,7 +367,6 @@ export class GameEngine {
 
         // Level complete when we snapped onto the end tile (any segment)
         if (this.touchedEndTile() && !this.levelCompleted) {
-          this.pos = this.endPointIndex!;
           this.speed = 0;
           this.levelCompleted = true;
           this.onLevelComplete?.(this.elapsedTime);
@@ -385,12 +384,18 @@ export class GameEngine {
       return;
     }
 
+    // Loop wrapping: last point === first point, so cycle length is rail.length - 1
+    if (this.isLoop && this.rail.length > 2) {
+      const cycleLen = this.rail.length - 1;
+      while (this.pos >= cycleLen) this.pos -= cycleLen;
+      while (this.pos < 0) this.pos += cycleLen;
+    }
+
     const i = Math.floor(this.pos);
     if (i < 0) return;
     if (i >= this.rail.length - 1) {
       // Reached or passed the end of this segment. Complete if we touched the end tile (on any segment).
       if (this.hasFinitePath && this.touchedEndTile() && !this.levelCompleted) {
-        this.pos = this.endPointIndex!;
         this.speed = 0;
         this.levelCompleted = true;
         this.onLevelComplete?.(this.elapsedTime);
@@ -446,14 +451,19 @@ export class GameEngine {
 
     const dPos = (this.speed * dt) / segLen;
     this.pos += dPos;
-    this.pos = Math.max(0, this.pos);
+    if (this.isLoop && this.rail.length > 2) {
+      const cycleLen = this.rail.length - 1;
+      while (this.pos >= cycleLen) this.pos -= cycleLen;
+      while (this.pos < 0) this.pos += cycleLen;
+    } else {
+      this.pos = Math.max(0, this.pos);
+    }
 
     this.distance += Math.abs(this.speed * dt) * 0.1; // px to meters
     this.elapsedTime += dt;
 
     // Check level completion: touched the end tile (on any segment)
     if (this.hasFinitePath && this.touchedEndTile() && !this.levelCompleted) {
-      this.pos = this.endPointIndex!;
       this.speed = 0;
       this.levelCompleted = true;
       this.onLevelComplete?.(this.elapsedTime);
@@ -494,12 +504,12 @@ export class GameEngine {
     return { x: p0.x + (p1.x - p0.x) * f, y: p0.y + (p1.y - p0.y) * f };
   }
 
-  /** True if the player is on the segment that has the end tile and has reached that point (any segment). */
+  /** True if the gondola is within the end tile trigger area (world-space proximity). */
   touchedEndTile(): boolean {
-    if (this.endSegmentIndex == null || this.endPointIndex == null || this.allRailSegments.length === 0) return false;
-    const endSeg = this.allRailSegments[this.endSegmentIndex];
-    if (!endSeg || this.rail !== endSeg) return false;
-    return this.pos >= this.endPointIndex - 0.01;
+    if (!this.endTilePos) return false;
+    const gp = this.onRail ? this.getGondolaPos() : { x: this.airX, y: this.airY };
+    const d = Math.hypot(gp.x - this.endTilePos.x, gp.y - this.endTilePos.y);
+    return d < GameEngine.END_TRIGGER_RADIUS;
   }
 
   getGameUpdateContext(): GameUpdateContext {
