@@ -32,7 +32,8 @@ export type EditorTool =
   | 'circular_curve'
   | 'circle'
   | 'line'
-  | 'line2';
+  | 'line2'
+  | 'draw_rail';
 
 export interface EditorTile {
   type: TileType;
@@ -68,6 +69,12 @@ export interface FreeLineSegment {
   attachWorld?: { x: number; y: number };
   end: { x: number; y: number };
   target?: { segmentId: string; endpoint: 'start' | 'end' };
+  /** Drawn rail: smoothed polyline between attach and end */
+  waypoints?: { x: number; y: number }[];
+  /** Drawn rail: original freehand points for re-smoothing */
+  rawDrawnPoints?: { x: number; y: number }[];
+  /** Drawn rail: smoothness slider value 0..1 */
+  smoothness?: number;
 }
 
 export interface EditorLevel {
@@ -201,6 +208,106 @@ export function sampleLineWorld(
     out.push({ x: start.x + dx * t, y: start.y + dy * t });
   }
   return out;
+}
+
+/** Resample an arbitrary polyline at uniform spacing. */
+export function samplePolylineWorld(
+  points: { x: number; y: number }[],
+  stepPx: number = 25
+): { x: number; y: number }[] {
+  if (points.length < 2) return [...points];
+  // Compute cumulative distances
+  const cumDist: number[] = [0];
+  for (let i = 1; i < points.length; i++) {
+    cumDist.push(cumDist[i - 1] + Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y));
+  }
+  const totalDist = cumDist[cumDist.length - 1];
+  if (totalDist < stepPx) return [points[0], points[points.length - 1]];
+  const steps = Math.max(2, Math.ceil(totalDist / stepPx));
+  const out: { x: number; y: number }[] = [];
+  let seg = 0;
+  for (let i = 0; i <= steps; i++) {
+    const d = (i / steps) * totalDist;
+    while (seg < points.length - 2 && cumDist[seg + 1] < d) seg++;
+    const segLen = cumDist[seg + 1] - cumDist[seg];
+    const t = segLen > 0 ? (d - cumDist[seg]) / segLen : 0;
+    out.push({
+      x: points[seg].x + (points[seg + 1].x - points[seg].x) * t,
+      y: points[seg].y + (points[seg + 1].y - points[seg].y) * t,
+    });
+  }
+  return out;
+}
+
+/** Ramer-Douglas-Peucker polyline simplification (iterative). */
+export function rdpSimplify(
+  points: { x: number; y: number }[],
+  epsilon: number
+): { x: number; y: number }[] {
+  if (points.length <= 2) return [...points];
+  const keep = new Uint8Array(points.length);
+  keep[0] = 1;
+  keep[points.length - 1] = 1;
+  const stack: [number, number][] = [[0, points.length - 1]];
+  while (stack.length > 0) {
+    const [start, end] = stack.pop()!;
+    let maxDist = 0, maxIdx = start;
+    const dx = points[end].x - points[start].x;
+    const dy = points[end].y - points[start].y;
+    const lenSq = dx * dx + dy * dy;
+    for (let i = start + 1; i < end; i++) {
+      let d: number;
+      if (lenSq === 0) {
+        d = Math.hypot(points[i].x - points[start].x, points[i].y - points[start].y);
+      } else {
+        const t = ((points[i].x - points[start].x) * dx + (points[i].y - points[start].y) * dy) / lenSq;
+        const px = points[start].x + t * dx;
+        const py = points[start].y + t * dy;
+        d = Math.hypot(points[i].x - px, points[i].y - py);
+      }
+      if (d > maxDist) { maxDist = d; maxIdx = i; }
+    }
+    if (maxDist > epsilon) {
+      keep[maxIdx] = 1;
+      if (maxIdx - start > 1) stack.push([start, maxIdx]);
+      if (end - maxIdx > 1) stack.push([maxIdx, end]);
+    }
+  }
+  return points.filter((_, i) => keep[i]);
+}
+
+/** Chaikin corner-cutting subdivision. Each iteration produces a smoother curve. */
+export function chaikinSmooth(
+  points: { x: number; y: number }[],
+  iterations: number
+): { x: number; y: number }[] {
+  if (iterations <= 0 || points.length < 3) return [...points];
+  let pts = points;
+  for (let iter = 0; iter < iterations; iter++) {
+    const next: { x: number; y: number }[] = [pts[0]]; // keep first point
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[i], p1 = pts[i + 1];
+      next.push({ x: p0.x * 0.75 + p1.x * 0.25, y: p0.y * 0.75 + p1.y * 0.25 });
+      next.push({ x: p0.x * 0.25 + p1.x * 0.75, y: p0.y * 0.25 + p1.y * 0.75 });
+    }
+    next.push(pts[pts.length - 1]); // keep last point
+    pts = next;
+  }
+  return pts;
+}
+
+/** Smooth a freehand-drawn rail path. smoothness 0..1 maps to RDP epsilon + Chaikin iterations. */
+export function smoothDrawnRail(
+  rawPoints: { x: number; y: number }[],
+  smoothness: number
+): { x: number; y: number }[] {
+  if (rawPoints.length < 2) return [...rawPoints];
+  const s = Math.max(0, Math.min(1, smoothness));
+  const epsilon = 2 + s * 38;
+  const chaikinIter = Math.floor(s * 3);
+  let pts = rdpSimplify(rawPoints, epsilon);
+  pts = chaikinSmooth(pts, chaikinIter);
+  return pts;
 }
 
 function getSmoothSegment(segments: SmoothSegment[] | undefined, keyA: string, keyB: string): SmoothSegment | undefined {
@@ -520,7 +627,9 @@ export function convertLevelToGameData(
             }
           }
         }
-        const raw = sampleLineWorld(fl.attachWorld, endWorld);
+        const raw = fl.waypoints && fl.waypoints.length > 0
+          ? samplePolylineWorld([fl.attachWorld, ...fl.waypoints, endWorld])
+          : sampleLineWorld(fl.attachWorld, endWorld);
         if (raw.length < 2) continue;
         raw[0] = fl.attachWorld;
         raw[raw.length - 1] = endWorld;
@@ -554,8 +663,10 @@ export function convertLevelToGameData(
         }
       }
 
-      // Build bridge
-      const raw = sampleLineWorld(startPt, endWorld);
+      // Build bridge — use waypoints polyline if this is a drawn rail
+      const raw = fl.waypoints && fl.waypoints.length > 0
+        ? samplePolylineWorld([startPt, ...fl.waypoints, endWorld])
+        : sampleLineWorld(startPt, endWorld);
       if (raw.length < 2) continue;
       raw[0] = startPt;
       raw[raw.length - 1] = endWorld;

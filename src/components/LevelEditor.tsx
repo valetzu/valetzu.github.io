@@ -5,7 +5,7 @@ import {
   saveCustomLevel, loadCustomLevels, deleteCustomLevel,
   convertLevelToGameData,
   SmoothSegment, sampleCircularArcWorld, sampleBezierWorld, keyToWorld,
-  FreeLineSegment, sampleLineWorld,
+  FreeLineSegment, sampleLineWorld, smoothDrawnRail,
   generateLevelId,
 } from '@/game/editorTypes';
 import { musicManager, getAvailableTracks, addToCatalog } from '@/game/musicManager';
@@ -36,6 +36,7 @@ const TOOLS: { tool: EditorTool; label: string; emoji: string }[] = [
   { tool: 'circle', label: 'Circle', emoji: '⭕' },
   { tool: 'line', label: 'Line', emoji: '📏' },
   { tool: 'line2', label: 'Free Line', emoji: '📐' },
+  { tool: 'draw_rail', label: 'Draw', emoji: '✏️' },
 ];
 
 const TILE_TOOL_TYPES = new Set<EditorTool>(['rail', 'rail_start', 'rail_end', 'rail_crossing', ...OBSTACLE_DEFINITIONS.map(d => d.tileType as EditorTool)]);
@@ -153,6 +154,15 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const [freeLines, setFreeLines] = useState<FreeLineSegment[]>([]);
   const [line2Start, setLine2Start] = useState<{ attach: import('@/game/editorTypes').FreeLineAttach; start: { x: number; y: number } } | null>(null);
   const [mouseWorld, setMouseWorld] = useState<{ x: number; y: number } | null>(null);
+  // Draw rail tool state
+  const [drawRailPoints, setDrawRailPoints] = useState<{ x: number; y: number }[] | null>(null);
+  const [drawRailAttach, setDrawRailAttach] = useState<{ attach: import('@/game/editorTypes').FreeLineAttach; start: { x: number; y: number } } | null>(null);
+  const [drawRailPending, setDrawRailPending] = useState<{
+    raw: { x: number; y: number }[];
+    attach: { attach: import('@/game/editorTypes').FreeLineAttach; start: { x: number; y: number } } | null;
+    endSnap: { pt: { x: number; y: number }; target: { segmentId: string; endpoint: 'start' | 'end' } } | null;
+  } | null>(null);
+  const [drawRailSmoothness, setDrawRailSmoothness] = useState(0.5);
   // Snap cycling: when multiple snap points overlap, scroll wheel cycles through them
   const snapCycleRef = useRef<{ worldX: number; worldY: number; index: number }>({ worldX: -999, worldY: -999, index: 0 });
 
@@ -534,15 +544,18 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       let start = getAttachPoint(fl.attach);
       if (!start && fl.attachWorld) start = fl.attachWorld;
       if (!start) continue;
-      const pts = sampleLineWorld(start, fl.end);
+      // Use waypoints polyline for drawn rails, straight line for regular free lines
+      const pts = fl.waypoints && fl.waypoints.length > 0
+        ? [start, ...fl.waypoints, fl.end]
+        : sampleLineWorld(start, fl.end);
       ctx.beginPath();
       ctx.moveTo(pts[0].x - cx, pts[0].y - cy);
       for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x - cx, pts[i].y - cy);
       ctx.stroke();
     }
 
-    // Line2 endpoint hints + hover highlight (include freeLine ends so user can start from connection points)
-    if (tool === 'line2') {
+    // Endpoint hints + hover highlight for line2 and draw_rail tools
+    if (tool === 'line2' || (tool === 'draw_rail' && !drawRailPoints && !drawRailPending)) {
       const hints: { attach: import('@/game/editorTypes').FreeLineAttach; pt: { x: number; y: number } }[] = baseForLines.flatMap((seg, si) => {
         if (!seg || seg.length < 1) return [];
         const id = segmentIdByIndex[si];
@@ -632,6 +645,65 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       ctx.setLineDash([]);
     }
 
+    // Draw rail: live drawing preview
+    if (drawRailPoints && drawRailPoints.length >= 2) {
+      ctx.strokeStyle = 'rgba(0, 204, 102, 0.9)';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([6, 6]);
+      ctx.beginPath();
+      ctx.moveTo(drawRailPoints[0].x - cx, drawRailPoints[0].y - cy);
+      for (let i = 1; i < drawRailPoints.length; i++) {
+        ctx.lineTo(drawRailPoints[i].x - cx, drawRailPoints[i].y - cy);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // Snap indicator at start
+      if (drawRailAttach) {
+        ctx.fillStyle = '#0f0';
+        ctx.beginPath();
+        ctx.arc(drawRailAttach.start.x - cx, drawRailAttach.start.y - cy, 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Draw rail: smoothing preview (pending confirmation)
+    if (drawRailPending) {
+      const smoothed = smoothDrawnRail(drawRailPending.raw, drawRailSmoothness);
+      // Raw path in faint gray
+      ctx.strokeStyle = 'rgba(153, 153, 153, 0.5)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(drawRailPending.raw[0].x - cx, drawRailPending.raw[0].y - cy);
+      for (let i = 1; i < drawRailPending.raw.length; i++) {
+        ctx.lineTo(drawRailPending.raw[i].x - cx, drawRailPending.raw[i].y - cy);
+      }
+      ctx.stroke();
+      // Smoothed path in solid green
+      if (smoothed.length >= 2) {
+        ctx.strokeStyle = '#00aa00';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(smoothed[0].x - cx, smoothed[0].y - cy);
+        for (let i = 1; i < smoothed.length; i++) {
+          ctx.lineTo(smoothed[i].x - cx, smoothed[i].y - cy);
+        }
+        ctx.stroke();
+      }
+      // Snap indicators
+      if (drawRailPending.attach) {
+        ctx.fillStyle = '#0f0';
+        ctx.beginPath();
+        ctx.arc(drawRailPending.attach.start.x - cx, drawRailPending.attach.start.y - cy, 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      if (drawRailPending.endSnap) {
+        ctx.fillStyle = '#0f0';
+        ctx.beginPath();
+        ctx.arc(drawRailPending.endSnap.pt.x - cx, drawRailPending.endSnap.pt.y - cy, 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
     // Line preview
     if (linePreview.length > 0) {
       ctx.fillStyle = 'rgba(0,200,100,0.4)';
@@ -668,7 +740,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(`Middle-click / Right-click drag to pan • +/- to zoom (${Math.round(zoom * 100)}%) • Click to place tiles`, w / 2, h - 15);
-  }, [camera, tiles, smoothSegments, freeLines, tool, arcCenter, arcPreview, zoom, curveStart, curveEnd, curveControl, lineStart, linePreview, line2Start, mouseWorld, obstacleParams, selectedObstacleKey]);
+  }, [camera, tiles, smoothSegments, freeLines, tool, arcCenter, arcPreview, zoom, curveStart, curveEnd, curveControl, lineStart, linePreview, line2Start, mouseWorld, obstacleParams, selectedObstacleKey, drawRailPoints, drawRailAttach, drawRailPending, drawRailSmoothness]);
 
   // Resize & render loop
   useEffect(() => {
@@ -1202,6 +1274,41 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         return;
       }
 
+      // Draw rail tool: mousedown starts freehand drawing
+      if (tool === 'draw_rail' && !drawRailPending) {
+        const { allSegments: baseSegments, segmentIdByIndex: baseIds } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, freeLines);
+        type Hint = { attach: import('@/game/editorTypes').FreeLineAttach; pt: { x: number; y: number }; dist: number };
+        const hints: Hint[] = [];
+        for (let si = 0; si < baseSegments.length; si++) {
+          const seg = baseSegments[si];
+          if (!seg || seg.length < 1) continue;
+          const id = baseIds[si];
+          hints.push({ attach: { segmentId: id, endpoint: 'start' }, pt: seg[0], dist: Math.hypot(world.x - seg[0].x, world.y - seg[0].y) });
+          hints.push({ attach: { segmentId: id, endpoint: 'end' }, pt: seg[seg.length - 1], dist: Math.hypot(world.x - seg[seg.length - 1].x, world.y - seg[seg.length - 1].y) });
+        }
+        for (const fl of freeLines) {
+          hints.push({ attach: { segmentId: fl.attach.segmentId, atWorld: fl.end }, pt: fl.end, dist: Math.hypot(world.x - fl.end.x, world.y - fl.end.y) });
+          if (fl.attachWorld) {
+            hints.push({ attach: { segmentId: fl.attach.segmentId, atWorld: fl.attachWorld }, pt: fl.attachWorld, dist: Math.hypot(world.x - fl.attachWorld.x, world.y - fl.attachWorld.y) });
+          }
+        }
+        const candidates = hints.filter(h => h.dist <= 45).sort((a, b) => a.dist - b.dist);
+        if (candidates.length > 0) {
+          const best = candidates[0];
+          const overlapping = candidates.filter(c => Math.hypot(c.pt.x - best.pt.x, c.pt.y - best.pt.y) < 5);
+          let chosen = overlapping.length > 1
+            ? overlapping[((snapCycleRef.current.index % overlapping.length) + overlapping.length) % overlapping.length]
+            : best;
+          setDrawRailAttach({ attach: chosen.attach, start: chosen.pt });
+          setDrawRailPoints([chosen.pt]);
+        } else {
+          // Unsnapped start
+          setDrawRailAttach(null);
+          setDrawRailPoints([world]);
+        }
+        return;
+      }
+
       // None tool: first click selects, second click on selected tile "picks it up"
       if (tool === 'none') {
         const key = tileKey(gx, gy);
@@ -1263,7 +1370,10 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           let start = resolveAttach(fl.attach);
           if (!start && fl.attachWorld) start = fl.attachWorld;
           if (!start) continue;
-          const d = ptSegDist(world.x, world.y, start.x, start.y, fl.end.x, fl.end.y);
+          // Use polyline distance for drawn rails with waypoints, segment distance for straight free lines
+          const d = fl.waypoints && fl.waypoints.length > 0
+            ? polylineDist(world.x, world.y, [start, ...fl.waypoints, fl.end])
+            : ptSegDist(world.x, world.y, start.x, start.y, fl.end.x, fl.end.y);
           if (d < bestDist) { bestDist = d; hitFreeLine = i; hitSmooth = -1; }
         }
 
@@ -1333,7 +1443,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     // When using line2 tool, scroll cycles through overlapping snap candidates
-    if (tool === 'line2' && mouseWorld) {
+    if ((tool === 'line2' || (tool === 'draw_rail' && !drawRailPoints && !drawRailPending)) && mouseWorld) {
       const sc = snapCycleRef.current;
       const nearPrev = Math.hypot(mouseWorld.x - sc.worldX, mouseWorld.y - sc.worldY) < 30;
       if (nearPrev) {
@@ -1383,6 +1493,15 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       );
     }
 
+    // Draw rail: append points while dragging (throttled to 8px min distance)
+    if (tool === 'draw_rail' && drawRailPoints) {
+      const world = screenToWorld(e.clientX, e.clientY);
+      const last = drawRailPoints[drawRailPoints.length - 1];
+      if (Math.hypot(world.x - last.x, world.y - last.y) >= 8) {
+        setDrawRailPoints(prev => prev ? [...prev, world] : null);
+      }
+    }
+
     // Line preview
     if (tool === 'line' && lineStart) {
       const { gx, gy } = screenToGrid(e.clientX, e.clientY);
@@ -1418,6 +1537,41 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       setCurveControl(null);
       setCurvePreview([]);
       setIsDraggingCurve(false);
+    }
+
+    // Draw rail: finish drawing, transition to smoothness adjustment
+    if (tool === 'draw_rail' && drawRailPoints && drawRailPoints.length >= 3) {
+      // Compute total path length
+      let totalLen = 0;
+      for (let i = 1; i < drawRailPoints.length; i++) {
+        totalLen += Math.hypot(drawRailPoints[i].x - drawRailPoints[i - 1].x, drawRailPoints[i].y - drawRailPoints[i - 1].y);
+      }
+      if (totalLen < 30) {
+        // Too short — cancel
+        setDrawRailPoints(null);
+        setDrawRailAttach(null);
+        return;
+      }
+      // Check end snap
+      const endWorld = drawRailPoints[drawRailPoints.length - 1];
+      const { allSegments, segmentIdByIndex } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, freeLines);
+      type SnapCandidate = { pt: { x: number; y: number }; target: { segmentId: string; endpoint: 'start' | 'end' }; dist: number };
+      const endCandidates: SnapCandidate[] = [];
+      for (let si = 0; si < allSegments.length; si++) {
+        const seg = allSegments[si];
+        if (!seg || seg.length < 1) continue;
+        const id = segmentIdByIndex[si];
+        endCandidates.push({ pt: seg[0], target: { segmentId: id, endpoint: 'start' }, dist: Math.hypot(endWorld.x - seg[0].x, endWorld.y - seg[0].y) });
+        endCandidates.push({ pt: seg[seg.length - 1], target: { segmentId: id, endpoint: 'end' }, dist: Math.hypot(endWorld.x - seg[seg.length - 1].x, endWorld.y - seg[seg.length - 1].y) });
+      }
+      const validEnd = endCandidates.filter(c => c.dist <= 45).sort((a, b) => a.dist - b.dist);
+      const endSnap = validEnd.length > 0 ? { pt: validEnd[0].pt, target: validEnd[0].target } : null;
+      setDrawRailPending({ raw: drawRailPoints, attach: drawRailAttach, endSnap });
+      setDrawRailPoints(null);
+    } else if (tool === 'draw_rail' && drawRailPoints) {
+      // Too few points — cancel
+      setDrawRailPoints(null);
+      setDrawRailAttach(null);
     }
   };
 
@@ -1757,6 +1911,9 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     setObstacleParams({});
     lastPlacedRailRef.current = null;
     setLine2Start(null);
+    setDrawRailPoints(null);
+    setDrawRailAttach(null);
+    setDrawRailPending(null);
     setArcCenter(null);
     setArcPreview([]);
   };
@@ -1867,6 +2024,61 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         </div>
       )}
 
+      {/* Draw rail smoothness slider */}
+      {drawRailPending && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-20 px-4 py-3 rounded-lg bg-game-card border border-game-card-border shadow-lg flex items-center gap-3">
+          <span className="text-game-title text-sm font-bold whitespace-nowrap">Smoothness</span>
+          <input
+            type="range"
+            min={0} max={1} step={0.01}
+            value={drawRailSmoothness}
+            onChange={e => setDrawRailSmoothness(parseFloat(e.target.value))}
+            className="w-40"
+          />
+          <span className="text-game-subtitle text-xs w-8">{Math.round(drawRailSmoothness * 100)}%</span>
+          <button
+            onClick={() => {
+              const smoothed = smoothDrawnRail(drawRailPending.raw, drawRailSmoothness);
+              const startPt = drawRailPending.attach ? drawRailPending.attach.start : drawRailPending.raw[0];
+              const endPt = drawRailPending.endSnap ? drawRailPending.endSnap.pt : smoothed[smoothed.length - 1];
+              // Build waypoints (intermediate points, excluding first/last which are attach/end)
+              const waypoints = smoothed.length > 2 ? smoothed.slice(1, -1) : [];
+              const newFl: FreeLineSegment = {
+                attach: drawRailPending.attach
+                  ? drawRailPending.attach.attach
+                  : { segmentId: '__orphan__', atWorld: startPt },
+                attachWorld: startPt,
+                end: endPt,
+                target: drawRailPending.endSnap?.target,
+                waypoints,
+                rawDrawnPoints: drawRailPending.raw,
+                smoothness: drawRailSmoothness,
+              };
+              // Dedup: remove conflicting free lines at same start/end
+              setFreeLines(prev => [
+                ...prev.filter(fl => {
+                  if (fl.attachWorld && Math.hypot(fl.attachWorld.x - startPt.x, fl.attachWorld.y - startPt.y) < 5) return false;
+                  if (Math.hypot(fl.end.x - endPt.x, fl.end.y - endPt.y) < 5) return false;
+                  return true;
+                }),
+                newFl,
+              ]);
+              setDrawRailPending(null);
+              setDrawRailAttach(null);
+            }}
+            className="px-3 py-1 rounded bg-green-600 text-white font-bold text-sm hover:brightness-110"
+          >
+            ✓
+          </button>
+          <button
+            onClick={() => { setDrawRailPending(null); setDrawRailAttach(null); }}
+            className="px-3 py-1 rounded bg-red-600 text-white font-bold text-sm hover:brightness-110"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Top bar */}
       <div className="fixed top-4 left-4 right-4 flex items-start justify-between z-10">
         {/* Left: Tiles menu + Tools + Eraser/Line */}
@@ -1966,7 +2178,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           </div>
 
           {/* Standalone tools: Eraser, Line, Line2 */}
-          {TOOLS.filter(t => ['eraser', 'line', 'line2'].includes(t.tool)).map(t => (
+          {TOOLS.filter(t => ['eraser', 'line', 'line2', 'draw_rail'].includes(t.tool)).map(t => (
             <button
               key={t.tool}
               onClick={() => {
@@ -1980,6 +2192,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
                 setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false);
                 setLineStart(null); setLinePreview([]);
                 if (t.tool === 'line2') setLine2Start(null);
+                setDrawRailPoints(null); setDrawRailAttach(null); setDrawRailPending(null);
                 setShowTilesMenu(false);
               }}
               className={`px-3 py-2 rounded-lg font-bold text-sm transition-all ${
@@ -2001,6 +2214,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
               setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false);
               setLineStart(null); setLinePreview([]);
               setLine2Start(null);
+              setDrawRailPoints(null); setDrawRailAttach(null); setDrawRailPending(null);
               setShowTilesMenu(false); setShowToolsMenu(false);
             }}
             className={`px-3 py-2 rounded-lg font-bold text-sm transition-all ${
