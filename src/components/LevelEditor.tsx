@@ -1182,8 +1182,14 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
             snapTarget = chosenEnd.target;
           }
           const endPoint = snapEnd ? snapEnd : world;
+          // If another free line already uses the same snap point as start or end, disconnect it
+          const attachPt = line2Start.start;
           setFreeLines(prev => [
-            ...prev,
+            ...prev.filter(fl => {
+              if (fl.attachWorld && Math.hypot(fl.attachWorld.x - attachPt.x, fl.attachWorld.y - attachPt.y) < 5) return false;
+              if (Math.hypot(fl.end.x - endPoint.x, fl.end.y - endPoint.y) < 5) return false;
+              return true;
+            }),
             {
               attach: line2Start.attach,
               attachWorld: line2Start.start,

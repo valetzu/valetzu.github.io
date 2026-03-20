@@ -399,7 +399,8 @@ export function convertLevelToGameData(
   const hasCrossings = crossingKeys.size > 0;
   const components = getRailComponents(railKeys, conns, hasCrossings ? crossingKeys : undefined);
 
-  // Hoist endKey so it's available in the freeLine post-processing block
+  // Hoist start/end keys so they're available in the freeLine post-processing block
+  const startKey = railKeys.find(k => tiles[k] === 'rail_start');
   const endKey = railKeys.find(k => tiles[k] === 'rail_end');
 
   let railPoints: { x: number; y: number }[] = [];
@@ -410,11 +411,11 @@ export function convertLevelToGameData(
   const segmentIdByIndex: string[] = [];
 
   if (conns && Object.keys(conns).length > 0) {
-    const startKey = railKeys.find(k => tiles[k] === 'rail_start')
+    const walkStart = startKey
       || railKeys.find(k => conns[k] && conns[k].size === 1)
       || railKeys[0];
 
-    const startOrdered = walkRailComponent(startKey, conns, hasCrossings ? crossingKeys : undefined);
+    const startOrdered = walkRailComponent(walkStart, conns, hasCrossings ? crossingKeys : undefined);
     isLoop = startOrdered.length > 2 && startOrdered[0] === startOrdered[startOrdered.length - 1];
     const expanded = expandPathWithSmoothSegments(startOrdered, smoothSegments);
     railPoints = expanded.points;
@@ -444,14 +445,16 @@ export function convertLevelToGameData(
     segmentIdByIndex.push(componentId(sorted));
   }
 
-  // Apply each freeLine independently per chain.
-  // Each tile-based segment starts as its own chain. A freeLine only extends the chain
-  // it is explicitly attached to; freeLines on different chains stay isolated.
-  // Only when a freeLine has a target does it merge the target chain into the attach chain.
+  // ---------------------------------------------------------------------------
+  // Free line merging: chains are DIRECTIONLESS point arrays.
+  //
+  // Each free line is a bridge between two world positions (attachWorld → end).
+  // A bridge always connects at a chain's endpoint (first or last point).
+  // We orient the chain so the attach point is at the END, then always append.
+  // After all merges, we reverse the final rail once so rail_start is at index 0.
+  // ---------------------------------------------------------------------------
   if (freeLines && freeLines.length > 0) {
-    // chainById[chainId] = mutable point array for that chain
     const chainById: Record<string, { x: number; y: number }[]> = {};
-    // segToChain[segmentId] = which chainId currently owns that segment
     const segToChain: Record<string, string> = {};
 
     for (let i = 0; i < allSegments.length; i++) {
@@ -467,82 +470,74 @@ export function convertLevelToGameData(
       return cid && chainById[cid] ? [cid, chainById[cid]] : null;
     };
 
-    const closestIndex = (pts: { x: number; y: number }[], world: { x: number; y: number }) => {
-      let bestI = 0, bestD = Infinity;
-      for (let i = 0; i < pts.length; i++) {
-        const d = Math.hypot(pts[i].x - world.x, pts[i].y - world.y);
-        if (d < bestD) { bestD = d; bestI = i; }
+    /** Which end of `pts` is closer to `world`? Returns the endpoint position. Reverses `pts` in-place so the matched end is always at pts[last]. */
+    const orientChainToward = (pts: { x: number; y: number }[], world: { x: number; y: number }): { x: number; y: number } => {
+      const dFirst = Math.hypot(world.x - pts[0].x, world.y - pts[0].y);
+      const dLast = Math.hypot(world.x - pts[pts.length - 1].x, world.y - pts[pts.length - 1].y);
+      if (dFirst < dLast) pts.reverse(); // attach is at pts[0] → flip so it's at pts[last]
+      return pts[pts.length - 1];
+    };
+
+    /** Orient `pts` so the point closest to `world` is at pts[0] (for target joining). */
+    const orientChainAwayFrom = (pts: { x: number; y: number }[], world: { x: number; y: number }) => {
+      const dFirst = Math.hypot(world.x - pts[0].x, world.y - pts[0].y);
+      const dLast = Math.hypot(world.x - pts[pts.length - 1].x, world.y - pts[pts.length - 1].y);
+      if (dLast < dFirst) pts.reverse(); // match is at pts[last] → flip so it's at pts[0]
+    };
+
+    const mergeTarget = (chainId: string, pts: { x: number; y: number }[], endWorld: { x: number; y: number }, mergeChainId: string) => {
+      const mPts = chainById[mergeChainId];
+      if (!mPts) return;
+      // Orient target so the join point is at mPts[0]
+      orientChainAwayFrom(mPts, endWorld);
+      // Append target (skip mPts[0] = shared join point)
+      for (let i = 1; i < mPts.length; i++) pts.push(mPts[i]);
+      for (const [sid, cid] of Object.entries(segToChain)) {
+        if (cid === mergeChainId) segToChain[sid] = chainId;
       }
-      return bestI;
+      delete chainById[mergeChainId];
     };
 
     for (const fl of freeLines) {
+      const attachWorld = fl.attachWorld ?? fl.end;
+
       const res = resolveChainOf(fl.attach.segmentId);
       if (!res) {
-        // Attach segment was erased. If we have a cached world position, create a floating chain
-        // so the segment still exists for in-game physics and its endpoints remain snap-able.
+        // Attach segment was erased — create an orphan chain from the bridge
         if (!fl.attachWorld) continue;
-        let floatEnd = fl.end;
+        let endWorld = fl.end;
         let floatMergeChainId: string | null = null;
         if (fl.target) {
           const tgtRes = resolveChainOf(fl.target.segmentId);
           if (tgtRes) {
             const [tgtChainId, tgtPts] = tgtRes;
-            if (tgtPts.length > 0) {
-              floatEnd = fl.target.endpoint === 'end' ? tgtPts[tgtPts.length - 1] : tgtPts[0];
+            if (tgtChainId && tgtPts.length > 0) {
+              // Use whichever end of target chain is closer to fl.end
+              const dFirst = Math.hypot(fl.end.x - tgtPts[0].x, fl.end.y - tgtPts[0].y);
+              const dLast = Math.hypot(fl.end.x - tgtPts[tgtPts.length - 1].x, fl.end.y - tgtPts[tgtPts.length - 1].y);
+              endWorld = dFirst <= dLast ? tgtPts[0] : tgtPts[tgtPts.length - 1];
               floatMergeChainId = tgtChainId;
             }
           }
         }
-        const raw = sampleLineWorld(fl.attachWorld, floatEnd);
+        const raw = sampleLineWorld(fl.attachWorld, endWorld);
         if (raw.length < 2) continue;
-        const floatPts = raw.slice();
-        floatPts[0] = fl.attachWorld;
-        floatPts[floatPts.length - 1] = floatEnd;
+        raw[0] = fl.attachWorld;
+        raw[raw.length - 1] = endWorld;
         const floatId = `orphan_${fl.attachWorld.x.toFixed(0)}_${fl.attachWorld.y.toFixed(0)}`;
-        chainById[floatId] = floatPts;
+        chainById[floatId] = raw;
         if (floatMergeChainId) {
-          const mPts = chainById[floatMergeChainId];
-          if (mPts) {
-            const df = Math.hypot(floatEnd.x - mPts[0].x, floatEnd.y - mPts[0].y);
-            const dl = Math.hypot(floatEnd.x - mPts[mPts.length - 1].x, floatEnd.y - mPts[mPts.length - 1].y);
-            const oriented = df <= dl ? mPts : [...mPts].reverse();
-            for (let i = 1; i < oriented.length; i++) chainById[floatId].push(oriented[i]);
-            for (const [sid, cid] of Object.entries(segToChain)) {
-              if (cid === floatMergeChainId) segToChain[sid] = floatId;
-            }
-            delete chainById[floatMergeChainId];
-          }
+          mergeTarget(floatId, raw, endWorld, floatMergeChainId);
         }
         continue;
       }
+
       const [chainId, pts] = res;
 
-      // Determine attach position and whether we extend from the chain's end or start
-      let startPt: { x: number; y: number };
-      let appendToEnd: boolean;
+      // Orient chain so the attach world position is at pts[last]
+      const startPt = orientChainToward(pts, attachWorld);
 
-      if ('endpoint' in fl.attach && fl.attachWorld) {
-        // The segment may have been merged into a larger chain, so 'start'/'end'
-        // no longer map to pts[0]/pts[last]. Use the cached world position to find
-        // the actual attach point within the (possibly merged) chain.
-        const bestI = closestIndex(pts, fl.attachWorld);
-        appendToEnd = bestI >= pts.length / 2;
-        startPt = pts[bestI];
-      } else if ('endpoint' in fl.attach) {
-        appendToEnd = fl.attach.endpoint === 'end';
-        startPt = appendToEnd ? pts[pts.length - 1] : pts[0];
-      } else {
-        const world = 'atWorld' in fl.attach
-          ? fl.attach.atWorld
-          : (fl.attachWorld ?? fl.end);
-        const bestI = closestIndex(pts, world);
-        // If the closest point is in the second half, extend from the end; otherwise from the start
-        appendToEnd = bestI >= pts.length / 2;
-        startPt = pts[bestI];
-      }
-
-      // Resolve the bridge's end point; use the target's exact endpoint vertex if snapped
+      // Resolve bridge end: use whichever end of the target chain is closest to fl.end
       let endWorld = fl.end;
       let mergeChainId: string | null = null;
 
@@ -551,64 +546,30 @@ export function convertLevelToGameData(
         if (tgtRes) {
           const [tgtChainId, tgtPts] = tgtRes;
           if (tgtChainId !== chainId && tgtPts.length > 0) {
-            endWorld = fl.target.endpoint === 'end'
-              ? tgtPts[tgtPts.length - 1]
-              : tgtPts[0];
+            const dFirst = Math.hypot(fl.end.x - tgtPts[0].x, fl.end.y - tgtPts[0].y);
+            const dLast = Math.hypot(fl.end.x - tgtPts[tgtPts.length - 1].x, fl.end.y - tgtPts[tgtPts.length - 1].y);
+            endWorld = dFirst <= dLast ? tgtPts[0] : tgtPts[tgtPts.length - 1];
             mergeChainId = tgtChainId;
           }
         }
       }
 
-      // Build the bridge polyline with exact endpoints
+      // Build bridge
       const raw = sampleLineWorld(startPt, endWorld);
       if (raw.length < 2) continue;
-      const bridge = raw.slice();
-      bridge[0] = startPt;
-      bridge[bridge.length - 1] = endWorld;
+      raw[0] = startPt;
+      raw[raw.length - 1] = endWorld;
 
-      if (appendToEnd) {
-        // Append bridge (skip bridge[0] = startPt, already the last point of pts)
-        for (let i = 1; i < bridge.length; i++) pts.push(bridge[i]);
+      // Always append bridge (pts[last] = startPt = raw[0], so skip raw[0])
+      for (let i = 1; i < raw.length; i++) pts.push(raw[i]);
 
-        if (mergeChainId) {
-          const mPts = chainById[mergeChainId];
-          if (mPts) {
-            const df = Math.hypot(endWorld.x - mPts[0].x, endWorld.y - mPts[0].y);
-            const dl = Math.hypot(endWorld.x - mPts[mPts.length - 1].x, endWorld.y - mPts[mPts.length - 1].y);
-            const oriented = df <= dl ? mPts : [...mPts].reverse();
-            // Append target (skip oriented[0] = endWorld, shared with bridge end)
-            for (let i = 1; i < oriented.length; i++) pts.push(oriented[i]);
-            for (const [sid, cid] of Object.entries(segToChain)) {
-              if (cid === mergeChainId) segToChain[sid] = chainId;
-            }
-            delete chainById[mergeChainId];
-          }
-        }
-      } else {
-        // Prepend: bridge goes pts[0] → endWorld; path becomes [endWorld, …, bridge, pts[0], pts[1], …]
-        const toInsert = bridge.slice(1).reverse(); // [endWorld, …, bridge[1]] (pts[0] already in pts)
-        pts.splice(0, 0, ...toInsert);
-
-        if (mergeChainId) {
-          const mPts = chainById[mergeChainId];
-          if (mPts) {
-            // Orient so oriented[last] = endWorld (now pts[0] after prepend above)
-            const df = Math.hypot(endWorld.x - mPts[0].x, endWorld.y - mPts[0].y);
-            const dl = Math.hypot(endWorld.x - mPts[mPts.length - 1].x, endWorld.y - mPts[mPts.length - 1].y);
-            const oriented = dl <= df ? mPts : [...mPts].reverse();
-            // Prepend target (skip oriented[last] = endWorld, shared point)
-            const toIns = oriented.slice(0, -1);
-            pts.splice(0, 0, ...toIns);
-            for (const [sid, cid] of Object.entries(segToChain)) {
-              if (cid === mergeChainId) segToChain[sid] = chainId;
-            }
-            delete chainById[mergeChainId];
-          }
-        }
+      // Merge target chain if the bridge connects to a different chain
+      if (mergeChainId) {
+        mergeTarget(chainId, pts, endWorld, mergeChainId);
       }
     }
 
-    // Rebuild allSegments: main chain (the one containing segment 0) goes first
+    // Rebuild allSegments: main chain (containing segment 0) goes first
     const mainChainId = segToChain[segmentIdByIndex[0]];
     const newAllSegs: { x: number; y: number }[][] = [];
     const addedChains = new Set<string>();
@@ -624,6 +585,19 @@ export function convertLevelToGameData(
     }
     railPoints = newAllSegs[0] ?? allSegments[0] ?? [];
     allSegments.splice(0, allSegments.length, ...newAllSegs);
+
+    // Final orientation: ensure railPoints[0] is near rail_start tile.
+    // Chains are directionless — riding direction is determined solely by
+    // where the player spawns (rail_start).
+    if (startKey && railPoints.length >= 2) {
+      const startWorld = keyToWorld(startKey);
+      const dFirst = Math.hypot(railPoints[0].x - startWorld.x, railPoints[0].y - startWorld.y);
+      const dLast = Math.hypot(railPoints[railPoints.length - 1].x - startWorld.x, railPoints[railPoints.length - 1].y - startWorld.y);
+      if (dLast < dFirst) {
+        railPoints.reverse();
+        allSegments[0] = railPoints;
+      }
+    }
 
     // segmentIdByIndex must match the rebuilt allSegments order
     const newSegIds: string[] = [];
