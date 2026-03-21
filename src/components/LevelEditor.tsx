@@ -5,8 +5,9 @@ import {
   saveCustomLevel, loadCustomLevels, deleteCustomLevel,
   convertLevelToGameData,
   SmoothSegment, sampleCircularArcWorld, sampleBezierWorld, keyToWorld,
-  FreeLineSegment, sampleLineWorld, smoothDrawnRail,
+  FreeLineSegment, smoothDrawnRail,
   generateLevelId,
+  buildIndividualSegments, buildContinuousSegments, getSnapPoints,
 } from '@/game/editorTypes';
 import { musicManager, getAvailableTracks, addToCatalog } from '@/game/musicManager';
 import { Point, Obstacle, WORLD_CONFIG, recordTime, getRecords, LevelRecord, formatTime } from '@/game/types';
@@ -63,6 +64,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const railConnectionsRef = useRef<Record<string, Set<string>>>({});
   const lastPlacedRailRef = useRef<string | null>(null);
   const [skyOnly, setSkyOnly] = useState(true);
+  const [autoconnect, setAutoconnect] = useState(true);
 
   const addRailConnection = (keyA: string, keyB: string) => {
     const conns = railConnectionsRef.current;
@@ -289,8 +291,11 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Tiles
-    const connections = railConnectionsRef.current;
+    // Compute individual rail segments for polyline rendering
+    const individualSegs = buildIndividualSegments(tiles, railConnectionsRef.current, smoothSegments, freeLines);
+
+    // Tiles — rail tiles are rendered as polylines below; obstacle tiles keep grid squares
+    const showTileGhost = tool === 'rail' || tool === 'rail_start' || tool === 'rail_end' || tool === 'rail_crossing' || tool === 'eraser';
     for (const [key, type] of Object.entries(tiles)) {
       if (type === 'empty') continue;
       const [gx, gy] = parseTileKey(key);
@@ -299,57 +304,12 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       if (sx < -GRID_SIZE || sx > vw + GRID_SIZE || sy < -GRID_SIZE || sy > vh + GRID_SIZE) continue;
 
       if (type === 'rail' || type === 'rail_start' || type === 'rail_end' || type === 'rail_crossing') {
-        // Background color
-        ctx.fillStyle = type === 'rail_start' ? '#00E676' : type === 'rail_end' ? '#FF4081' : type === 'rail_crossing' ? '#FFA500' : '#FFD700';
-        ctx.fillRect(sx + 2, sy + 2, GRID_SIZE - 4, GRID_SIZE - 4);
-
-        // Draw rail connections using explicit connection map (skip straight line if smooth segment exists)
-        ctx.strokeStyle = '#333';
-        ctx.lineWidth = 4;
-        const centerX = sx + GRID_SIZE / 2;
-        const centerY = sy + GRID_SIZE / 2;
-        const isSmoothPair = (a: string, b: string) =>
-          smoothSegments.some(s => (s.startKey === a && s.endKey === b) || (s.startKey === b && s.endKey === a));
-
-        const myConnections = connections[key];
-        if (myConnections) {
-          ctx.beginPath();
-          for (const connKey of myConnections) {
-            if (isSmoothPair(key, connKey)) continue; // smooth segment drawn separately
-            const [cgx, cgy] = parseTileKey(connKey);
-            const dx = cgx - gx;
-            const dy = cgy - gy;
-            const drawX = sx + GRID_SIZE / 2 + dx * (GRID_SIZE / 2);
-            const drawY = sy + GRID_SIZE / 2 + dy * (GRID_SIZE / 2);
-            ctx.moveTo(drawX, drawY);
-            ctx.lineTo(centerX, centerY);
-          }
-          ctx.stroke();
-        }
-
-        // Label for start/end/crossing
-        if (type === 'rail_start' || type === 'rail_end') {
-          ctx.font = `bold ${GRID_SIZE * 0.3}px system-ui`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillStyle = '#000';
-          ctx.fillText(type === 'rail_start' ? 'START' : 'END', centerX, centerY);
-        } else if (type === 'rail_crossing') {
-          // Draw X symbol for crossing
-          const m = GRID_SIZE * 0.25;
-          ctx.strokeStyle = '#000';
-          ctx.lineWidth = 3;
-          ctx.beginPath();
-          ctx.moveTo(sx + m, sy + m);
-          ctx.lineTo(sx + GRID_SIZE - m, sy + GRID_SIZE - m);
-          ctx.moveTo(sx + GRID_SIZE - m, sy + m);
-          ctx.lineTo(sx + m, sy + GRID_SIZE - m);
-          ctx.stroke();
-        } else {
-          ctx.fillStyle = '#333';
-          ctx.beginPath();
-          ctx.arc(centerX, centerY, 4, 0, Math.PI * 2);
-          ctx.fill();
+        // Faint ghost overlay — only when using tile placement or eraser tools
+        if (showTileGhost) {
+          ctx.globalAlpha = 0.2;
+          ctx.fillStyle = type === 'rail_start' ? '#00E676' : type === 'rail_end' ? '#FF4081' : type === 'rail_crossing' ? '#FFA500' : '#FFD700';
+          ctx.fillRect(sx + 2, sy + 2, GRID_SIZE - 4, GRID_SIZE - 4);
+          ctx.globalAlpha = 1.0;
         }
       } else {
         // Generic obstacle tile — driven by the registry
@@ -509,83 +469,171 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       ctx.fill();
     }
 
-    // Smooth segments (circular/bezier) as cable
-    ctx.strokeStyle = '#333';
-    ctx.lineWidth = 4;
-    for (const seg of smoothSegments) {
-      const start = keyToWorld(seg.startKey);
-      const end = keyToWorld(seg.endKey);
-      const pivot = { x: seg.pivotGx * GRID_SIZE, y: seg.pivotGy * GRID_SIZE };
-      const pts = seg.type === 'circular'
-        ? sampleCircularArcWorld(start, end, pivot)
-        : sampleBezierWorld(start, end, pivot);
+    // Autoconnect preview: show dashed line from hovered cell to nearby snappoints
+    if (autoconnect && mouseWorld && (tool === 'rail' || tool === 'rail_crossing' || tool === 'rail_start' || tool === 'rail_end')) {
+      const hgx = Math.floor(mouseWorld.x / GRID_SIZE);
+      const hgy = Math.floor(mouseWorld.y / GRID_SIZE);
+      const hWorld = { x: (hgx + 0.5) * GRID_SIZE, y: (hgy + 0.5) * GRID_SIZE };
+      // Find snappoints that are endpoint tiles in adjacent cells
+      const endpointKeys = new Set<string>();
+      for (const seg of individualSegs) {
+        if (!seg.sourceKeys) continue;
+        endpointKeys.add(seg.sourceKeys[0]);
+        if (seg.sourceKeys.length > 1) endpointKeys.add(seg.sourceKeys[seg.sourceKeys.length - 1]);
+      }
+      ctx.setLineDash([6, 4]);
+      ctx.strokeStyle = 'rgba(0, 230, 118, 0.6)';
+      ctx.lineWidth = 2;
+      for (const [ndx, ndy] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]] as [number, number][]) {
+        const nk = tileKey(hgx + ndx, hgy + ndy);
+        const nt = tiles[nk];
+        const isRailLike = nt === 'rail' || nt === 'rail_start' || nt === 'rail_end' || nt === 'rail_crossing';
+        if (isRailLike && (endpointKeys.has(nk) || nt === 'rail_crossing' || tool === 'rail_crossing')) {
+          const nWorld = keyToWorld(nk);
+          ctx.beginPath();
+          ctx.moveTo(hWorld.x - cx, hWorld.y - cy);
+          ctx.lineTo(nWorld.x - cx, nWorld.y - cy);
+          ctx.stroke();
+        }
+      }
+      ctx.setLineDash([]);
+    }
+
+    // ── Individual rail segments as polylines ──────────────────────────────
+    for (const seg of individualSegs) {
+      if (seg.points.length < 2) {
+        // Single-point segment: draw as a dot
+        ctx.fillStyle = '#AAA';
+        ctx.beginPath();
+        ctx.arc(seg.points[0].x - cx, seg.points[0].y - cy, 4, 0, Math.PI * 2);
+        ctx.fill();
+        continue;
+      }
+      ctx.strokeStyle = '#AAA';
+      ctx.lineWidth = 4;
       ctx.beginPath();
-      ctx.moveTo(pts[0].x - cx, pts[0].y - cy);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x - cx, pts[i].y - cy);
+      ctx.moveTo(seg.points[0].x - cx, seg.points[0].y - cy);
+      for (let i = 1; i < seg.points.length; i++) {
+        ctx.lineTo(seg.points[i].x - cx, seg.points[i].y - cy);
+      }
       ctx.stroke();
     }
 
-    // Free line extensions (derive current start from attached segment endpoints; ignore freeLines while deriving)
-    ctx.strokeStyle = '#333';
-    ctx.lineWidth = 4;
+    // Snappoint markers at each segment endpoint
+    const snaps = getSnapPoints(individualSegs);
+    for (const snap of snaps) {
+      ctx.fillStyle = 'rgba(0, 230, 118, 0.7)';
+      ctx.beginPath();
+      ctx.arc(snap.point.x - cx, snap.point.y - cy, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Rail start / end / crossing markers on the polyline
+    for (const [key, type] of Object.entries(tiles)) {
+      if (type === 'rail_start' || type === 'rail_end') {
+        const world = keyToWorld(key);
+        const color = type === 'rail_start' ? '#00E676' : '#FF4081';
+        const label = type === 'rail_start' ? 'S' : 'E';
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(world.x - cx, world.y - cy, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.font = 'bold 10px system-ui';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, world.x - cx, world.y - cy);
+      } else if (type === 'rail_crossing') {
+        const world = keyToWorld(key);
+        const m = 6;
+        ctx.strokeStyle = '#FFA500';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(world.x - cx - m, world.y - cy - m);
+        ctx.lineTo(world.x - cx + m, world.y - cy + m);
+        ctx.moveTo(world.x - cx + m, world.y - cy - m);
+        ctx.lineTo(world.x - cx - m, world.y - cy + m);
+        ctx.stroke();
+      }
+    }
+
+    // Legacy computation — still used by hover highlight and endpoint hints (Phase 3 will replace)
     const { allSegments: baseForLines, segmentIdByIndex } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, undefined);
     const segIdToIdx: Record<string, number> = {};
     segmentIdByIndex.forEach((id, i) => { segIdToIdx[id] = i; });
-    const getAttachPoint = (attach: import('@/game/editorTypes').FreeLineAttach) => {
-      if ('atWorld' in attach) return attach.atWorld;
-      const idx = segIdToIdx[attach.segmentId];
-      if (idx == null) return null;
-      const seg = baseForLines[idx];
-      if (!seg || seg.length < 1) return null;
-      const p = attach.endpoint === 'start' ? seg[0] : seg[seg.length - 1];
-      return { x: p.x, y: p.y };
-    };
-    for (const fl of freeLines) {
-      let start = getAttachPoint(fl.attach);
-      if (!start && fl.attachWorld) start = fl.attachWorld;
-      if (!start) continue;
-      // Use waypoints polyline for drawn rails, straight line for regular free lines
-      const pts = fl.waypoints && fl.waypoints.length > 0
-        ? [start, ...fl.waypoints, fl.end]
-        : sampleLineWorld(start, fl.end);
-      ctx.beginPath();
-      ctx.moveTo(pts[0].x - cx, pts[0].y - cy);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x - cx, pts[i].y - cy);
-      ctx.stroke();
+    // getAttachPoint — used by click handlers (defined in their scope)
+    // baseForLines/segmentIdByIndex are used by endpoint hints below
+
+    // Build continuous segments + lookups for hover/eraser
+    const continuousSegs = buildContinuousSegments(individualSegs);
+    const indivIdToContSeg: Record<string, typeof continuousSegs[0]> = {};
+    for (const cont of continuousSegs) {
+      for (const iid of cont.individualIds) indivIdToContSeg[iid] = cont;
     }
+    const indivById: Record<string, typeof individualSegs[0]> = {};
+    for (const seg of individualSegs) indivById[seg.id] = seg;
 
-    // Merged segments (with freeLines) for hover highlight
-    const { allSegments: mergedSegments } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, freeLines);
+    // Point-to-line-segment distance helper
+    const ptSegDist = (px: number, py: number, ax: number, ay: number, bx: number, by: number) => {
+      const dx = bx - ax, dy = by - ay;
+      const lenSq = dx * dx + dy * dy;
+      if (lenSq === 0) return Math.hypot(px - ax, py - ay);
+      const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+      return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+    };
 
-    // Segment hover highlight — for line2, draw_rail, and hand tool
-    const showHoverHighlight = tool === 'line2' || (tool === 'draw_rail' && !drawRailPoints && !drawRailPending) || tool === 'none';
-    if (showHoverHighlight && mouseWorld) {
-      // Find nearest merged segment by point-to-polyline distance
-      const ptSegDist = (px: number, py: number, ax: number, ay: number, bx: number, by: number) => {
-        const dx = bx - ax, dy = by - ay;
-        const lenSq = dx * dx + dy * dy;
-        if (lenSq === 0) return Math.hypot(px - ax, py - ay);
-        const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
-        return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
-      };
-      let bestSegIdx = -1;
+    // Find nearest individual segment to a world point
+    const findNearestIndividual = (mx: number, my: number) => {
+      let bestSeg: typeof individualSegs[0] | null = null;
       let bestDist = Infinity;
-      for (let si = 0; si < mergedSegments.length; si++) {
-        const seg = mergedSegments[si];
-        if (!seg || seg.length < 2) continue;
-        for (let i = 0; i < seg.length - 1; i++) {
-          const d = ptSegDist(mouseWorld.x, mouseWorld.y, seg[i].x, seg[i].y, seg[i + 1].x, seg[i + 1].y);
-          if (d < bestDist) { bestDist = d; bestSegIdx = si; }
+      for (const seg of individualSegs) {
+        if (seg.points.length < 2) {
+          const d = Math.hypot(mx - seg.points[0].x, my - seg.points[0].y);
+          if (d < bestDist) { bestDist = d; bestSeg = seg; }
+          continue;
+        }
+        for (let i = 0; i < seg.points.length - 1; i++) {
+          const d = ptSegDist(mx, my, seg.points[i].x, seg.points[i].y, seg.points[i + 1].x, seg.points[i + 1].y);
+          if (d < bestDist) { bestDist = d; bestSeg = seg; }
         }
       }
-      if (bestSegIdx >= 0 && bestDist <= 60) {
-        const seg = mergedSegments[bestSegIdx];
-        ctx.strokeStyle = 'rgba(0, 200, 255, 0.5)';
-        ctx.lineWidth = 6;
-        ctx.beginPath();
-        ctx.moveTo(seg[0].x - cx, seg[0].y - cy);
-        for (let i = 1; i < seg.length; i++) ctx.lineTo(seg[i].x - cx, seg[i].y - cy);
-        ctx.stroke();
+      return bestSeg && bestDist <= 60 ? { seg: bestSeg, dist: bestDist } : null;
+    };
+
+    // Segment hover highlight — hand tool, line2, draw_rail, eraser
+    const showHoverHighlight = tool === 'none' || tool === 'line2' || (tool === 'draw_rail' && !drawRailPoints && !drawRailPending) || tool === 'eraser';
+    if (showHoverHighlight && mouseWorld) {
+      const nearest = findNearestIndividual(mouseWorld.x, mouseWorld.y);
+      if (nearest) {
+        const cont = indivIdToContSeg[nearest.seg.id];
+        if (cont) {
+          // Highlight all individual segments in the continuous segment (cyan)
+          ctx.strokeStyle = 'rgba(0, 200, 255, 0.5)';
+          ctx.lineWidth = 6;
+          for (const iid of cont.individualIds) {
+            const iseg = indivById[iid];
+            if (!iseg || iseg.points.length < 2) continue;
+            ctx.beginPath();
+            ctx.moveTo(iseg.points[0].x - cx, iseg.points[0].y - cy);
+            for (let i = 1; i < iseg.points.length; i++) ctx.lineTo(iseg.points[i].x - cx, iseg.points[i].y - cy);
+            ctx.stroke();
+          }
+        }
+        // Eraser: additionally highlight the specific individual segment in red
+        if (tool === 'eraser' && nearest.seg.points.length >= 2) {
+          ctx.strokeStyle = 'rgba(255, 80, 80, 0.7)';
+          ctx.lineWidth = 8;
+          ctx.beginPath();
+          ctx.moveTo(nearest.seg.points[0].x - cx, nearest.seg.points[0].y - cy);
+          for (let i = 1; i < nearest.seg.points.length; i++) ctx.lineTo(nearest.seg.points[i].x - cx, nearest.seg.points[i].y - cy);
+          ctx.stroke();
+        } else if (tool === 'eraser' && nearest.seg.points.length === 1) {
+          // Single-point segment: red circle
+          ctx.fillStyle = 'rgba(255, 80, 80, 0.7)';
+          ctx.beginPath();
+          ctx.arc(nearest.seg.points[0].x - cx, nearest.seg.points[0].y - cy, 8, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
     }
 
@@ -1355,20 +1403,9 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         return;
       }
 
-      // Eraser: check if click is near a free line or smooth curve segment and delete it
+      // Eraser: find nearest individual rail segment and delete it
       if (tool === 'eraser') {
-        const { allSegments: baseSegs, segmentIdByIndex: baseIds } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, undefined);
-        const segIdToIdx: Record<string, number> = {};
-        baseIds.forEach((id, i) => { segIdToIdx[id] = i; });
-        const resolveAttach = (attach: import('@/game/editorTypes').FreeLineAttach) => {
-          if ('atWorld' in attach) return attach.atWorld;
-          const idx = segIdToIdx[attach.segmentId];
-          if (idx == null) return null;
-          const seg = baseSegs[idx];
-          if (!seg || seg.length < 1) return null;
-          const p = attach.endpoint === 'start' ? seg[0] : seg[seg.length - 1];
-          return { x: p.x, y: p.y };
-        };
+        const eraserSegs = buildIndividualSegments(tiles, railConnectionsRef.current, smoothSegments, freeLines);
         const ptSegDist = (px: number, py: number, ax: number, ay: number, bx: number, by: number) => {
           const dx = bx - ax, dy = by - ay;
           const lenSq = dx * dx + dy * dy;
@@ -1376,62 +1413,60 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
           return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
         };
-        const polylineDist = (px: number, py: number, pts: { x: number; y: number }[]) => {
-          let min = Infinity;
-          for (let i = 1; i < pts.length; i++) min = Math.min(min, ptSegDist(px, py, pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y));
-          return min;
-        };
 
         const ERASE_THRESHOLD = 15;
         let bestDist = ERASE_THRESHOLD;
-        let hitFreeLine = -1;
-        let hitSmooth = -1;
+        let hitSeg: typeof eraserSegs[0] | null = null;
 
-        for (let i = 0; i < freeLines.length; i++) {
-          const fl = freeLines[i];
-          let start = resolveAttach(fl.attach);
-          if (!start && fl.attachWorld) start = fl.attachWorld;
-          if (!start) continue;
-          // Use polyline distance for drawn rails with waypoints, segment distance for straight free lines
-          const d = fl.waypoints && fl.waypoints.length > 0
-            ? polylineDist(world.x, world.y, [start, ...fl.waypoints, fl.end])
-            : ptSegDist(world.x, world.y, start.x, start.y, fl.end.x, fl.end.y);
-          if (d < bestDist) { bestDist = d; hitFreeLine = i; hitSmooth = -1; }
-        }
-
-        for (let i = 0; i < smoothSegments.length; i++) {
-          const seg = smoothSegments[i];
-          const start = keyToWorld(seg.startKey);
-          const end = keyToWorld(seg.endKey);
-          const pivot = { x: seg.pivotGx * GRID_SIZE, y: seg.pivotGy * GRID_SIZE };
-          const pts = seg.type === 'circular'
-            ? sampleCircularArcWorld(start, end, pivot)
-            : sampleBezierWorld(start, end, pivot);
-          const d = polylineDist(world.x, world.y, pts);
-          if (d < bestDist) { bestDist = d; hitSmooth = i; hitFreeLine = -1; }
-        }
-
-        if (hitFreeLine >= 0) {
-          setFreeLines(prev => prev.filter((_, i) => i !== hitFreeLine));
-          return;
-        }
-        if (hitSmooth >= 0) {
-          const seg = smoothSegments[hitSmooth];
-          const conns = railConnectionsRef.current;
-          conns[seg.startKey]?.delete(seg.endKey);
-          conns[seg.endKey]?.delete(seg.startKey);
-          // Also remove both endpoint tiles of the curve
-          for (const k of [seg.startKey, seg.endKey]) {
-            removeRailConnections(k);
-            if (lastPlacedRailRef.current === k) lastPlacedRailRef.current = null;
+        for (const seg of eraserSegs) {
+          if (seg.points.length < 2) {
+            const d = Math.hypot(world.x - seg.points[0].x, world.y - seg.points[0].y);
+            if (d < bestDist) { bestDist = d; hitSeg = seg; }
+            continue;
           }
-          setSmoothSegments(prev => prev.filter((_, i) => i !== hitSmooth));
-          setTiles(prev => {
-            const next = { ...prev };
-            delete next[seg.startKey];
-            delete next[seg.endKey];
-            return next;
-          });
+          for (let i = 0; i < seg.points.length - 1; i++) {
+            const d = ptSegDist(world.x, world.y, seg.points[i].x, seg.points[i].y, seg.points[i + 1].x, seg.points[i + 1].y);
+            if (d < bestDist) { bestDist = d; hitSeg = seg; }
+          }
+        }
+
+        if (hitSeg) {
+          if (hitSeg.kind === 'free_line' || hitSeg.kind === 'drawn_rail') {
+            const idx = hitSeg.sourceFreeLineIndex!;
+            setFreeLines(prev => prev.filter((_, i) => i !== idx));
+          } else if (hitSeg.kind === 'smooth_curve') {
+            const si = hitSeg.sourceSmoothIndex!;
+            const seg = smoothSegments[si];
+            const conns = railConnectionsRef.current;
+            conns[seg.startKey]?.delete(seg.endKey);
+            conns[seg.endKey]?.delete(seg.startKey);
+            for (const k of [seg.startKey, seg.endKey]) {
+              removeRailConnections(k);
+              if (lastPlacedRailRef.current === k) lastPlacedRailRef.current = null;
+            }
+            setSmoothSegments(prev => prev.filter((_, i) => i !== si));
+            setTiles(prev => {
+              const next = { ...prev };
+              delete next[seg.startKey];
+              delete next[seg.endKey];
+              return next;
+            });
+          } else if (hitSeg.kind === 'tile_chain' && hitSeg.sourceKeys) {
+            // Delete all tiles in this chain and their connections
+            const keysToRemove = hitSeg.sourceKeys;
+            for (const k of keysToRemove) {
+              removeRailConnections(k);
+              if (lastPlacedRailRef.current === k) lastPlacedRailRef.current = null;
+            }
+            // Also remove smooth segments anchored to any of these tiles
+            const keySet = new Set(keysToRemove);
+            setSmoothSegments(prev => prev.filter(s => !keySet.has(s.startKey) && !keySet.has(s.endKey)));
+            setTiles(prev => {
+              const next = { ...prev };
+              for (const k of keysToRemove) delete next[k];
+              return next;
+            });
+          }
           return;
         }
       }
@@ -1648,20 +1683,44 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
             addRailConnection(last, key);
           }
         }
-        // Auto-connect to any adjacent crossing tiles (so building through a crossing works)
+        // Auto-connect to adjacent tiles
         const neighborDirs: [number, number][] = [
           [1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]
         ];
-        for (const [ndx, ndy] of neighborDirs) {
-          const nk = tileKey(gx + ndx, gy + ndy);
-          if (nk !== last && tiles[nk] === 'rail_crossing') {
-            addRailConnection(key, nk);
+        if (autoconnect) {
+          // Autoconnect: connect to any adjacent rail tile that is a segment endpoint (snappoint)
+          const segs = buildIndividualSegments(tiles, railConnectionsRef.current, smoothSegments, freeLines);
+          // Collect endpoint tile keys (tiles at snappoints)
+          const endpointKeys = new Set<string>();
+          for (const seg of segs) {
+            if (!seg.sourceKeys) continue;
+            // First and last source keys are the endpoint tiles
+            endpointKeys.add(seg.sourceKeys[0]);
+            if (seg.sourceKeys.length > 1) endpointKeys.add(seg.sourceKeys[seg.sourceKeys.length - 1]);
           }
-          // Also connect if WE are a crossing and neighbor is any rail-like tile
-          if (tool === 'rail_crossing' && nk !== last) {
+          for (const [ndx, ndy] of neighborDirs) {
+            const nk = tileKey(gx + ndx, gy + ndy);
+            if (nk === last) continue; // already connected above
             const nt = tiles[nk];
-            if (nt === 'rail' || nt === 'rail_start' || nt === 'rail_end' || nt === 'rail_crossing') {
+            const isRailLike = nt === 'rail' || nt === 'rail_start' || nt === 'rail_end' || nt === 'rail_crossing';
+            if (!isRailLike) continue;
+            // Connect if neighbor is a segment endpoint or we/they are crossings
+            if (endpointKeys.has(nk) || nt === 'rail_crossing' || tool === 'rail_crossing') {
               addRailConnection(key, nk);
+            }
+          }
+        } else {
+          // Legacy behavior: only auto-connect crossings
+          for (const [ndx, ndy] of neighborDirs) {
+            const nk = tileKey(gx + ndx, gy + ndy);
+            if (nk !== last && tiles[nk] === 'rail_crossing') {
+              addRailConnection(key, nk);
+            }
+            if (tool === 'rail_crossing' && nk !== last) {
+              const nt = tiles[nk];
+              if (nt === 'rail' || nt === 'rail_start' || nt === 'rail_end' || nt === 'rail_crossing') {
+                addRailConnection(key, nk);
+              }
             }
           }
         }
@@ -2277,6 +2336,15 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
             title={skyOnly ? 'Background: Sky only' : 'Background: Full scenery'}
           >
             {skyOnly ? '☁️ Sky Only' : '🏔️ Scenery'}
+          </button>
+          <button
+            onClick={() => setAutoconnect(a => !a)}
+            className={`px-3 py-2 rounded-lg text-sm font-bold ${
+              autoconnect ? 'bg-green-700 text-white hover:bg-green-600' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`}
+            title={autoconnect ? 'Autoconnect: ON — rail tiles auto-connect to nearby segment endpoints' : 'Autoconnect: OFF'}
+          >
+            {autoconnect ? '🔗 Auto' : '🔗'}
           </button>
           <button
             onClick={startTest}

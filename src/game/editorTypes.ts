@@ -77,6 +77,35 @@ export interface FreeLineSegment {
   smoothness?: number;
 }
 
+// ─── Unified Rail Segment Model ──────────────────────────────────────────────
+
+/** A single rail piece created by one tool action (tile chain, smooth curve, free line, or drawn rail). */
+export interface IndividualRailSegment {
+  id: string;
+  kind: 'tile_chain' | 'smooth_curve' | 'free_line' | 'drawn_rail';
+  points: { x: number; y: number }[];
+  snapA: { x: number; y: number };
+  snapB: { x: number; y: number };
+  /** Tile keys this segment is built from (tile_chain & smooth_curve) */
+  sourceKeys?: string[];
+  /** Index into smoothSegments[] (smooth_curve only) */
+  sourceSmoothIndex?: number;
+  /** Index into freeLines[] (free_line & drawn_rail only) */
+  sourceFreeLineIndex?: number;
+}
+
+/** A group of connected individual segments forming one continuous rail path. */
+export interface ContinuousRailSegment {
+  id: string;
+  individualIds: string[];
+}
+
+export interface SnapPoint {
+  segmentId: string;
+  point: { x: number; y: number };
+  endpoint: 'A' | 'B';
+}
+
 export interface EditorLevel {
   name: string;
   /** Stable unique identifier used for music folder paths and deduplication. */
@@ -518,8 +547,10 @@ export function convertLevelToGameData(
   const segmentIdByIndex: string[] = [];
 
   if (conns && Object.keys(conns).length > 0) {
-    const walkStart = startKey
-      || railKeys.find(k => conns[k] && conns[k].size === 1)
+    // Direction-neutral: prefer any dead-end tile (1 connection) for walk start.
+    // rail_start only influences the final orientation step (reversing so index 0 is near spawn).
+    const walkStart = railKeys.find(k => conns[k] && conns[k].size === 1)
+      || startKey
       || railKeys[0];
 
     const startOrdered = walkRailComponent(walkStart, conns, hasCrossings ? crossingKeys : undefined);
@@ -721,4 +752,238 @@ export function convertLevelToGameData(
   }
 
   return { railPoints, allSegments, segmentIdByIndex, obstacles, endTileWorldPos, isLoop };
+}
+
+// ─── Unified Segment Builders ────────────────────────────────────────────────
+
+/** Build individual rail segments from editor source data.
+ *  Each tool action (tile chain, smooth curve, free line, drawn rail) produces
+ *  one IndividualRailSegment with two snappoints at its endpoints. */
+export function buildIndividualSegments(
+  tiles: Record<string, TileType>,
+  connections: Record<string, Set<string>>,
+  smoothSegments: SmoothSegment[],
+  freeLines: FreeLineSegment[]
+): IndividualRailSegment[] {
+  const result: IndividualRailSegment[] = [];
+  let idCounter = 0;
+
+  // ── Tile-based segments ──────────────────────────────────────────────────
+  const railKeys: string[] = [];
+  for (const [key, type] of Object.entries(tiles)) {
+    if (type === 'rail' || type === 'rail_start' || type === 'rail_end' || type === 'rail_crossing') {
+      railKeys.push(key);
+    }
+  }
+
+  // Smooth segment lookup: sorted pair key → { seg, index }
+  const smoothLookup = new Map<string, { seg: SmoothSegment; index: number }>();
+  for (let i = 0; i < smoothSegments.length; i++) {
+    const s = smoothSegments[i];
+    const pairKey = [s.startKey, s.endKey].sort().join('|');
+    smoothLookup.set(pairKey, { seg: s, index: i });
+  }
+  const findSmooth = (a: string, b: string) =>
+    smoothLookup.get([a, b].sort().join('|'));
+
+  if (railKeys.length > 0) {
+    const crossingKeys = new Set<string>();
+    for (const key of railKeys) {
+      if (tiles[key] === 'rail_crossing') crossingKeys.add(key);
+    }
+    const hasCrossings = crossingKeys.size > 0;
+    const conns = Object.keys(connections).length > 0
+      ? connections
+      : {} as Record<string, Set<string>>;
+    const components = getRailComponents(
+      railKeys, conns, hasCrossings ? crossingKeys : undefined
+    );
+
+    for (const comp of components) {
+      if (comp.length === 0) continue;
+
+      // Single isolated tile
+      if (comp.length === 1) {
+        const pt = keyToWorld(comp[0]);
+        result.push({
+          id: `seg_${idCounter++}`,
+          kind: 'tile_chain',
+          points: [pt],
+          snapA: pt,
+          snapB: pt,
+          sourceKeys: [comp[0]],
+        });
+        continue;
+      }
+
+      // Walk the component, splitting at smooth segment boundaries.
+      // Consecutive straight-connected tiles accumulate into one tile_chain;
+      // each smooth curve becomes its own smooth_curve segment.
+      let chainKeys: string[] = [comp[0]];
+
+      for (let i = 1; i < comp.length; i++) {
+        const prevKey = comp[i - 1];
+        const currKey = comp[i];
+        const smooth = findSmooth(prevKey, currKey);
+
+        if (smooth) {
+          // Flush accumulated tile chain
+          if (chainKeys.length >= 2) {
+            const points = chainKeys.map(k => keyToWorld(k));
+            result.push({
+              id: `seg_${idCounter++}`,
+              kind: 'tile_chain',
+              points,
+              snapA: points[0],
+              snapB: points[points.length - 1],
+              sourceKeys: [...chainKeys],
+            });
+          }
+
+          // Sample the smooth curve
+          const { seg, index } = smooth;
+          const wStart = keyToWorld(seg.startKey);
+          const wEnd = keyToWorld(seg.endKey);
+          const wPivot = { x: seg.pivotGx * GRID_SIZE, y: seg.pivotGy * GRID_SIZE };
+          let arcPts = seg.type === 'circular'
+            ? sampleCircularArcWorld(wStart, wEnd, wPivot)
+            : sampleBezierWorld(wStart, wEnd, wPivot);
+
+          // Ensure arc direction matches walk direction
+          if (arcPts.length >= 2) {
+            const prevWorld = keyToWorld(prevKey);
+            const dFirst = Math.hypot(arcPts[0].x - prevWorld.x, arcPts[0].y - prevWorld.y);
+            const dLast = Math.hypot(arcPts[arcPts.length - 1].x - prevWorld.x, arcPts[arcPts.length - 1].y - prevWorld.y);
+            if (dLast < dFirst) arcPts = [...arcPts].reverse();
+          }
+
+          result.push({
+            id: `seg_${idCounter++}`,
+            kind: 'smooth_curve',
+            points: arcPts,
+            snapA: arcPts[0],
+            snapB: arcPts[arcPts.length - 1],
+            sourceSmoothIndex: index,
+            sourceKeys: [prevKey, currKey],
+          });
+
+          // Start a new chain from the current key
+          chainKeys = [currKey];
+        } else {
+          chainKeys.push(currKey);
+        }
+      }
+
+      // Flush remaining tile chain (skip single leftover tiles — they're
+      // already represented as a smooth curve's snappoint)
+      if (chainKeys.length >= 2) {
+        const points = chainKeys.map(k => keyToWorld(k));
+        result.push({
+          id: `seg_${idCounter++}`,
+          kind: 'tile_chain',
+          points,
+          snapA: points[0],
+          snapB: points[points.length - 1],
+          sourceKeys: [...chainKeys],
+        });
+      }
+    }
+  }
+
+  // ── Free line segments ───────────────────────────────────────────────────
+  for (let i = 0; i < freeLines.length; i++) {
+    const fl = freeLines[i];
+    const startPt = fl.attachWorld ?? fl.end;
+    const endPt = fl.end;
+
+    let points: { x: number; y: number }[];
+    if (fl.waypoints && fl.waypoints.length > 0) {
+      points = [startPt, ...fl.waypoints, endPt];
+    } else {
+      points = [startPt, endPt];
+    }
+
+    result.push({
+      id: `seg_${idCounter++}`,
+      kind: fl.rawDrawnPoints ? 'drawn_rail' : 'free_line',
+      points,
+      snapA: points[0],
+      snapB: points[points.length - 1],
+      sourceFreeLineIndex: i,
+    });
+  }
+
+  return result;
+}
+
+/** Group individual segments into continuous segments by matching snappoints. */
+export function buildContinuousSegments(
+  individualSegments: IndividualRailSegment[]
+): ContinuousRailSegment[] {
+  const n = individualSegments.length;
+  if (n === 0) return [];
+
+  const SNAP_TOLERANCE = 2; // px
+
+  // Build adjacency based on snappoint proximity
+  const adj: Set<number>[] = Array.from({ length: n }, () => new Set());
+  for (let i = 0; i < n; i++) {
+    const si = individualSegments[i];
+    for (let j = i + 1; j < n; j++) {
+      const sj = individualSegments[j];
+      if (
+        Math.hypot(si.snapA.x - sj.snapA.x, si.snapA.y - sj.snapA.y) < SNAP_TOLERANCE ||
+        Math.hypot(si.snapA.x - sj.snapB.x, si.snapA.y - sj.snapB.y) < SNAP_TOLERANCE ||
+        Math.hypot(si.snapB.x - sj.snapA.x, si.snapB.y - sj.snapA.y) < SNAP_TOLERANCE ||
+        Math.hypot(si.snapB.x - sj.snapB.x, si.snapB.y - sj.snapB.y) < SNAP_TOLERANCE
+      ) {
+        adj[i].add(j);
+        adj[j].add(i);
+      }
+    }
+  }
+
+  // BFS to find connected components
+  const visited = new Set<number>();
+  const result: ContinuousRailSegment[] = [];
+  let contId = 0;
+
+  for (let i = 0; i < n; i++) {
+    if (visited.has(i)) continue;
+    const component: number[] = [];
+    const queue = [i];
+    visited.add(i);
+    while (queue.length > 0) {
+      const idx = queue.shift()!;
+      component.push(idx);
+      for (const nb of adj[idx]) {
+        if (!visited.has(nb)) {
+          visited.add(nb);
+          queue.push(nb);
+        }
+      }
+    }
+
+    result.push({
+      id: `cont_${contId++}`,
+      individualIds: component.map(idx => individualSegments[idx].id),
+    });
+  }
+
+  return result;
+}
+
+/** Extract all snappoints from individual segments. */
+export function getSnapPoints(
+  individualSegments: IndividualRailSegment[]
+): SnapPoint[] {
+  const result: SnapPoint[] = [];
+  for (const seg of individualSegments) {
+    result.push({ segmentId: seg.id, point: seg.snapA, endpoint: 'A' });
+    // Only add snapB if distinct from snapA (skip degenerate single-point segments)
+    if (Math.hypot(seg.snapA.x - seg.snapB.x, seg.snapA.y - seg.snapB.y) > 1) {
+      result.push({ segmentId: seg.id, point: seg.snapB, endpoint: 'B' });
+    }
+  }
+  return result;
 }
