@@ -39,7 +39,7 @@ const TOOLS: { tool: EditorTool; label: string; emoji: string }[] = [
   { tool: 'draw_rail', label: 'Draw', emoji: '✏️' },
 ];
 
-const TILE_TOOL_TYPES = new Set<EditorTool>(['rail', 'rail_start', 'rail_end', 'rail_crossing', ...OBSTACLE_DEFINITIONS.map(d => d.tileType as EditorTool)]);
+const TILE_TOOL_TYPES = new Set<EditorTool>(['rail_start', 'rail_end', 'rail_crossing', ...OBSTACLE_DEFINITIONS.map(d => d.tileType as EditorTool)]);
 const SHAPE_TOOL_TYPES = new Set<EditorTool>(['arc', 'curve', 'circular_curve', 'circle']);
 
 const OBSTACLE_COLORS: Record<string, string> = Object.fromEntries(
@@ -2200,7 +2200,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           </div>
 
           {/* Standalone tools: Eraser, Line, Line2 */}
-          {TOOLS.filter(t => ['eraser', 'line', 'line2', 'draw_rail'].includes(t.tool)).map(t => (
+          {TOOLS.filter(t => ['rail', 'eraser', 'line', 'line2', 'draw_rail'].includes(t.tool)).map(t => (
             <button
               key={t.tool}
               onClick={() => {
