@@ -1209,19 +1209,23 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           }
           // Find all candidates within snap radius, then use cycle index to disambiguate overlapping ones
           const candidates = hints.filter(h => h.dist <= 45).sort((a, b) => a.dist - b.dist);
-          if (candidates.length === 0) return;
-          // Group candidates that are at nearly the same position (within 5px)
-          const best = candidates[0];
-          const overlapping = candidates.filter(c => Math.hypot(c.pt.x - best.pt.x, c.pt.y - best.pt.y) < 5);
-          let chosen: typeof best;
-          if (overlapping.length > 1) {
-            const sc = snapCycleRef.current;
-            const idx = ((sc.index % overlapping.length) + overlapping.length) % overlapping.length;
-            chosen = overlapping[idx];
+          if (candidates.length === 0) {
+            // No snap point nearby — start a free-standing line
+            setLine2Start({ attach: { segmentId: '__orphan__', atWorld: world }, start: world });
           } else {
-            chosen = best;
+            // Group candidates that are at nearly the same position (within 5px)
+            const best = candidates[0];
+            const overlapping = candidates.filter(c => Math.hypot(c.pt.x - best.pt.x, c.pt.y - best.pt.y) < 5);
+            let chosen: typeof best;
+            if (overlapping.length > 1) {
+              const sc = snapCycleRef.current;
+              const idx = ((sc.index % overlapping.length) + overlapping.length) % overlapping.length;
+              chosen = overlapping[idx];
+            } else {
+              chosen = best;
+            }
+            setLine2Start({ attach: chosen.attach, start: chosen.pt });
           }
-          setLine2Start({ attach: chosen.attach, start: chosen.pt });
         } else {
           // Second click: free end point anywhere in world space (with snapping to any endpoint)
         const { allSegments, segmentIdByIndex } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, freeLines);
