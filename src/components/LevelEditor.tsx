@@ -554,7 +554,42 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       ctx.stroke();
     }
 
-    // Endpoint hints + hover highlight for line2 and draw_rail tools
+    // Merged segments (with freeLines) for hover highlight
+    const { allSegments: mergedSegments } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, freeLines);
+
+    // Segment hover highlight — for line2, draw_rail, and hand tool
+    const showHoverHighlight = tool === 'line2' || (tool === 'draw_rail' && !drawRailPoints && !drawRailPending) || tool === 'none';
+    if (showHoverHighlight && mouseWorld) {
+      // Find nearest merged segment by point-to-polyline distance
+      const ptSegDist = (px: number, py: number, ax: number, ay: number, bx: number, by: number) => {
+        const dx = bx - ax, dy = by - ay;
+        const lenSq = dx * dx + dy * dy;
+        if (lenSq === 0) return Math.hypot(px - ax, py - ay);
+        const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+        return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+      };
+      let bestSegIdx = -1;
+      let bestDist = Infinity;
+      for (let si = 0; si < mergedSegments.length; si++) {
+        const seg = mergedSegments[si];
+        if (!seg || seg.length < 2) continue;
+        for (let i = 0; i < seg.length - 1; i++) {
+          const d = ptSegDist(mouseWorld.x, mouseWorld.y, seg[i].x, seg[i].y, seg[i + 1].x, seg[i + 1].y);
+          if (d < bestDist) { bestDist = d; bestSegIdx = si; }
+        }
+      }
+      if (bestSegIdx >= 0 && bestDist <= 60) {
+        const seg = mergedSegments[bestSegIdx];
+        ctx.strokeStyle = 'rgba(0, 200, 255, 0.5)';
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.moveTo(seg[0].x - cx, seg[0].y - cy);
+        for (let i = 1; i < seg.length; i++) ctx.lineTo(seg[i].x - cx, seg[i].y - cy);
+        ctx.stroke();
+      }
+    }
+
+    // Endpoint hints for line2 and draw_rail tools
     if (tool === 'line2' || (tool === 'draw_rail' && !drawRailPoints && !drawRailPending)) {
       const hints: { attach: import('@/game/editorTypes').FreeLineAttach; pt: { x: number; y: number } }[] = baseForLines.flatMap((seg, si) => {
         if (!seg || seg.length < 1) return [];
@@ -590,23 +625,6 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
             hoverHint = overlapping[idx];
           } else {
             hoverHint = best;
-          }
-        }
-      }
-      const hoverSegId = hoverHint ? ('segmentId' in hoverHint.attach ? hoverHint.attach.segmentId : null) : null;
-
-      // Highlight the segment that the current hover target belongs to
-      if (hoverSegId) {
-        const segIdx = segIdToIdx[hoverSegId];
-        if (segIdx != null) {
-          const seg = baseForLines[segIdx];
-          if (seg && seg.length > 1) {
-            ctx.strokeStyle = 'rgba(0, 200, 255, 0.5)';
-            ctx.lineWidth = 6;
-            ctx.beginPath();
-            ctx.moveTo(seg[0].x - cx, seg[0].y - cy);
-            for (let i = 1; i < seg.length; i++) ctx.lineTo(seg[i].x - cx, seg[i].y - cy);
-            ctx.stroke();
           }
         }
       }
