@@ -1,39 +1,54 @@
-import { obstacleDefMap, resolveParams, ObstacleParams } from './obstacleDefinitions';
+import {
+  obstacleDefMap,
+  resolveParams,
+  ObstacleParams,
+} from "./obstacleDefinitions";
 
 export const GRID_SIZE = 50;
 export const EDITOR_WIDTH = 200; // grid cells wide
 export const EDITOR_HEIGHT = 16; // grid cells tall
 
 export type TileType =
-  | 'empty' | 'rail' | 'rail_start' | 'rail_end' | 'rail_crossing'
-  | 'spinner' | 'bouncer'
-  | 'pendulum' | 'crusher' | 'laser' | 'swoop'
-  | 'orbiter' | 'boulder' | 'mine' | 'stalactite';
+  | "empty"
+  | "rail"
+  | "rail_start"
+  | "rail_end"
+  | "rail_crossing"
+  | "spinner"
+  | "bouncer"
+  | "pendulum"
+  | "crusher"
+  | "laser"
+  | "swoop"
+  | "orbiter"
+  | "boulder"
+  | "mine"
+  | "stalactite";
 
 export type EditorTool =
-  | 'none'
-  | 'rail'
-  | 'rail_start'
-  | 'rail_end'
-  | 'rail_crossing'
-  | 'spinner'
-  | 'bouncer'
-  | 'pendulum'
-  | 'crusher'
-  | 'laser'
-  | 'swoop'
-  | 'orbiter'
-  | 'boulder'
-  | 'mine'
-  | 'stalactite'
-  | 'eraser'
-  | 'arc'
-  | 'curve'
-  | 'circular_curve'
-  | 'circle'
-  | 'line'
-  | 'line2'
-  | 'draw_rail';
+  | "none"
+  | "rail"
+  | "rail_start"
+  | "rail_end"
+  | "rail_crossing"
+  | "spinner"
+  | "bouncer"
+  | "pendulum"
+  | "crusher"
+  | "laser"
+  | "swoop"
+  | "orbiter"
+  | "boulder"
+  | "mine"
+  | "stalactite"
+  | "eraser"
+  | "arc"
+  | "curve"
+  | "circular_curve"
+  | "circle"
+  | "line"
+  | "line2"
+  | "draw_rail";
 
 export interface EditorTile {
   type: TileType;
@@ -41,7 +56,7 @@ export interface EditorTile {
 
 /** Smooth segment between two rail tiles: rendered and played as a curve, not tile-stepped */
 export interface SmoothSegment {
-  type: 'circular' | 'bezier';
+  type: "circular" | "bezier";
   startKey: string;
   endKey: string;
   pivotGx: number;
@@ -50,7 +65,7 @@ export interface SmoothSegment {
 
 /** Stable id for a rail component (min tile key by gx,gy) so it doesn't change when start tile moves */
 export function componentId(keys: string[]): string {
-  if (keys.length === 0) return '';
+  if (keys.length === 0) return "";
   return keys.slice().sort((a, b) => {
     const [ax, ay] = parseTileKey(a);
     const [bx, by] = parseTileKey(b);
@@ -59,7 +74,7 @@ export function componentId(keys: string[]): string {
 }
 
 export type FreeLineAttach =
-  | { segmentId: string; endpoint: 'start' | 'end' }
+  | { segmentId: string; endpoint: "start" | "end" }
   | { segmentId: string; atWorld: { x: number; y: number } };
 
 export interface FreeLineSegment {
@@ -68,7 +83,7 @@ export interface FreeLineSegment {
   /** Cached world position where the Line 2 started, so it survives rail graph changes */
   attachWorld?: { x: number; y: number };
   end: { x: number; y: number };
-  target?: { segmentId: string; endpoint: 'start' | 'end' };
+  target?: { segmentId: string; endpoint: "start" | "end" };
   /** Drawn rail: smoothed polyline between attach and end */
   waypoints?: { x: number; y: number }[];
   /** Drawn rail: original freehand points for re-smoothing */
@@ -82,7 +97,7 @@ export interface FreeLineSegment {
 /** A single rail piece created by one tool action (tile chain, smooth curve, free line, or drawn rail). */
 export interface IndividualRailSegment {
   id: string;
-  kind: 'tile_chain' | 'smooth_curve' | 'free_line' | 'drawn_rail';
+  kind: "tile_chain" | "smooth_curve" | "free_line" | "drawn_rail";
   points: { x: number; y: number }[];
   snapA: { x: number; y: number };
   snapB: { x: number; y: number };
@@ -103,7 +118,7 @@ export interface ContinuousRailSegment {
 export interface SnapPoint {
   segmentId: string;
   point: { x: number; y: number };
-  endpoint: 'A' | 'B';
+  endpoint: "A" | "B";
 }
 
 export interface EditorLevel {
@@ -137,7 +152,7 @@ export function tileKey(gx: number, gy: number): string {
 }
 
 export function parseTileKey(key: string): [number, number] {
-  const [x, y] = key.split(',').map(Number);
+  const [x, y] = key.split(",").map(Number);
   return [x, y];
 }
 
@@ -150,17 +165,28 @@ export function keyToWorld(key: string): { x: number; y: number } {
 export function sampleCircularArcWorld(
   start: { x: number; y: number },
   end: { x: number; y: number },
-  pivot: { x: number; y: number }
+  pivot: { x: number; y: number },
 ): { x: number; y: number }[] {
-  const x1 = start.x, y1 = start.y;
-  const x2 = end.x, y2 = end.y;
-  const x3 = pivot.x, y3 = pivot.y;
+  const x1 = start.x,
+    y1 = start.y;
+  const x2 = end.x,
+    y2 = end.y;
+  const x3 = pivot.x,
+    y3 = pivot.y;
   const d = 2 * (x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2));
   if (Math.abs(d) < 1e-6) {
     return [start, end];
   }
-  const ux = ((x1 * x1 + y1 * y1) * (y2 - y3) + (x2 * x2 + y2 * y2) * (y3 - y1) + (x3 * x3 + y3 * y3) * (y1 - y2)) / d;
-  const uy = ((x1 * x1 + y1 * y1) * (x3 - x2) + (x2 * x2 + y2 * y2) * (x1 - x3) + (x3 * x3 + y3 * y3) * (x2 - x1)) / d;
+  const ux =
+    ((x1 * x1 + y1 * y1) * (y2 - y3) +
+      (x2 * x2 + y2 * y2) * (y3 - y1) +
+      (x3 * x3 + y3 * y3) * (y1 - y2)) /
+    d;
+  const uy =
+    ((x1 * x1 + y1 * y1) * (x3 - x2) +
+      (x2 * x2 + y2 * y2) * (x1 - x3) +
+      (x3 * x3 + y3 * y3) * (x2 - x1)) /
+    d;
   const radius = Math.sqrt((x1 - ux) ** 2 + (y1 - uy) ** 2);
   if (!isFinite(radius) || radius < 1) return [start, end];
   const a1 = Math.atan2(y1 - uy, x1 - ux);
@@ -173,16 +199,21 @@ export function sampleCircularArcWorld(
     while (r >= tau) r -= tau;
     return r;
   };
-  const A1 = norm(a1), A2 = norm(a2), A3 = norm(a3);
+  const A1 = norm(a1),
+    A2 = norm(a2),
+    A3 = norm(a3);
   const isBetweenCCW = (from: number, to: number, mid: number) => {
-    let f = from, t = to, m = mid;
+    let f = from,
+      t = to,
+      m = mid;
     const tau = Math.PI * 2;
     if (t < f) t += tau;
     if (m < f) m += tau;
     return m >= f && m <= t;
   };
   const ccwContainsPivot = isBetweenCCW(A1, A2, A3);
-  let startAngle = A1, endAngle = A2;
+  let startAngle = A1,
+    endAngle = A2;
   if (!ccwContainsPivot) {
     if (startAngle < endAngle) startAngle += Math.PI * 2;
     else endAngle += Math.PI * 2;
@@ -196,7 +227,10 @@ export function sampleCircularArcWorld(
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
     const angle = startAngle + angleSpan * t;
-    out.push({ x: ux + Math.cos(angle) * radius, y: uy + Math.sin(angle) * radius });
+    out.push({
+      x: ux + Math.cos(angle) * radius,
+      y: uy + Math.sin(angle) * radius,
+    });
   }
   return out;
 }
@@ -205,7 +239,7 @@ export function sampleCircularArcWorld(
 export function sampleBezierWorld(
   start: { x: number; y: number },
   end: { x: number; y: number },
-  control: { x: number; y: number }
+  control: { x: number; y: number },
 ): { x: number; y: number }[] {
   const dist = Math.hypot(end.x - start.x, end.y - start.y);
   const steps = Math.max(16, Math.min(80, Math.ceil(dist / 6)));
@@ -224,7 +258,7 @@ export function sampleBezierWorld(
 export function sampleLineWorld(
   start: { x: number; y: number },
   end: { x: number; y: number },
-  stepPx: number = 25
+  stepPx: number = 25,
 ): { x: number; y: number }[] {
   const dx = end.x - start.x;
   const dy = end.y - start.y;
@@ -242,13 +276,19 @@ export function sampleLineWorld(
 /** Resample an arbitrary polyline at uniform spacing. */
 export function samplePolylineWorld(
   points: { x: number; y: number }[],
-  stepPx: number = 25
+  stepPx: number = 25,
 ): { x: number; y: number }[] {
   if (points.length < 2) return [...points];
   // Compute cumulative distances
   const cumDist: number[] = [0];
   for (let i = 1; i < points.length; i++) {
-    cumDist.push(cumDist[i - 1] + Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y));
+    cumDist.push(
+      cumDist[i - 1] +
+        Math.hypot(
+          points[i].x - points[i - 1].x,
+          points[i].y - points[i - 1].y,
+        ),
+    );
   }
   const totalDist = cumDist[cumDist.length - 1];
   if (totalDist < stepPx) return [points[0], points[points.length - 1]];
@@ -271,7 +311,7 @@ export function samplePolylineWorld(
 /** Ramer-Douglas-Peucker polyline simplification (iterative). */
 export function rdpSimplify(
   points: { x: number; y: number }[],
-  epsilon: number
+  epsilon: number,
 ): { x: number; y: number }[] {
   if (points.length <= 2) return [...points];
   const keep = new Uint8Array(points.length);
@@ -280,21 +320,31 @@ export function rdpSimplify(
   const stack: [number, number][] = [[0, points.length - 1]];
   while (stack.length > 0) {
     const [start, end] = stack.pop()!;
-    let maxDist = 0, maxIdx = start;
+    let maxDist = 0,
+      maxIdx = start;
     const dx = points[end].x - points[start].x;
     const dy = points[end].y - points[start].y;
     const lenSq = dx * dx + dy * dy;
     for (let i = start + 1; i < end; i++) {
       let d: number;
       if (lenSq === 0) {
-        d = Math.hypot(points[i].x - points[start].x, points[i].y - points[start].y);
+        d = Math.hypot(
+          points[i].x - points[start].x,
+          points[i].y - points[start].y,
+        );
       } else {
-        const t = ((points[i].x - points[start].x) * dx + (points[i].y - points[start].y) * dy) / lenSq;
+        const t =
+          ((points[i].x - points[start].x) * dx +
+            (points[i].y - points[start].y) * dy) /
+          lenSq;
         const px = points[start].x + t * dx;
         const py = points[start].y + t * dy;
         d = Math.hypot(points[i].x - px, points[i].y - py);
       }
-      if (d > maxDist) { maxDist = d; maxIdx = i; }
+      if (d > maxDist) {
+        maxDist = d;
+        maxIdx = i;
+      }
     }
     if (maxDist > epsilon) {
       keep[maxIdx] = 1;
@@ -308,14 +358,15 @@ export function rdpSimplify(
 /** Chaikin corner-cutting subdivision. Each iteration produces a smoother curve. */
 export function chaikinSmooth(
   points: { x: number; y: number }[],
-  iterations: number
+  iterations: number,
 ): { x: number; y: number }[] {
   if (iterations <= 0 || points.length < 3) return [...points];
   let pts = points;
   for (let iter = 0; iter < iterations; iter++) {
     const next: { x: number; y: number }[] = [pts[0]]; // keep first point
     for (let i = 0; i < pts.length - 1; i++) {
-      const p0 = pts[i], p1 = pts[i + 1];
+      const p0 = pts[i],
+        p1 = pts[i + 1];
       next.push({ x: p0.x * 0.75 + p1.x * 0.25, y: p0.y * 0.75 + p1.y * 0.25 });
       next.push({ x: p0.x * 0.25 + p1.x * 0.75, y: p0.y * 0.25 + p1.y * 0.75 });
     }
@@ -328,7 +379,7 @@ export function chaikinSmooth(
 /** Smooth a freehand-drawn rail path. smoothness 0..1 maps to RDP epsilon + Chaikin iterations. */
 export function smoothDrawnRail(
   rawPoints: { x: number; y: number }[],
-  smoothness: number
+  smoothness: number,
 ): { x: number; y: number }[] {
   if (rawPoints.length < 2) return [...rawPoints];
   const s = Math.max(0, Math.min(1, smoothness));
@@ -339,19 +390,27 @@ export function smoothDrawnRail(
   return pts;
 }
 
-function getSmoothSegment(segments: SmoothSegment[] | undefined, keyA: string, keyB: string): SmoothSegment | undefined {
+function getSmoothSegment(
+  segments: SmoothSegment[] | undefined,
+  keyA: string,
+  keyB: string,
+): SmoothSegment | undefined {
   if (!segments) return undefined;
   return segments.find(
-    s =>
-      (s.startKey === keyA && s.endKey === keyB) || (s.startKey === keyB && s.endKey === keyA)
+    (s) =>
+      (s.startKey === keyA && s.endKey === keyB) ||
+      (s.startKey === keyB && s.endKey === keyA),
   );
 }
 
 /** Expand an ordered list of tile keys into world points, inserting smooth segment geometry where defined */
 export function expandPathWithSmoothSegments(
   orderedKeys: string[],
-  smoothSegments: SmoothSegment[] | undefined
-): { points: { x: number; y: number }[]; keyToLastIndex: Record<string, number> } {
+  smoothSegments: SmoothSegment[] | undefined,
+): {
+  points: { x: number; y: number }[];
+  keyToLastIndex: Record<string, number>;
+} {
   const points: { x: number; y: number }[] = [];
   const keyToLastIndex: Record<string, number> = {};
   if (orderedKeys.length === 0) return { points, keyToLastIndex };
@@ -366,10 +425,14 @@ export function expandPathWithSmoothSegments(
       // Always sample using the segment's stored direction so the arc shape is stable
       const worldStart = keyToWorldPt(seg.startKey);
       const worldEnd = keyToWorldPt(seg.endKey);
-      const worldPivot = { x: seg.pivotGx * GRID_SIZE, y: seg.pivotGy * GRID_SIZE };
-      let arcPts = seg.type === 'circular'
-        ? sampleCircularArcWorld(worldStart, worldEnd, worldPivot)
-        : sampleBezierWorld(worldStart, worldEnd, worldPivot);
+      const worldPivot = {
+        x: seg.pivotGx * GRID_SIZE,
+        y: seg.pivotGy * GRID_SIZE,
+      };
+      let arcPts =
+        seg.type === "circular"
+          ? sampleCircularArcWorld(worldStart, worldEnd, worldPivot)
+          : sampleBezierWorld(worldStart, worldEnd, worldPivot);
       // If walk direction is opposite to stored direction, reverse the sampled points
       const reversed = seg.startKey === keyB;
       if (reversed) arcPts = [...arcPts].reverse();
@@ -386,23 +449,23 @@ export function expandPathWithSmoothSegments(
 
 export function saveCustomLevel(level: EditorLevel) {
   const levels = loadCustomLevels();
-  const idx = levels.findIndex(l => l.name === level.name);
+  const idx = levels.findIndex((l) => l.name === level.name);
   if (idx >= 0) levels[idx] = level;
   else levels.push(level);
-  localStorage.setItem('cable-riders-custom-levels', JSON.stringify(levels));
+  localStorage.setItem("cable-riders-custom-levels", JSON.stringify(levels));
 }
 
 export function loadCustomLevels(): EditorLevel[] {
   try {
-    const raw = localStorage.getItem('cable-riders-custom-levels');
+    const raw = localStorage.getItem("cable-riders-custom-levels");
     if (raw) return JSON.parse(raw);
   } catch {}
   return [];
 }
 
 export function deleteCustomLevel(name: string) {
-  const levels = loadCustomLevels().filter(l => l.name !== name);
-  localStorage.setItem('cable-riders-custom-levels', JSON.stringify(levels));
+  const levels = loadCustomLevels().filter((l) => l.name !== name);
+  localStorage.setItem("cable-riders-custom-levels", JSON.stringify(levels));
 }
 
 // Walk one connected component from startKey, return ordered keys.
@@ -411,7 +474,7 @@ export function deleteCustomLevel(name: string) {
 function walkRailComponent(
   startKey: string,
   connections: Record<string, Set<string>>,
-  crossingKeys?: Set<string>
+  crossingKeys?: Set<string>,
 ): string[] {
   const visited = new Set<string>();
   const ordered: string[] = [];
@@ -423,7 +486,8 @@ function walkRailComponent(
     if (!neighbors) break;
 
     let next: string | null = null;
-    const isCrossing = crossingKeys && crossingKeys.has(current) && neighbors.size > 2;
+    const isCrossing =
+      crossingKeys && crossingKeys.has(current) && neighbors.size > 2;
 
     if (isCrossing && ordered.length >= 2) {
       // Direction-aware: pick neighbor that continues "straight through"
@@ -471,7 +535,7 @@ function walkRailComponent(
 function getRailComponents(
   railKeys: string[],
   connections: Record<string, Set<string>>,
-  crossingKeys?: Set<string>
+  crossingKeys?: Set<string>,
 ): string[][] {
   const seen = new Set<string>();
   const components: string[][] = [];
@@ -496,21 +560,36 @@ export function convertLevelToGameData(
   connections?: Record<string, Set<string>>,
   smoothSegments?: SmoothSegment[],
   freeLines?: FreeLineSegment[],
-  obstacleParams?: Record<string, ObstacleParams>
+  obstacleParams?: Record<string, ObstacleParams>,
 ): {
   railPoints: { x: number; y: number }[];
   allSegments: { x: number; y: number }[][];
   /** Stable segment id per index (so Line 2 doesn't break when start tile moves) */
   segmentIdByIndex: string[];
-  obstacles: { tileType: string; gx: number; gy: number; params: ObstacleParams }[];
+  obstacles: {
+    tileType: string;
+    gx: number;
+    gy: number;
+    params: ObstacleParams;
+  }[];
   endTileWorldPos: { x: number; y: number } | null;
   isLoop: boolean;
 } {
-  const obstacles: { tileType: string; gx: number; gy: number; params: ObstacleParams }[] = [];
+  const obstacles: {
+    tileType: string;
+    gx: number;
+    gy: number;
+    params: ObstacleParams;
+  }[] = [];
   const railKeys: string[] = [];
 
   for (const [key, type] of Object.entries(tiles)) {
-    if (type === 'rail' || type === 'rail_start' || type === 'rail_end' || type === 'rail_crossing') {
+    if (
+      type === "rail" ||
+      type === "rail_start" ||
+      type === "rail_end" ||
+      type === "rail_crossing"
+    ) {
       railKeys.push(key);
     } else if (obstacleDefMap.has(type)) {
       const [gx, gy] = parseTileKey(key);
@@ -521,23 +600,37 @@ export function convertLevelToGameData(
   }
 
   if (railKeys.length < 2) {
-    const rawRail = railKeys.map(k => keyToWorld(k));
+    const rawRail = railKeys.map((k) => keyToWorld(k));
     const segmentIdByIndex = rawRail.length > 0 ? [componentId(railKeys)] : [];
-    return { railPoints: rawRail, allSegments: rawRail.length > 0 ? [rawRail] : [], segmentIdByIndex, obstacles, endTileWorldPos: null, isLoop: false };
+    return {
+      railPoints: rawRail,
+      allSegments: rawRail.length > 0 ? [rawRail] : [],
+      segmentIdByIndex,
+      obstacles,
+      endTileWorldPos: null,
+      isLoop: false,
+    };
   }
 
-  const conns = connections && Object.keys(connections).length > 0 ? connections : ({} as Record<string, Set<string>>);
+  const conns =
+    connections && Object.keys(connections).length > 0
+      ? connections
+      : ({} as Record<string, Set<string>>);
   // Build set of crossing tile keys for direction-aware traversal
   const crossingKeys = new Set<string>();
   for (const key of railKeys) {
-    if (tiles[key] === 'rail_crossing') crossingKeys.add(key);
+    if (tiles[key] === "rail_crossing") crossingKeys.add(key);
   }
   const hasCrossings = crossingKeys.size > 0;
-  const components = getRailComponents(railKeys, conns, hasCrossings ? crossingKeys : undefined);
+  const components = getRailComponents(
+    railKeys,
+    conns,
+    hasCrossings ? crossingKeys : undefined,
+  );
 
   // Hoist start/end keys so they're available in the freeLine post-processing block
-  const startKey = railKeys.find(k => tiles[k] === 'rail_start');
-  const endKey = railKeys.find(k => tiles[k] === 'rail_end');
+  const startKey = railKeys.find((k) => tiles[k] === "rail_start");
+  const endKey = railKeys.find((k) => tiles[k] === "rail_end");
 
   let railPoints: { x: number; y: number }[] = [];
   // End tile world position for proximity-based trigger (no fragile index tracking)
@@ -549,12 +642,19 @@ export function convertLevelToGameData(
   if (conns && Object.keys(conns).length > 0) {
     // Direction-neutral: prefer any dead-end tile (1 connection) for walk start.
     // rail_start only influences the final orientation step (reversing so index 0 is near spawn).
-    const walkStart = railKeys.find(k => conns[k] && conns[k].size === 1)
-      || startKey
-      || railKeys[0];
+    const walkStart =
+      railKeys.find((k) => conns[k] && conns[k].size === 1) ||
+      startKey ||
+      railKeys[0];
 
-    const startOrdered = walkRailComponent(walkStart, conns, hasCrossings ? crossingKeys : undefined);
-    isLoop = startOrdered.length > 2 && startOrdered[0] === startOrdered[startOrdered.length - 1];
+    const startOrdered = walkRailComponent(
+      walkStart,
+      conns,
+      hasCrossings ? crossingKeys : undefined,
+    );
+    isLoop =
+      startOrdered.length > 2 &&
+      startOrdered[0] === startOrdered[startOrdered.length - 1];
     const expanded = expandPathWithSmoothSegments(startOrdered, smoothSegments);
     railPoints = expanded.points;
 
@@ -562,8 +662,11 @@ export function convertLevelToGameData(
     segmentIdByIndex.push(componentId(startOrdered));
     const startSet = new Set(startOrdered);
     for (const comp of components) {
-      if (comp.some(k => startSet.has(k))) continue;
-      const { points: pts } = expandPathWithSmoothSegments(comp, smoothSegments);
+      if (comp.some((k) => startSet.has(k))) continue;
+      const { points: pts } = expandPathWithSmoothSegments(
+        comp,
+        smoothSegments,
+      );
       // Include even single-tile components so Line 2 can reliably
       // target hand-placed isolated rail tiles.
       if (pts.length >= 1) {
@@ -603,33 +706,55 @@ export function convertLevelToGameData(
       }
     }
 
-    const resolveChainOf = (segId: string): [string, { x: number; y: number }[]] | null => {
+    const resolveChainOf = (
+      segId: string,
+    ): [string, { x: number; y: number }[]] | null => {
       const cid = segToChain[segId];
       return cid && chainById[cid] ? [cid, chainById[cid]] : null;
     };
 
     /** Which end of `pts` is closer to `world`? Returns the endpoint position. Reverses `pts` in-place so the matched end is always at pts[last]. */
-    const orientChainToward = (pts: { x: number; y: number }[], world: { x: number; y: number }): { x: number; y: number } => {
+    const orientChainToward = (
+      pts: { x: number; y: number }[],
+      world: { x: number; y: number },
+    ): { x: number; y: number } => {
       const dFirst = Math.hypot(world.x - pts[0].x, world.y - pts[0].y);
-      const dLast = Math.hypot(world.x - pts[pts.length - 1].x, world.y - pts[pts.length - 1].y);
+      const dLast = Math.hypot(
+        world.x - pts[pts.length - 1].x,
+        world.y - pts[pts.length - 1].y,
+      );
       if (dFirst < dLast) pts.reverse(); // attach is at pts[0] → flip so it's at pts[last]
       return pts[pts.length - 1];
     };
 
     /** Orient `pts` so the point closest to `world` is at pts[0] (for target joining). */
-    const orientChainAwayFrom = (pts: { x: number; y: number }[], world: { x: number; y: number }) => {
+    const orientChainAwayFrom = (
+      pts: { x: number; y: number }[],
+      world: { x: number; y: number },
+    ) => {
       const dFirst = Math.hypot(world.x - pts[0].x, world.y - pts[0].y);
-      const dLast = Math.hypot(world.x - pts[pts.length - 1].x, world.y - pts[pts.length - 1].y);
+      const dLast = Math.hypot(
+        world.x - pts[pts.length - 1].x,
+        world.y - pts[pts.length - 1].y,
+      );
       if (dLast < dFirst) pts.reverse(); // match is at pts[last] → flip so it's at pts[0]
     };
 
-    const mergeTarget = (chainId: string, pts: { x: number; y: number }[], endWorld: { x: number; y: number }, mergeChainId: string) => {
+    const mergeTarget = (
+      chainId: string,
+      pts: { x: number; y: number }[],
+      endWorld: { x: number; y: number },
+      mergeChainId: string,
+    ) => {
       const mPts = chainById[mergeChainId];
       if (!mPts) return;
       // Orient target so the join point is at mPts[0]
       orientChainAwayFrom(mPts, endWorld);
-      // Append target (skip mPts[0] = shared join point)
-      for (let i = 1; i < mPts.length; i++) pts.push(mPts[i]);
+      // Append target — only skip mPts[0] if it's actually a duplicate of the last appended point
+      const last = pts[pts.length - 1];
+      const gap = Math.hypot(mPts[0].x - last.x, mPts[0].y - last.y);
+      const startIdx = gap < 4 ? 1 : 0;
+      for (let i = startIdx; i < mPts.length; i++) pts.push(mPts[i]);
       for (const [sid, cid] of Object.entries(segToChain)) {
         if (cid === mergeChainId) segToChain[sid] = chainId;
       }
@@ -639,8 +764,12 @@ export function convertLevelToGameData(
     for (const fl of freeLines) {
       const attachWorld = fl.attachWorld ?? fl.end;
 
+      /* console.log('[FL-DEBUG] Processing free line:', JSON.stringify({ attachSegId: fl.attach.segmentId, attachWorld, end: fl.end, hasTarget: !!fl.target, targetSegId: fl.target?.segmentId }));
+      console.log('[FL-DEBUG] chainById keys:', Object.keys(chainById), 'segToChain:', JSON.stringify(segToChain)); */
+
       const res = resolveChainOf(fl.attach.segmentId);
       if (!res) {
+        /* console.log('[FL-DEBUG] resolveChainOf FAILED for attach segmentId:', fl.attach.segmentId); */
         // Attach segment was erased — create an orphan chain from the bridge
         if (!fl.attachWorld) continue;
         let endWorld = fl.end;
@@ -651,16 +780,24 @@ export function convertLevelToGameData(
             const [tgtChainId, tgtPts] = tgtRes;
             if (tgtChainId && tgtPts.length > 0) {
               // Use whichever end of target chain is closer to fl.end
-              const dFirst = Math.hypot(fl.end.x - tgtPts[0].x, fl.end.y - tgtPts[0].y);
-              const dLast = Math.hypot(fl.end.x - tgtPts[tgtPts.length - 1].x, fl.end.y - tgtPts[tgtPts.length - 1].y);
-              endWorld = dFirst <= dLast ? tgtPts[0] : tgtPts[tgtPts.length - 1];
+              const dFirst = Math.hypot(
+                fl.end.x - tgtPts[0].x,
+                fl.end.y - tgtPts[0].y,
+              );
+              const dLast = Math.hypot(
+                fl.end.x - tgtPts[tgtPts.length - 1].x,
+                fl.end.y - tgtPts[tgtPts.length - 1].y,
+              );
+              endWorld =
+                dFirst <= dLast ? tgtPts[0] : tgtPts[tgtPts.length - 1];
               floatMergeChainId = tgtChainId;
             }
           }
         }
-        const raw = fl.waypoints && fl.waypoints.length > 0
-          ? samplePolylineWorld([fl.attachWorld, ...fl.waypoints, endWorld])
-          : sampleLineWorld(fl.attachWorld, endWorld);
+        const raw =
+          fl.waypoints && fl.waypoints.length > 0
+            ? samplePolylineWorld([fl.attachWorld, ...fl.waypoints, endWorld])
+            : sampleLineWorld(fl.attachWorld, endWorld);
         if (raw.length < 2) continue;
         raw[0] = fl.attachWorld;
         raw[raw.length - 1] = endWorld;
@@ -683,27 +820,44 @@ export function convertLevelToGameData(
 
       if (fl.target) {
         const tgtRes = resolveChainOf(fl.target.segmentId);
+        /* console.log('[FL-DEBUG] target resolve:', fl.target.segmentId, '→', tgtRes ? tgtRes[0] : 'NULL'); */
         if (tgtRes) {
           const [tgtChainId, tgtPts] = tgtRes;
+          /* console.log('[FL-DEBUG] tgtChainId:', tgtChainId, 'chainId:', chainId, 'same?', tgtChainId === chainId, 'tgtPts.length:', tgtPts.length); */
           if (tgtChainId !== chainId && tgtPts.length > 0) {
-            const dFirst = Math.hypot(fl.end.x - tgtPts[0].x, fl.end.y - tgtPts[0].y);
-            const dLast = Math.hypot(fl.end.x - tgtPts[tgtPts.length - 1].x, fl.end.y - tgtPts[tgtPts.length - 1].y);
+            const dFirst = Math.hypot(
+              fl.end.x - tgtPts[0].x,
+              fl.end.y - tgtPts[0].y,
+            );
+            const dLast = Math.hypot(
+              fl.end.x - tgtPts[tgtPts.length - 1].x,
+              fl.end.y - tgtPts[tgtPts.length - 1].y,
+            );
             endWorld = dFirst <= dLast ? tgtPts[0] : tgtPts[tgtPts.length - 1];
             mergeChainId = tgtChainId;
+            /* console.log('[FL-DEBUG] WILL MERGE target chain:', mergeChainId); */
+          } else {
+            /* console.log('[FL-DEBUG] SKIP merge: same chain or empty target'); */
           }
         }
+      } else {
+        /* console.log('[FL-DEBUG] No target — bridge extends to fl.end without merge'); */
       }
 
       // Build bridge — use waypoints polyline if this is a drawn rail
-      const raw = fl.waypoints && fl.waypoints.length > 0
-        ? samplePolylineWorld([startPt, ...fl.waypoints, endWorld])
-        : sampleLineWorld(startPt, endWorld);
+      const raw =
+        fl.waypoints && fl.waypoints.length > 0
+          ? samplePolylineWorld([startPt, ...fl.waypoints, endWorld])
+          : sampleLineWorld(startPt, endWorld);
       if (raw.length < 2) continue;
       raw[0] = startPt;
       raw[raw.length - 1] = endWorld;
 
-      // Always append bridge (pts[last] = startPt = raw[0], so skip raw[0])
-      for (let i = 1; i < raw.length; i++) pts.push(raw[i]);
+      // Append bridge — only skip raw[0] if it's actually a duplicate of the last appended point
+      const lastPt = pts[pts.length - 1];
+      const bridgeGap = Math.hypot(raw[0].x - lastPt.x, raw[0].y - lastPt.y);
+      const bridgeStart = bridgeGap < 4 ? 1 : 0;
+      for (let i = bridgeStart; i < raw.length; i++) pts.push(raw[i]);
 
       // Merge target chain if the bridge connects to a different chain
       if (mergeChainId) {
@@ -727,14 +881,21 @@ export function convertLevelToGameData(
     }
     railPoints = newAllSegs[0] ?? allSegments[0] ?? [];
     allSegments.splice(0, allSegments.length, ...newAllSegs);
+    /* console.log('[FL-DEBUG] Final: chains:', newAllSegs.length, 'railPoints.length:', railPoints.length, 'segment lengths:', newAllSegs.map(s => s.length)); */
 
     // Final orientation: ensure railPoints[0] is near rail_start tile.
     // Chains are directionless — riding direction is determined solely by
     // where the player spawns (rail_start).
     if (startKey && railPoints.length >= 2) {
       const startWorld = keyToWorld(startKey);
-      const dFirst = Math.hypot(railPoints[0].x - startWorld.x, railPoints[0].y - startWorld.y);
-      const dLast = Math.hypot(railPoints[railPoints.length - 1].x - startWorld.x, railPoints[railPoints.length - 1].y - startWorld.y);
+      const dFirst = Math.hypot(
+        railPoints[0].x - startWorld.x,
+        railPoints[0].y - startWorld.y,
+      );
+      const dLast = Math.hypot(
+        railPoints[railPoints.length - 1].x - startWorld.x,
+        railPoints[railPoints.length - 1].y - startWorld.y,
+      );
       if (dLast < dFirst) {
         railPoints.reverse();
         allSegments[0] = railPoints;
@@ -748,10 +909,16 @@ export function convertLevelToGameData(
       if (cid !== mainChainId) newSegIds.push(cid);
     }
     segmentIdByIndex.splice(0, segmentIdByIndex.length, ...newSegIds);
-
   }
 
-  return { railPoints, allSegments, segmentIdByIndex, obstacles, endTileWorldPos, isLoop };
+  return {
+    railPoints,
+    allSegments,
+    segmentIdByIndex,
+    obstacles,
+    endTileWorldPos,
+    isLoop,
+  };
 }
 
 // ─── Unified Segment Builders ────────────────────────────────────────────────
@@ -763,7 +930,7 @@ export function buildIndividualSegments(
   tiles: Record<string, TileType>,
   connections: Record<string, Set<string>>,
   smoothSegments: SmoothSegment[],
-  freeLines: FreeLineSegment[]
+  freeLines: FreeLineSegment[],
 ): IndividualRailSegment[] {
   const result: IndividualRailSegment[] = [];
   let idCounter = 0;
@@ -771,7 +938,12 @@ export function buildIndividualSegments(
   // ── Tile-based segments ──────────────────────────────────────────────────
   const railKeys: string[] = [];
   for (const [key, type] of Object.entries(tiles)) {
-    if (type === 'rail' || type === 'rail_start' || type === 'rail_end' || type === 'rail_crossing') {
+    if (
+      type === "rail" ||
+      type === "rail_start" ||
+      type === "rail_end" ||
+      type === "rail_crossing"
+    ) {
       railKeys.push(key);
     }
   }
@@ -780,23 +952,26 @@ export function buildIndividualSegments(
   const smoothLookup = new Map<string, { seg: SmoothSegment; index: number }>();
   for (let i = 0; i < smoothSegments.length; i++) {
     const s = smoothSegments[i];
-    const pairKey = [s.startKey, s.endKey].sort().join('|');
+    const pairKey = [s.startKey, s.endKey].sort().join("|");
     smoothLookup.set(pairKey, { seg: s, index: i });
   }
   const findSmooth = (a: string, b: string) =>
-    smoothLookup.get([a, b].sort().join('|'));
+    smoothLookup.get([a, b].sort().join("|"));
 
   if (railKeys.length > 0) {
     const crossingKeys = new Set<string>();
     for (const key of railKeys) {
-      if (tiles[key] === 'rail_crossing') crossingKeys.add(key);
+      if (tiles[key] === "rail_crossing") crossingKeys.add(key);
     }
     const hasCrossings = crossingKeys.size > 0;
-    const conns = Object.keys(connections).length > 0
-      ? connections
-      : {} as Record<string, Set<string>>;
+    const conns =
+      Object.keys(connections).length > 0
+        ? connections
+        : ({} as Record<string, Set<string>>);
     const components = getRailComponents(
-      railKeys, conns, hasCrossings ? crossingKeys : undefined
+      railKeys,
+      conns,
+      hasCrossings ? crossingKeys : undefined,
     );
 
     for (const comp of components) {
@@ -807,7 +982,7 @@ export function buildIndividualSegments(
         const pt = keyToWorld(comp[0]);
         result.push({
           id: `seg_${idCounter++}`,
-          kind: 'tile_chain',
+          kind: "tile_chain",
           points: [pt],
           snapA: pt,
           snapB: pt,
@@ -829,10 +1004,10 @@ export function buildIndividualSegments(
         if (smooth) {
           // Flush accumulated tile chain
           if (chainKeys.length >= 2) {
-            const points = chainKeys.map(k => keyToWorld(k));
+            const points = chainKeys.map((k) => keyToWorld(k));
             result.push({
               id: `seg_${idCounter++}`,
-              kind: 'tile_chain',
+              kind: "tile_chain",
               points,
               snapA: points[0],
               snapB: points[points.length - 1],
@@ -844,22 +1019,32 @@ export function buildIndividualSegments(
           const { seg, index } = smooth;
           const wStart = keyToWorld(seg.startKey);
           const wEnd = keyToWorld(seg.endKey);
-          const wPivot = { x: seg.pivotGx * GRID_SIZE, y: seg.pivotGy * GRID_SIZE };
-          let arcPts = seg.type === 'circular'
-            ? sampleCircularArcWorld(wStart, wEnd, wPivot)
-            : sampleBezierWorld(wStart, wEnd, wPivot);
+          const wPivot = {
+            x: seg.pivotGx * GRID_SIZE,
+            y: seg.pivotGy * GRID_SIZE,
+          };
+          let arcPts =
+            seg.type === "circular"
+              ? sampleCircularArcWorld(wStart, wEnd, wPivot)
+              : sampleBezierWorld(wStart, wEnd, wPivot);
 
           // Ensure arc direction matches walk direction
           if (arcPts.length >= 2) {
             const prevWorld = keyToWorld(prevKey);
-            const dFirst = Math.hypot(arcPts[0].x - prevWorld.x, arcPts[0].y - prevWorld.y);
-            const dLast = Math.hypot(arcPts[arcPts.length - 1].x - prevWorld.x, arcPts[arcPts.length - 1].y - prevWorld.y);
+            const dFirst = Math.hypot(
+              arcPts[0].x - prevWorld.x,
+              arcPts[0].y - prevWorld.y,
+            );
+            const dLast = Math.hypot(
+              arcPts[arcPts.length - 1].x - prevWorld.x,
+              arcPts[arcPts.length - 1].y - prevWorld.y,
+            );
             if (dLast < dFirst) arcPts = [...arcPts].reverse();
           }
 
           result.push({
             id: `seg_${idCounter++}`,
-            kind: 'smooth_curve',
+            kind: "smooth_curve",
             points: arcPts,
             snapA: arcPts[0],
             snapB: arcPts[arcPts.length - 1],
@@ -877,10 +1062,10 @@ export function buildIndividualSegments(
       // Flush remaining tile chain (skip single leftover tiles — they're
       // already represented as a smooth curve's snappoint)
       if (chainKeys.length >= 2) {
-        const points = chainKeys.map(k => keyToWorld(k));
+        const points = chainKeys.map((k) => keyToWorld(k));
         result.push({
           id: `seg_${idCounter++}`,
-          kind: 'tile_chain',
+          kind: "tile_chain",
           points,
           snapA: points[0],
           snapB: points[points.length - 1],
@@ -905,7 +1090,7 @@ export function buildIndividualSegments(
 
     result.push({
       id: `seg_${idCounter++}`,
-      kind: fl.rawDrawnPoints ? 'drawn_rail' : 'free_line',
+      kind: fl.rawDrawnPoints ? "drawn_rail" : "free_line",
       points,
       snapA: points[0],
       snapB: points[points.length - 1],
@@ -918,12 +1103,12 @@ export function buildIndividualSegments(
 
 /** Group individual segments into continuous segments by matching snappoints. */
 export function buildContinuousSegments(
-  individualSegments: IndividualRailSegment[]
+  individualSegments: IndividualRailSegment[],
 ): ContinuousRailSegment[] {
   const n = individualSegments.length;
   if (n === 0) return [];
 
-  const SNAP_TOLERANCE = 2; // px
+  const SNAP_TOLERANCE = 8; // px
 
   // Build adjacency based on snappoint proximity
   const adj: Set<number>[] = Array.from({ length: n }, () => new Set());
@@ -932,10 +1117,14 @@ export function buildContinuousSegments(
     for (let j = i + 1; j < n; j++) {
       const sj = individualSegments[j];
       if (
-        Math.hypot(si.snapA.x - sj.snapA.x, si.snapA.y - sj.snapA.y) < SNAP_TOLERANCE ||
-        Math.hypot(si.snapA.x - sj.snapB.x, si.snapA.y - sj.snapB.y) < SNAP_TOLERANCE ||
-        Math.hypot(si.snapB.x - sj.snapA.x, si.snapB.y - sj.snapA.y) < SNAP_TOLERANCE ||
-        Math.hypot(si.snapB.x - sj.snapB.x, si.snapB.y - sj.snapB.y) < SNAP_TOLERANCE
+        Math.hypot(si.snapA.x - sj.snapA.x, si.snapA.y - sj.snapA.y) <
+          SNAP_TOLERANCE ||
+        Math.hypot(si.snapA.x - sj.snapB.x, si.snapA.y - sj.snapB.y) <
+          SNAP_TOLERANCE ||
+        Math.hypot(si.snapB.x - sj.snapA.x, si.snapB.y - sj.snapA.y) <
+          SNAP_TOLERANCE ||
+        Math.hypot(si.snapB.x - sj.snapB.x, si.snapB.y - sj.snapB.y) <
+          SNAP_TOLERANCE
       ) {
         adj[i].add(j);
         adj[j].add(i);
@@ -966,7 +1155,7 @@ export function buildContinuousSegments(
 
     result.push({
       id: `cont_${contId++}`,
-      individualIds: component.map(idx => individualSegments[idx].id),
+      individualIds: component.map((idx) => individualSegments[idx].id),
     });
   }
 
@@ -975,14 +1164,14 @@ export function buildContinuousSegments(
 
 /** Extract all snappoints from individual segments. */
 export function getSnapPoints(
-  individualSegments: IndividualRailSegment[]
+  individualSegments: IndividualRailSegment[],
 ): SnapPoint[] {
   const result: SnapPoint[] = [];
   for (const seg of individualSegments) {
-    result.push({ segmentId: seg.id, point: seg.snapA, endpoint: 'A' });
+    result.push({ segmentId: seg.id, point: seg.snapA, endpoint: "A" });
     // Only add snapB if distinct from snapA (skip degenerate single-point segments)
     if (Math.hypot(seg.snapA.x - seg.snapB.x, seg.snapA.y - seg.snapB.y) > 1) {
-      result.push({ segmentId: seg.id, point: seg.snapB, endpoint: 'B' });
+      result.push({ segmentId: seg.id, point: seg.snapB, endpoint: "B" });
     }
   }
   return result;
