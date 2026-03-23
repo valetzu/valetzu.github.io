@@ -1059,8 +1059,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         } else {
           const points = generateArc(arcCenter.gx, arcCenter.gy, gx, gy);
           if (points.length >= 2) {
-            const worldPts = points.map(p => ({ x: (p.gx + 0.5) * GRID_SIZE, y: (p.gy + 0.5) * GRID_SIZE }));
-            setSegments(prev => [...prev, { points: worldPts }]);
+            const worldPts = filterOccupiedPoints(points.map(p => ({ x: (p.gx + 0.5) * GRID_SIZE, y: (p.gy + 0.5) * GRID_SIZE })));
+            if (worldPts.length >= 2) setSegments(prev => [...prev, { points: worldPts }]);
           }
           setArcCenter(null);
           setArcPreview([]);
@@ -1101,8 +1101,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         } else {
           const points = generateCircleRail(arcCenter.gx, arcCenter.gy, gx, gy);
           if (points.length >= 2) {
-            const worldPts = points.map(p => ({ x: (p.gx + 0.5) * GRID_SIZE, y: (p.gy + 0.5) * GRID_SIZE }));
-            setSegments(prev => [...prev, { points: worldPts }]);
+            const worldPts = filterOccupiedPoints(points.map(p => ({ x: (p.gx + 0.5) * GRID_SIZE, y: (p.gy + 0.5) * GRID_SIZE })));
+            if (worldPts.length >= 2) setSegments(prev => [...prev, { points: worldPts }]);
           }
           setArcCenter(null);
           setArcPreview([]);
@@ -1116,8 +1116,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         } else {
           const points = generateLine(lineStart, { gx, gy });
           if (points.length >= 2) {
-            const worldPts = points.map(p => ({ x: (p.gx + 0.5) * GRID_SIZE, y: (p.gy + 0.5) * GRID_SIZE }));
-            setSegments(prev => [...prev, { points: worldPts }]);
+            const worldPts = filterOccupiedPoints(points.map(p => ({ x: (p.gx + 0.5) * GRID_SIZE, y: (p.gy + 0.5) * GRID_SIZE })));
+            if (worldPts.length >= 2) setSegments(prev => [...prev, { points: worldPts }]);
           }
           setLineStart(null);
           setLinePreview([]);
@@ -1437,6 +1437,20 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     }
   };
 
+  /** Check if a world point overlaps an existing rail segment point within the same grid cell. */
+  const isWorldPtOccupied = (wx: number, wy: number) => {
+    const halfGrid = GRID_SIZE * 0.5;
+    return segments.some(seg =>
+      seg.points.some(p =>
+        Math.abs(p.x - wx) < halfGrid && Math.abs(p.y - wy) < halfGrid
+      )
+    );
+  };
+
+  /** Filter out world points that overlap existing rail (for shape tools). */
+  const filterOccupiedPoints = (pts: { x: number; y: number }[]) =>
+    pts.filter(p => !isWorldPtOccupied(p.x, p.y));
+
   const placeTile = (gx: number, gy: number) => {
     const key = tileKey(gx, gy);
     const worldPt = { x: (gx + 0.5) * GRID_SIZE, y: (gy + 0.5) * GRID_SIZE };
@@ -1447,6 +1461,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       setObstacleParams(prev => { const next = { ...prev }; delete next[key]; return next; });
       setObstacles(prev => { const next = { ...prev }; delete next[key]; return next; });
     } else if (tool === 'rail' || tool === 'rail_crossing') {
+      // Prevent placing on a tile that already has rail passing through it
+      if (isWorldPtOccupied(worldPt.x, worldPt.y)) return;
       // Rail placement: extend existing segment endpoint or create new segment
       const lastRef = lastPlacedRailRef.current;
       if (lastRef) {
