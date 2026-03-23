@@ -1,22 +1,42 @@
-import { useState } from 'react';
-import { loadSettings, updateSetting, GameSettings } from '@/game/settings';
-import { musicManager } from '@/game/musicManager';
+import { useState } from "react";
+import { loadSettings, updateSetting, GameSettings } from "@/game/settings";
+import { musicManager } from "@/game/musicManager";
+
+export type SettingsTab = "sound" | "editor";
 
 interface SettingsMenuProps {
   onClose: () => void;
+  initialTab?: SettingsTab;
 }
 
-type SettingsTab = 'sound';
+const MAX_SNAP = 250;
+const MIN_SNAP = 5;
 
-export default function SettingsMenu({ onClose }: SettingsMenuProps) {
+export default function SettingsMenu({
+  onClose,
+  initialTab = "sound",
+}: SettingsMenuProps) {
   const [settings, setSettings] = useState<GameSettings>(loadSettings);
-  const [activeTab, setActiveTab] = useState<SettingsTab>('sound');
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
 
   const handleMusicVolume = (vol: number) => {
-    const next = updateSetting('musicVolume', vol);
+    const next = updateSetting("musicVolume", vol);
     setSettings(next);
     musicManager.setVolume(vol);
   };
+
+  const handleSnapRadius = (val: number) => {
+    const clamped = Math.max(MIN_SNAP, Math.min(MAX_SNAP, val));
+    const next = updateSetting("snapRadius", clamped);
+    setSettings(next);
+  };
+
+  const tabClass = (tab: SettingsTab) =>
+    `px-6 py-3 font-bold text-sm transition-colors ${
+      activeTab === tab
+        ? "text-game-accent border-b-2 border-game-accent"
+        : "text-game-subtitle hover:text-game-title"
+    }`;
 
   return (
     <div className="fixed inset-0 flex items-center justify-center z-50 bg-black/60 backdrop-blur-sm">
@@ -35,24 +55,28 @@ export default function SettingsMenu({ onClose }: SettingsMenuProps) {
         {/* Tabs */}
         <div className="flex border-b border-game-card-border">
           <button
-            onClick={() => setActiveTab('sound')}
-            className={`px-6 py-3 font-bold text-sm transition-colors ${
-              activeTab === 'sound'
-                ? 'text-game-accent border-b-2 border-game-accent'
-                : 'text-game-subtitle hover:text-game-title'
-            }`}
+            onClick={() => setActiveTab("sound")}
+            className={tabClass("sound")}
           >
             🔊 Sound
+          </button>
+          <button
+            onClick={() => setActiveTab("editor")}
+            className={tabClass("editor")}
+          >
+            🛤️ Level Editor
           </button>
         </div>
 
         {/* Content */}
         <div className="p-6 space-y-5">
-          {activeTab === 'sound' && (
+          {activeTab === "sound" && (
             <>
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="font-bold text-game-title">Music Volume</label>
+                  <label className="font-bold text-game-title">
+                    Music Volume
+                  </label>
                   <span className="text-game-subtitle text-sm tabular-nums">
                     {Math.round(settings.musicVolume * 100)}%
                   </span>
@@ -63,12 +87,45 @@ export default function SettingsMenu({ onClose }: SettingsMenuProps) {
                   max={1}
                   step={0.01}
                   value={settings.musicVolume}
-                  onChange={e => handleMusicVolume(parseFloat(e.target.value))}
+                  onChange={(e) =>
+                    handleMusicVolume(parseFloat(e.target.value))
+                  }
                   className="w-full h-2 rounded-full appearance-none cursor-pointer"
                   style={{
                     background: `linear-gradient(to right, var(--game-accent) ${settings.musicVolume * 100}%, var(--game-bar-bg) ${settings.musicVolume * 100}%)`,
                   }}
                 />
+              </div>
+            </>
+          )}
+
+          {activeTab === "editor" && (
+            <>
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="font-bold text-game-title">
+                    Snap Radius
+                  </label>
+                  <span className="text-game-subtitle text-sm tabular-nums">
+                    {Math.round(settings.snapRadius)} px
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={MIN_SNAP}
+                  max={MAX_SNAP}
+                  step={1}
+                  value={settings.snapRadius}
+                  onChange={(e) => handleSnapRadius(parseFloat(e.target.value))}
+                  className="w-full h-2 rounded-full appearance-none cursor-pointer"
+                  style={{
+                    background: `linear-gradient(to right, var(--game-accent) ${((settings.snapRadius - MIN_SNAP) / (MAX_SNAP - MIN_SNAP)) * 100}%, var(--game-bar-bg) ${((settings.snapRadius - MIN_SNAP) / (MAX_SNAP - MIN_SNAP)) * 100}%)`,
+                  }}
+                />
+                <div className="flex justify-between text-xs text-game-subtitle mt-1">
+                  <span>{MIN_SNAP}px</span>
+                  <span>{MAX_SNAP}px</span>
+                </div>
               </div>
             </>
           )}
