@@ -65,6 +65,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const [startMarker, setStartMarker] = useState<{ x: number; y: number } | null>(null);
   const [endMarker, setEndMarker] = useState<{ x: number; y: number } | null>(null);
   const lastPlacedRailRef = useRef<{ segIdx: number; endpoint: 'start' | 'end' } | null>(null);
+  const lastPlacedKeyRef = useRef<string | null>(null);
   const [skyOnly, setSkyOnly] = useState(true);
   const [autoconnect, setAutoconnect] = useState(true);
 
@@ -1374,6 +1375,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const handleMouseUp = () => {
     setIsPanning(false);
     setIsDrawing(false);
+    lastPlacedKeyRef.current = null;
 
     // Autoconnect on mouse release: try to connect the last-placed segment's endpoint to a nearby existing segment
     if (autoconnect && lastPlacedRailRef.current && (tool === 'rail' || tool === 'rail_crossing')) {
@@ -1522,6 +1524,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       setObstacleParams(prev => { const next = { ...prev }; delete next[key]; return next; });
       setObstacles(prev => { const next = { ...prev }; delete next[key]; return next; });
     } else if (tool === 'rail' || tool === 'rail_crossing') {
+      // Skip if we already placed on this exact tile during this drag
+      if (lastPlacedKeyRef.current === key) return;
       // Prevent placing on a tile that already has rail — unless near a snappoint (to allow connecting)
       if (isWorldPtOccupied(worldPt.x, worldPt.y) && !isNearSnapPoint(worldPt.x, worldPt.y)) return;
       // Rail placement: extend existing segment endpoint or create new segment
@@ -1544,6 +1548,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
               return { ...s, points: pts };
             }));
             // lastPlacedRailRef stays on same segment, same endpoint
+            lastPlacedKeyRef.current = key;
             return;
           }
         }
@@ -1551,6 +1556,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       // No nearby endpoint: create new single-point segment (autoconnect deferred to mouseUp)
       setSegments(prev => [...prev, { points: [worldPt] }]);
       lastPlacedRailRef.current = { segIdx: segments.length, endpoint: 'end' };
+      lastPlacedKeyRef.current = key;
     } else if (tool === 'rail_start') {
       setStartMarker(worldPt);
     } else if (tool === 'rail_end') {
