@@ -1182,16 +1182,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           }
           const endPoint = snapEnd ? snapEnd : world;
           const startPt = line2Start.start;
-          // Dedup: remove existing segments that share same start/end point
-          setSegments(prev => [
-            ...prev.filter(seg => {
-              const sa = seg.points[0], sb = seg.points[seg.points.length - 1];
-              if (Math.hypot(sa.x - startPt.x, sa.y - startPt.y) < 5) return false;
-              if (Math.hypot(sb.x - endPoint.x, sb.y - endPoint.y) < 5) return false;
-              return true;
-            }),
-            { points: [startPt, endPoint] },
-          ]);
+          setSegments(prev => [...prev, { points: [startPt, endPoint] }]);
           setLine2Start(null);
         }
         return;
@@ -1438,6 +1429,18 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   };
 
   /** Check if a world point overlaps an existing rail segment point within the same grid cell. */
+  /** Check if a world point is near any segment endpoint (snappoint). */
+  const isNearSnapPoint = (wx: number, wy: number) => {
+    const snapDist = GRID_SIZE * 1.5;
+    return segments.some(seg => {
+      if (seg.points.length === 0) return false;
+      const first = seg.points[0];
+      const last = seg.points[seg.points.length - 1];
+      return Math.hypot(wx - first.x, wy - first.y) < snapDist
+        || Math.hypot(wx - last.x, wy - last.y) < snapDist;
+    });
+  };
+
   const isWorldPtOccupied = (wx: number, wy: number) => {
     const halfGrid = GRID_SIZE * 0.5;
     return segments.some(seg =>
@@ -1447,9 +1450,9 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     );
   };
 
-  /** Filter out world points that overlap existing rail (for shape tools). */
+  /** Filter out world points that overlap existing rail, but keep points near snappoints. */
   const filterOccupiedPoints = (pts: { x: number; y: number }[]) =>
-    pts.filter(p => !isWorldPtOccupied(p.x, p.y));
+    pts.filter(p => !isWorldPtOccupied(p.x, p.y) || isNearSnapPoint(p.x, p.y));
 
   const placeTile = (gx: number, gy: number) => {
     const key = tileKey(gx, gy);
@@ -1461,8 +1464,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       setObstacleParams(prev => { const next = { ...prev }; delete next[key]; return next; });
       setObstacles(prev => { const next = { ...prev }; delete next[key]; return next; });
     } else if (tool === 'rail' || tool === 'rail_crossing') {
-      // Prevent placing on a tile that already has rail passing through it
-      if (isWorldPtOccupied(worldPt.x, worldPt.y)) return;
+      // Prevent placing on a tile that already has rail — unless near a snappoint (to allow connecting)
+      if (isWorldPtOccupied(worldPt.x, worldPt.y) && !isNearSnapPoint(worldPt.x, worldPt.y)) return;
       // Rail placement: extend existing segment endpoint or create new segment
       const lastRef = lastPlacedRailRef.current;
       if (lastRef) {
@@ -1942,17 +1945,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
                 rawDrawnPoints: drawRailPending.raw,
                 smoothness: drawRailSmoothness,
               };
-              // Dedup: remove conflicting segments at same start/end
-              setSegments(prev => [
-                ...prev.filter(seg => {
-                  const segStart = seg.points[0];
-                  const segEnd = seg.points[seg.points.length - 1];
-                  if (Math.hypot(segStart.x - startPt.x, segStart.y - startPt.y) < 5) return false;
-                  if (Math.hypot(segEnd.x - endPt.x, segEnd.y - endPt.y) < 5) return false;
-                  return true;
-                }),
-                newSeg,
-              ]);
+              setSegments(prev => [...prev, newSeg]);
               setDrawRailPending(null);
               setDrawRailAttach(null);
             }}
