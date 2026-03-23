@@ -1528,6 +1528,18 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       if (lastPlacedKeyRef.current === key) return;
       // Prevent placing on a tile that already has rail — unless near a snappoint (to allow connecting)
       if (isWorldPtOccupied(worldPt.x, worldPt.y) && !isNearSnapPoint(worldPt.x, worldPt.y)) return;
+      // Snap to existing segment endpoint if nearby (for precise junction matching)
+      let placePt = worldPt;
+      let bestSnapDist = Infinity;
+      for (const seg of segments) {
+        if (seg.points.length === 0) continue;
+        const first = seg.points[0];
+        const last = seg.points[seg.points.length - 1];
+        const dFirst = Math.hypot(worldPt.x - first.x, worldPt.y - first.y);
+        const dLast = Math.hypot(worldPt.x - last.x, worldPt.y - last.y);
+        if (dFirst < GRID_SIZE * 1.5 && dFirst < bestSnapDist) { bestSnapDist = dFirst; placePt = first; }
+        if (dLast < GRID_SIZE * 1.5 && dLast < bestSnapDist) { bestSnapDist = dLast; placePt = last; }
+      }
       // Rail placement: extend existing segment endpoint or create new segment
       const lastRef = lastPlacedRailRef.current;
       if (lastRef) {
@@ -1543,8 +1555,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
             setSegments(prev => prev.map((s, i) => {
               if (i !== lastRef.segIdx) return s;
               const pts = lastRef.endpoint === 'end'
-                ? [...s.points, worldPt]
-                : [worldPt, ...s.points];
+                ? [...s.points, placePt]
+                : [placePt, ...s.points];
               return { ...s, points: pts };
             }));
             // lastPlacedRailRef stays on same segment, same endpoint
@@ -1554,7 +1566,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         }
       }
       // No nearby endpoint: create new single-point segment (autoconnect deferred to mouseUp)
-      setSegments(prev => [...prev, { points: [worldPt] }]);
+      setSegments(prev => [...prev, { points: [placePt] }]);
       lastPlacedRailRef.current = { segIdx: segments.length, endpoint: 'end' };
       lastPlacedKeyRef.current = key;
     } else if (tool === 'rail_start') {
