@@ -1,14 +1,15 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import {
-  GRID_SIZE, EDITOR_HEIGHT, EditorTool, TileType,
+  GRID_SIZE, EDITOR_HEIGHT, EditorTool, ObstacleTileType,
   EditorLevel, tileKey, parseTileKey,
   saveCustomLevel, loadCustomLevels, deleteCustomLevel,
-  convertLevelToGameData,
-  SmoothSegment, sampleCircularArcWorld, sampleBezierWorld, keyToWorld,
-  FreeLineSegment, smoothDrawnRail,
-  generateLevelId,
-  buildIndividualSegments, buildContinuousSegments, getSnapPoints,
+  convertLevelToGameDataV3, migrateToV3,
+  RailSegment, sampleCircularArcWorld, sampleBezierWorld, keyToWorld,
+  smoothDrawnRail,
+  generateLevelId, isObstacleTileType,
+  buildIndividualSegmentsFromRailSegments, buildContinuousSegments, getSnapPoints,
 } from '@/game/editorTypes';
+import { downloadLevelFile, importLevel } from '@/game/levelIO';
 import { musicManager, getAvailableTracks, addToCatalog } from '@/game/musicManager';
 import { Point, Obstacle, WORLD_CONFIG, recordTime, getRecords, LevelRecord, formatTime } from '@/game/types';
 import { GameEngine } from '@/game/engine';
@@ -59,66 +60,15 @@ const TILE_COLORS: Record<string, string> = {
 export default function LevelEditor({ onBack }: LevelEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [tool, setTool] = useState<EditorTool>('none');
-  const [tiles, setTiles] = useState<Record<string, TileType>>({});
-  // Track explicit connections between rail tiles: key -> Set of connected keys
-  const railConnectionsRef = useRef<Record<string, Set<string>>>({});
-  const lastPlacedRailRef = useRef<string | null>(null);
+  const [segments, setSegments] = useState<RailSegment[]>([]);
+  const [obstacles, setObstacles] = useState<Record<string, ObstacleTileType>>({});
+  const [startMarker, setStartMarker] = useState<{ x: number; y: number } | null>(null);
+  const [endMarker, setEndMarker] = useState<{ x: number; y: number } | null>(null);
+  const lastPlacedRailRef = useRef<{ segIdx: number; endpoint: 'start' | 'end' } | null>(null);
   const [skyOnly, setSkyOnly] = useState(true);
   const [autoconnect, setAutoconnect] = useState(true);
 
-  const addRailConnection = (keyA: string, keyB: string) => {
-    const conns = railConnectionsRef.current;
-    if (!conns[keyA]) conns[keyA] = new Set();
-    if (!conns[keyB]) conns[keyB] = new Set();
-    const maxA = tiles[keyA] === 'rail_crossing' ? 4 : 2;
-    const maxB = tiles[keyB] === 'rail_crossing' ? 4 : 2;
-    if (conns[keyA].size < maxA && conns[keyB].size < maxB) {
-      conns[keyA].add(keyB);
-      conns[keyB].add(keyA);
-    }
-  };
-
-  const removeRailConnections = (key: string) => {
-    const conns = railConnectionsRef.current;
-    const myConns = conns[key];
-    if (myConns) {
-      for (const other of myConns) {
-        conns[other]?.delete(key);
-      }
-      delete conns[key];
-    }
-  };
-
-  const rebuildConnectionsFromTiles = (tilesData: Record<string, TileType>) => {
-    const conns: Record<string, Set<string>> = {};
-    const isRailLike = (t: TileType | undefined) => t === 'rail' || t === 'rail_start' || t === 'rail_end' || t === 'rail_crossing';
-    const keys = Object.keys(tilesData).filter(k => isRailLike(tilesData[k]));
-    for (const key of keys) {
-      const [gx, gy] = parseTileKey(key);
-      // Rebuild connections between neighboring rail tiles (orthogonal + direct diagonals)
-      // Only use a subset of neighbor directions to avoid duplicate pairs.
-      const neighborOffsets: [number, number][] = [
-        [1, 0],   // right
-        [0, 1],   // down
-        [1, 1],   // down-right diagonal
-        [1, -1],  // up-right diagonal
-      ];
-      for (const [dx, dy] of neighborOffsets) {
-        const nk = tileKey(gx + dx, gy + dy);
-        if (isRailLike(tilesData[nk])) {
-          if (!conns[key]) conns[key] = new Set();
-          if (!conns[nk]) conns[nk] = new Set();
-          const maxKey = tilesData[key] === 'rail_crossing' ? 4 : 2;
-          const maxNk = tilesData[nk] === 'rail_crossing' ? 4 : 2;
-          if (conns[key].size < maxKey && conns[nk].size < maxNk) {
-            conns[key].add(nk);
-            conns[nk].add(key);
-          }
-        }
-      }
-    }
-    railConnectionsRef.current = conns;
-  };
+  const SNAP_TOLERANCE = 8; // px — for merging segment endpoints
   const [camera, setCamera] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [isPanning, setIsPanning] = useState(false);
@@ -136,10 +86,11 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const [levelComplete, setLevelComplete] = useState<{ time: number; records: LevelRecord[]; isNewBest: boolean } | null>(null);
   const testCanvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
+  const importFileRef = useRef<HTMLInputElement>(null);
   const gameOverRef = useRef(false);
-  const lastSavedTilesRef = useRef<string>('{}');
-  const lastSavedSmoothRef = useRef<string>('[]');
-  const lastSavedFreeLinesRef = useRef<string>('[]');
+  const lastSavedSegmentsRef = useRef<string>('[]');
+  const lastSavedObstaclesRef = useRef<string>('{}');
+  const lastSavedMarkersRef = useRef<string>('{}');
   const [testError, setTestError] = useState<string | null>(null);
   const [currentLevelId, setCurrentLevelId] = useState<string>('');
   const [currentMusicFile, setCurrentMusicFile] = useState<string>('');
@@ -152,37 +103,25 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   // Accumulated rotation (degrees) for the next fresh obstacle placement
   const pendingToolRotRef = useRef<number>(0);
 
-  const [smoothSegments, setSmoothSegments] = useState<SmoothSegment[]>([]);
-  const [freeLines, setFreeLines] = useState<FreeLineSegment[]>([]);
-  const [line2Start, setLine2Start] = useState<{ attach: import('@/game/editorTypes').FreeLineAttach; start: { x: number; y: number } } | null>(null);
+  // smoothSegments and freeLines removed — now unified into `segments` state
+  const [line2Start, setLine2Start] = useState<{ start: { x: number; y: number } } | null>(null);
   const [mouseWorld, setMouseWorld] = useState<{ x: number; y: number } | null>(null);
   // Draw rail tool state
   const [drawRailPoints, setDrawRailPoints] = useState<{ x: number; y: number }[] | null>(null);
-  const [drawRailAttach, setDrawRailAttach] = useState<{ attach: import('@/game/editorTypes').FreeLineAttach; start: { x: number; y: number } } | null>(null);
+  const [drawRailAttach, setDrawRailAttach] = useState<{ start: { x: number; y: number } } | null>(null);
   const [drawRailPending, setDrawRailPending] = useState<{
     raw: { x: number; y: number }[];
-    attach: { attach: import('@/game/editorTypes').FreeLineAttach; start: { x: number; y: number } } | null;
-    endSnap: { pt: { x: number; y: number }; target: { segmentId: string; endpoint: 'start' | 'end' } } | null;
+    attach: { start: { x: number; y: number } } | null;
+    endSnap: { pt: { x: number; y: number } } | null;
   } | null>(null);
   const [drawRailSmoothness, setDrawRailSmoothness] = useState(0.5);
   // Snap cycling: when multiple snap points overlap, scroll wheel cycles through them
   const snapCycleRef = useRef<{ worldX: number; worldY: number; index: number }>({ worldX: -999, worldY: -999, index: 0 });
 
   const hasUnsavedChanges = () =>
-    JSON.stringify(tiles) !== lastSavedTilesRef.current ||
-    JSON.stringify(smoothSegments) !== lastSavedSmoothRef.current ||
-    JSON.stringify(freeLines) !== lastSavedFreeLinesRef.current;
-
-  const serializeConnections = (): Record<string, string[]> => {
-    const conns = railConnectionsRef.current;
-    const out: Record<string, string[]> = {};
-    for (const [key, set] of Object.entries(conns)) {
-      if (set && set.size > 0) {
-        out[key] = Array.from(set);
-      }
-    }
-    return out;
-  };
+    JSON.stringify(segments) !== lastSavedSegmentsRef.current ||
+    JSON.stringify(obstacles) !== lastSavedObstaclesRef.current ||
+    JSON.stringify({ startMarker, endMarker }) !== lastSavedMarkersRef.current;
 
   // Arc tool state
   const [arcCenter, setArcCenter] = useState<{ gx: number; gy: number } | null>(null);
@@ -218,7 +157,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       if (selectedObstacleKey) {
         // Rotate the selected placed obstacle
         setObstacleParams(prev => {
-          const def = obstacleDefMap.get(tiles[selectedObstacleKey]);
+          const def = obstacleDefMap.get(obstacles[selectedObstacleKey]);
           if (!def) return prev;
           const existing = prev[selectedObstacleKey] as any ?? { ...def.defaultParams };
           return { ...prev, [selectedObstacleKey]: { ...existing, rotation: ((existing.rotation ?? 0) + 90) % 360 } };
@@ -236,7 +175,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [testing, tool, selectedObstacleKey, tiles]);
+  }, [testing, tool, selectedObstacleKey, obstacles]);
 
   // Draw the editor grid
   const render = useCallback(() => {
@@ -292,27 +231,15 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     ctx.setLineDash([]);
 
     // Compute individual rail segments for polyline rendering
-    const individualSegs = buildIndividualSegments(tiles, railConnectionsRef.current, smoothSegments, freeLines);
+    const individualSegs = buildIndividualSegmentsFromRailSegments(segments);
 
-    // Tiles — rail tiles are rendered as polylines below; obstacle tiles keep grid squares
-    const showTileGhost = tool === 'rail' || tool === 'rail_start' || tool === 'rail_end' || tool === 'rail_crossing' || tool === 'eraser';
-    for (const [key, type] of Object.entries(tiles)) {
-      if (type === 'empty') continue;
+    // Obstacle tiles — grid squares
+    for (const [key, type] of Object.entries(obstacles)) {
       const [gx, gy] = parseTileKey(key);
       const sx = gx * GRID_SIZE - cx;
       const sy = gy * GRID_SIZE - cy;
       if (sx < -GRID_SIZE || sx > vw + GRID_SIZE || sy < -GRID_SIZE || sy > vh + GRID_SIZE) continue;
-
-      if (type === 'rail' || type === 'rail_start' || type === 'rail_end' || type === 'rail_crossing') {
-        // Faint ghost overlay — only when using tile placement or eraser tools
-        if (showTileGhost) {
-          ctx.globalAlpha = 0.2;
-          ctx.fillStyle = type === 'rail_start' ? '#00E676' : type === 'rail_end' ? '#FF4081' : type === 'rail_crossing' ? '#FFA500' : '#FFD700';
-          ctx.fillRect(sx + 2, sy + 2, GRID_SIZE - 4, GRID_SIZE - 4);
-          ctx.globalAlpha = 1.0;
-        }
-      } else {
-        // Generic obstacle tile — driven by the registry
+      {
         const def = obstacleDefMap.get(type);
         if (def) {
           ctx.fillStyle = def.tileColor;
@@ -469,30 +396,22 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       ctx.fill();
     }
 
-    // Autoconnect preview: show dashed line from hovered cell to nearby snappoints
+    // Autoconnect preview: show dashed line from hovered cell to nearby segment endpoints
     if (autoconnect && mouseWorld && (tool === 'rail' || tool === 'rail_crossing' || tool === 'rail_start' || tool === 'rail_end')) {
       const hgx = Math.floor(mouseWorld.x / GRID_SIZE);
       const hgy = Math.floor(mouseWorld.y / GRID_SIZE);
       const hWorld = { x: (hgx + 0.5) * GRID_SIZE, y: (hgy + 0.5) * GRID_SIZE };
-      // Find snappoints that are endpoint tiles in adjacent cells
-      const endpointKeys = new Set<string>();
-      for (const seg of individualSegs) {
-        if (!seg.sourceKeys) continue;
-        endpointKeys.add(seg.sourceKeys[0]);
-        if (seg.sourceKeys.length > 1) endpointKeys.add(seg.sourceKeys[seg.sourceKeys.length - 1]);
-      }
+      const maxDist = GRID_SIZE * 1.5; // snap radius for autoconnect preview
       ctx.setLineDash([6, 4]);
       ctx.strokeStyle = 'rgba(0, 230, 118, 0.6)';
       ctx.lineWidth = 2;
-      for (const [ndx, ndy] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]] as [number, number][]) {
-        const nk = tileKey(hgx + ndx, hgy + ndy);
-        const nt = tiles[nk];
-        const isRailLike = nt === 'rail' || nt === 'rail_start' || nt === 'rail_end' || nt === 'rail_crossing';
-        if (isRailLike && (endpointKeys.has(nk) || nt === 'rail_crossing' || tool === 'rail_crossing')) {
-          const nWorld = keyToWorld(nk);
+      const snapPts = getSnapPoints(individualSegs);
+      for (const sp of snapPts) {
+        const d = Math.hypot(sp.point.x - hWorld.x, sp.point.y - hWorld.y);
+        if (d > 0.1 && d < maxDist) {
           ctx.beginPath();
           ctx.moveTo(hWorld.x - cx, hWorld.y - cy);
-          ctx.lineTo(nWorld.x - cx, nWorld.y - cy);
+          ctx.lineTo(sp.point.x - cx, sp.point.y - cy);
           ctx.stroke();
         }
       }
@@ -528,41 +447,25 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       ctx.fill();
     }
 
-    // Rail start / end / crossing markers on the polyline
-    for (const [key, type] of Object.entries(tiles)) {
-      if (type === 'rail_start' || type === 'rail_end') {
-        const world = keyToWorld(key);
-        const color = type === 'rail_start' ? '#00E676' : '#FF4081';
-        const label = type === 'rail_start' ? 'S' : 'E';
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.arc(world.x - cx, world.y - cy, 8, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#000';
-        ctx.font = 'bold 10px system-ui';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(label, world.x - cx, world.y - cy);
-      } else if (type === 'rail_crossing') {
-        const world = keyToWorld(key);
-        const m = 6;
-        ctx.strokeStyle = '#FFA500';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(world.x - cx - m, world.y - cy - m);
-        ctx.lineTo(world.x - cx + m, world.y - cy + m);
-        ctx.moveTo(world.x - cx + m, world.y - cy - m);
-        ctx.lineTo(world.x - cx - m, world.y - cy + m);
-        ctx.stroke();
-      }
+    // Rail start / end markers
+    for (const [marker, color, label] of [
+      [startMarker, '#00E676', 'S'],
+      [endMarker, '#FF4081', 'E'],
+    ] as [{ x: number; y: number } | null, string, string][]) {
+      if (!marker) continue;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(marker.x - cx, marker.y - cy, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#000';
+      ctx.font = 'bold 10px system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, marker.x - cx, marker.y - cy);
     }
 
-    // Legacy computation — still used by hover highlight and endpoint hints (Phase 3 will replace)
-    const { allSegments: baseForLines, segmentIdByIndex } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, undefined);
-    const segIdToIdx: Record<string, number> = {};
-    segmentIdByIndex.forEach((id, i) => { segIdToIdx[id] = i; });
-    // getAttachPoint — used by click handlers (defined in their scope)
-    // baseForLines/segmentIdByIndex are used by endpoint hints below
+    // Snap points for endpoint hints — all segments are unified now, no separate "base" needed
+    const baseSnaps = getSnapPoints(individualSegs);
 
     // Build continuous segments + lookups for hover/eraser
     const continuousSegs = buildContinuousSegments(individualSegs);
@@ -639,20 +542,10 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
 
     // Endpoint hints for line2 and draw_rail tools
     if (tool === 'line2' || (tool === 'draw_rail' && !drawRailPoints && !drawRailPending)) {
-      const hints: { attach: import('@/game/editorTypes').FreeLineAttach; pt: { x: number; y: number } }[] = baseForLines.flatMap((seg, si) => {
-        if (!seg || seg.length < 1) return [];
-        const id = segmentIdByIndex[si];
-        return [
-          { attach: { segmentId: id, endpoint: 'start' as const }, pt: seg[0] },
-          { attach: { segmentId: id, endpoint: 'end' as const }, pt: seg[seg.length - 1] },
-        ];
-      });
-      for (const fl of freeLines) {
-        hints.push({ attach: { segmentId: fl.attach.segmentId, atWorld: fl.end }, pt: fl.end });
-        if (fl.attachWorld) {
-          hints.push({ attach: { segmentId: fl.attach.segmentId, atWorld: fl.attachWorld }, pt: fl.attachWorld });
-        }
-      }
+      // Build hints from all segment endpoints
+      const hints: { pt: { x: number; y: number } }[] = baseSnaps.map(sp => ({
+        pt: sp.point,
+      }));
 
       // Find hover target with cycle disambiguation for overlapping points
       let hoverHint: (typeof hints)[0] | null = null;
@@ -806,7 +699,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(`Middle-click / Right-click drag to pan • +/- to zoom (${Math.round(zoom * 100)}%) • Click to place tiles`, w / 2, h - 15);
-  }, [camera, tiles, smoothSegments, freeLines, tool, arcCenter, arcPreview, zoom, curveStart, curveEnd, curveControl, lineStart, linePreview, line2Start, mouseWorld, obstacleParams, selectedObstacleKey, drawRailPoints, drawRailAttach, drawRailPending, drawRailSmoothness]);
+  }, [camera, segments, obstacles, startMarker, endMarker, tool, arcCenter, arcPreview, zoom, curveStart, curveEnd, curveControl, lineStart, linePreview, line2Start, mouseWorld, obstacleParams, selectedObstacleKey, drawRailPoints, drawRailAttach, drawRailPending, drawRailSmoothness]);
 
   // Resize & render loop
   useEffect(() => {
@@ -1165,17 +1058,10 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           setArcCenter({ gx, gy });
         } else {
           const points = generateArc(arcCenter.gx, arcCenter.gy, gx, gy);
-          for (let i = 1; i < points.length; i++) {
-            addRailConnection(tileKey(points[i - 1].gx, points[i - 1].gy), tileKey(points[i].gx, points[i].gy));
+          if (points.length >= 2) {
+            const worldPts = points.map(p => ({ x: (p.gx + 0.5) * GRID_SIZE, y: (p.gy + 0.5) * GRID_SIZE }));
+            setSegments(prev => [...prev, { points: worldPts }]);
           }
-          if (points.length > 0) lastPlacedRailRef.current = tileKey(points[points.length - 1].gx, points[points.length - 1].gy);
-          setTiles(prev => {
-            const next = { ...prev };
-            for (const p of points) {
-              next[tileKey(p.gx, p.gy)] = 'rail';
-            }
-            return next;
-          });
           setArcCenter(null);
           setArcPreview([]);
         }
@@ -1214,18 +1100,10 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           setArcCenter({ gx, gy });
         } else {
           const points = generateCircleRail(arcCenter.gx, arcCenter.gy, gx, gy);
-          // Add connections between consecutive arc points
-          for (let i = 1; i < points.length; i++) {
-            addRailConnection(tileKey(points[i - 1].gx, points[i - 1].gy), tileKey(points[i].gx, points[i].gy));
+          if (points.length >= 2) {
+            const worldPts = points.map(p => ({ x: (p.gx + 0.5) * GRID_SIZE, y: (p.gy + 0.5) * GRID_SIZE }));
+            setSegments(prev => [...prev, { points: worldPts }]);
           }
-          if (points.length > 0) lastPlacedRailRef.current = tileKey(points[points.length - 1].gx, points[points.length - 1].gy);
-          setTiles(prev => {
-            const next = { ...prev };
-            for (const p of points) {
-              next[tileKey(p.gx, p.gy)] = 'rail';
-            }
-            return next;
-          });
           setArcCenter(null);
           setArcPreview([]);
         }
@@ -1237,17 +1115,10 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           setLineStart({ gx, gy });
         } else {
           const points = generateLine(lineStart, { gx, gy });
-          for (let i = 1; i < points.length; i++) {
-            addRailConnection(tileKey(points[i - 1].gx, points[i - 1].gy), tileKey(points[i].gx, points[i].gy));
+          if (points.length >= 2) {
+            const worldPts = points.map(p => ({ x: (p.gx + 0.5) * GRID_SIZE, y: (p.gy + 0.5) * GRID_SIZE }));
+            setSegments(prev => [...prev, { points: worldPts }]);
           }
-          if (points.length > 0) lastPlacedRailRef.current = tileKey(points[points.length - 1].gx, points[points.length - 1].gy);
-          setTiles(prev => {
-            const next = { ...prev };
-            for (const p of points) {
-              next[tileKey(p.gx, p.gy)] = 'rail';
-            }
-            return next;
-          });
           setLineStart(null);
           setLinePreview([]);
         }
@@ -1257,27 +1128,19 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       if (tool === 'line2') {
         // First click: pick nearest snap point. Use BASE segments (no freeLines) so hints are stable and the selected start is always used.
         if (!line2Start) {
-          const { allSegments: baseSegments, segmentIdByIndex: baseIds } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, undefined);
-          type Hint = { attach: import('@/game/editorTypes').FreeLineAttach; pt: { x: number; y: number }; dist: number };
-          const hints: Hint[] = [];
-          for (let si = 0; si < baseSegments.length; si++) {
-            const seg = baseSegments[si];
-            if (!seg || seg.length < 1) continue;
-            const id = baseIds[si];
-            hints.push({ attach: { segmentId: id, endpoint: 'start' }, pt: { x: seg[0].x, y: seg[0].y }, dist: Math.hypot(world.x - seg[0].x, world.y - seg[0].y) });
-            hints.push({ attach: { segmentId: id, endpoint: 'end' }, pt: { x: seg[seg.length - 1].x, y: seg[seg.length - 1].y }, dist: Math.hypot(world.x - seg[seg.length - 1].x, world.y - seg[seg.length - 1].y) });
-          }
-          for (const fl of freeLines) {
-            hints.push({ attach: { segmentId: fl.attach.segmentId, atWorld: fl.end }, pt: fl.end, dist: Math.hypot(world.x - fl.end.x, world.y - fl.end.y) });
-            if (fl.attachWorld) {
-              hints.push({ attach: { segmentId: fl.attach.segmentId, atWorld: fl.attachWorld }, pt: fl.attachWorld, dist: Math.hypot(world.x - fl.attachWorld.x, world.y - fl.attachWorld.y) });
-            }
-          }
+          // Build snap hints from all segment endpoints
+          const allSegsForSnap = buildIndividualSegmentsFromRailSegments(segments);
+          const allSnapPtsForSnap = getSnapPoints(allSegsForSnap);
+          type Hint = { pt: { x: number; y: number }; dist: number };
+          const hints: Hint[] = allSnapPtsForSnap.map(sp => ({
+            pt: sp.point,
+            dist: Math.hypot(world.x - sp.point.x, world.y - sp.point.y),
+          }));
           // Find all candidates within snap radius, then use cycle index to disambiguate overlapping ones
           const candidates = hints.filter(h => h.dist <= 45).sort((a, b) => a.dist - b.dist);
           if (candidates.length === 0) {
             // No snap point nearby — start a free-standing line
-            setLine2Start({ attach: { segmentId: '__orphan__', atWorld: world }, start: world });
+            setLine2Start({ start: world });
           } else {
             // Group candidates that are at nearly the same position (within 5px)
             const best = candidates[0];
@@ -1290,25 +1153,20 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
             } else {
               chosen = best;
             }
-            setLine2Start({ attach: chosen.attach, start: chosen.pt });
+            setLine2Start({ start: chosen.pt });
           }
         } else {
           // Second click: free end point anywhere in world space (with snapping to any endpoint)
-        const { allSegments, segmentIdByIndex } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, freeLines);
-          type SnapCandidate = { pt: { x: number; y: number }; target: { segmentId: string; endpoint: 'start' | 'end' }; dist: number };
-          const endCandidates: SnapCandidate[] = [];
-          for (let si = 0; si < allSegments.length; si++) {
-            const seg = allSegments[si];
-            if (!seg || seg.length < 1) continue;
-            const id = segmentIdByIndex[si];
-            const a = seg[0];
-            const b = seg[seg.length - 1];
-            endCandidates.push({ pt: { x: a.x, y: a.y }, target: { segmentId: id, endpoint: 'start' }, dist: Math.hypot(world.x - a.x, world.y - a.y) });
-            endCandidates.push({ pt: { x: b.x, y: b.y }, target: { segmentId: id, endpoint: 'end' }, dist: Math.hypot(world.x - b.x, world.y - b.y) });
-          }
+          // Build snap candidates from all segments (including freeLines)
+          const allSegs = buildIndividualSegmentsFromRailSegments(segments);
+          const allSnapPts = getSnapPoints(allSegs);
+          type SnapCandidate = { pt: { x: number; y: number }; dist: number };
+          const endCandidates: SnapCandidate[] = allSnapPts.map(sp => ({
+            pt: sp.point,
+            dist: Math.hypot(world.x - sp.point.x, world.y - sp.point.y),
+          }));
           const validEnd = endCandidates.filter(c => c.dist <= 45).sort((a, b) => a.dist - b.dist);
           let snapEnd: { x: number; y: number } | null = null;
-          let snapTarget: { segmentId: string; endpoint: 'start' | 'end' } | null = null;
           if (validEnd.length > 0) {
             const bestEnd = validEnd[0];
             const overlappingEnd = validEnd.filter(c => Math.hypot(c.pt.x - bestEnd.pt.x, c.pt.y - bestEnd.pt.y) < 5);
@@ -1321,23 +1179,18 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
               chosenEnd = bestEnd;
             }
             snapEnd = chosenEnd.pt;
-            snapTarget = chosenEnd.target;
           }
           const endPoint = snapEnd ? snapEnd : world;
-          // If another free line already uses the same snap point as start or end, disconnect it
-          const attachPt = line2Start.start;
-          setFreeLines(prev => [
-            ...prev.filter(fl => {
-              if (fl.attachWorld && Math.hypot(fl.attachWorld.x - attachPt.x, fl.attachWorld.y - attachPt.y) < 5) return false;
-              if (Math.hypot(fl.end.x - endPoint.x, fl.end.y - endPoint.y) < 5) return false;
+          const startPt = line2Start.start;
+          // Dedup: remove existing segments that share same start/end point
+          setSegments(prev => [
+            ...prev.filter(seg => {
+              const sa = seg.points[0], sb = seg.points[seg.points.length - 1];
+              if (Math.hypot(sa.x - startPt.x, sa.y - startPt.y) < 5) return false;
+              if (Math.hypot(sb.x - endPoint.x, sb.y - endPoint.y) < 5) return false;
               return true;
             }),
-            {
-              attach: line2Start.attach,
-              attachWorld: line2Start.start,
-              end: endPoint,
-              target: snapTarget || undefined,
-            },
+            { points: [startPt, endPoint] },
           ]);
           setLine2Start(null);
         }
@@ -1346,22 +1199,14 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
 
       // Draw rail tool: mousedown starts freehand drawing
       if (tool === 'draw_rail' && !drawRailPending) {
-        const { allSegments: baseSegments, segmentIdByIndex: baseIds } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, freeLines);
-        type Hint = { attach: import('@/game/editorTypes').FreeLineAttach; pt: { x: number; y: number }; dist: number };
-        const hints: Hint[] = [];
-        for (let si = 0; si < baseSegments.length; si++) {
-          const seg = baseSegments[si];
-          if (!seg || seg.length < 1) continue;
-          const id = baseIds[si];
-          hints.push({ attach: { segmentId: id, endpoint: 'start' }, pt: seg[0], dist: Math.hypot(world.x - seg[0].x, world.y - seg[0].y) });
-          hints.push({ attach: { segmentId: id, endpoint: 'end' }, pt: seg[seg.length - 1], dist: Math.hypot(world.x - seg[seg.length - 1].x, world.y - seg[seg.length - 1].y) });
-        }
-        for (const fl of freeLines) {
-          hints.push({ attach: { segmentId: fl.attach.segmentId, atWorld: fl.end }, pt: fl.end, dist: Math.hypot(world.x - fl.end.x, world.y - fl.end.y) });
-          if (fl.attachWorld) {
-            hints.push({ attach: { segmentId: fl.attach.segmentId, atWorld: fl.attachWorld }, pt: fl.attachWorld, dist: Math.hypot(world.x - fl.attachWorld.x, world.y - fl.attachWorld.y) });
-          }
-        }
+        // Build snap hints from all segments (including freeLines)
+        const drawSegs = buildIndividualSegmentsFromRailSegments(segments);
+        const drawSnapPts = getSnapPoints(drawSegs);
+        type Hint = { pt: { x: number; y: number }; dist: number };
+        const hints: Hint[] = drawSnapPts.map(sp => ({
+          pt: sp.point,
+          dist: Math.hypot(world.x - sp.point.x, world.y - sp.point.y),
+        }));
         const candidates = hints.filter(h => h.dist <= 45).sort((a, b) => a.dist - b.dist);
         if (candidates.length > 0) {
           const best = candidates[0];
@@ -1369,7 +1214,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           let chosen = overlapping.length > 1
             ? overlapping[((snapCycleRef.current.index % overlapping.length) + overlapping.length) % overlapping.length]
             : best;
-          setDrawRailAttach({ attach: chosen.attach, start: chosen.pt });
+          setDrawRailAttach({ start: chosen.pt });
           setDrawRailPoints([chosen.pt]);
         } else {
           // Unsnapped start
@@ -1382,18 +1227,17 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       // None tool: first click selects, second click on selected tile "picks it up"
       if (tool === 'none') {
         const key = tileKey(gx, gy);
-        const tileType = tiles[key];
-        if (tileType && obstacleDefMap.has(tileType)) {
+        const obsType = obstacles[key];
+        if (obsType && obstacleDefMap.has(obsType)) {
           if (selectedObstacleKey === key) {
-            // Second click: pick up — remove tile, carry its params, switch to that obstacle tool
+            // Second click: pick up — remove obstacle, carry its params, switch to that obstacle tool
             pendingObstacleParamsRef.current = obstacleParams[key]
               ? { ...obstacleParams[key] }
               : null;
-            removeRailConnections(key);
             setSelectedObstacleKey(null);
             setObstacleParams(prev => { const next = { ...prev }; delete next[key]; return next; });
-            setTiles(prev => { const next = { ...prev }; delete next[key]; return next; });
-            setTool(tileType as EditorTool);
+            setObstacles(prev => { const next = { ...prev }; delete next[key]; return next; });
+            setTool(obsType as EditorTool);
           } else {
             setSelectedObstacleKey(key);
           }
@@ -1405,7 +1249,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
 
       // Eraser: find nearest individual rail segment and delete it
       if (tool === 'eraser') {
-        const eraserSegs = buildIndividualSegments(tiles, railConnectionsRef.current, smoothSegments, freeLines);
+        const eraserSegs = buildIndividualSegmentsFromRailSegments(segments);
         const ptSegDist = (px: number, py: number, ax: number, ay: number, bx: number, by: number) => {
           const dx = bx - ax, dy = by - ay;
           const lenSq = dx * dx + dy * dy;
@@ -1431,49 +1275,19 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         }
 
         if (hitSeg) {
-          if (hitSeg.kind === 'free_line' || hitSeg.kind === 'drawn_rail') {
-            const idx = hitSeg.sourceFreeLineIndex!;
-            setFreeLines(prev => prev.filter((_, i) => i !== idx));
-          } else if (hitSeg.kind === 'smooth_curve') {
-            const si = hitSeg.sourceSmoothIndex!;
-            const seg = smoothSegments[si];
-            const conns = railConnectionsRef.current;
-            conns[seg.startKey]?.delete(seg.endKey);
-            conns[seg.endKey]?.delete(seg.startKey);
-            for (const k of [seg.startKey, seg.endKey]) {
-              removeRailConnections(k);
-              if (lastPlacedRailRef.current === k) lastPlacedRailRef.current = null;
-            }
-            setSmoothSegments(prev => prev.filter((_, i) => i !== si));
-            setTiles(prev => {
-              const next = { ...prev };
-              delete next[seg.startKey];
-              delete next[seg.endKey];
-              return next;
-            });
-          } else if (hitSeg.kind === 'tile_chain' && hitSeg.sourceKeys) {
-            // Delete all tiles in this chain and their connections
-            const keysToRemove = hitSeg.sourceKeys;
-            for (const k of keysToRemove) {
-              removeRailConnections(k);
-              if (lastPlacedRailRef.current === k) lastPlacedRailRef.current = null;
-            }
-            // Also remove smooth segments anchored to any of these tiles
-            const keySet = new Set(keysToRemove);
-            setSmoothSegments(prev => prev.filter(s => !keySet.has(s.startKey) && !keySet.has(s.endKey)));
-            setTiles(prev => {
-              const next = { ...prev };
-              for (const k of keysToRemove) delete next[k];
-              return next;
-            });
+          // Unified erase: find segment index from hitSeg.id (format: "seg_N")
+          const segIdx = parseInt(hitSeg.id.replace('seg_', ''), 10);
+          if (!isNaN(segIdx)) {
+            setSegments(prev => prev.filter((_, i) => i !== segIdx));
+            lastPlacedRailRef.current = null;
           }
           return;
         }
       }
 
-      // Clicking an existing tile of the same type → switch to hand tool (and select if obstacle)
+      // Clicking an existing obstacle of the same type → switch to hand tool and select it
       const clickedKey = tileKey(gx, gy);
-      if (tiles[clickedKey] === (tool as TileType)) {
+      if (obstacles[clickedKey] === (tool as string)) {
         setTool('none');
         if (obstacleDefMap.has(tool)) setSelectedObstacleKey(clickedKey);
         return;
@@ -1570,25 +1384,18 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     setIsPanning(false);
     setIsDrawing(false);
 
-    // Commit curve / circular curve on mouse up: store as smooth segment, only place start/end tiles
+    // Commit curve / circular curve on mouse up: sample to polyline and add as segment
     if (isDraggingCurve && curveStart && curveEnd && curveControl) {
-      const startKey = tileKey(curveStart.gx, curveStart.gy);
-      const endKey = tileKey(curveEnd.gx, curveEnd.gy);
-      addRailConnection(startKey, endKey);
-      setSmoothSegments(prev => [...prev, {
-        type: tool === 'circular_curve' ? 'circular' : 'bezier',
-        startKey,
-        endKey,
-        pivotGx: curveControl.gx,
-        pivotGy: curveControl.gy,
-      }]);
-      setTiles(prev => {
-        const next = { ...prev };
-        next[startKey] = prev[startKey] === 'rail_start' || prev[startKey] === 'rail_end' ? prev[startKey]! : 'rail';
-        next[endKey] = prev[endKey] === 'rail_start' || prev[endKey] === 'rail_end' ? prev[endKey]! : 'rail';
-        return next;
-      });
-      lastPlacedRailRef.current = endKey;
+      const wStart = keyToWorld(tileKey(curveStart.gx, curveStart.gy));
+      const wEnd = keyToWorld(tileKey(curveEnd.gx, curveEnd.gy));
+      const wPivot = keyToWorld(tileKey(curveControl.gx, curveControl.gy));
+      const pts = tool === 'circular_curve'
+        ? sampleCircularArcWorld(wStart, wEnd, wPivot)
+        : sampleBezierWorld(wStart, wEnd, wPivot);
+      if (pts.length >= 2) {
+        setSegments(prev => [...prev, { points: pts }]);
+      }
+      lastPlacedRailRef.current = null;
       setCurveStart(null);
       setCurveEnd(null);
       setCurveControl(null);
@@ -1611,18 +1418,16 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       }
       // Check end snap
       const endWorld = drawRailPoints[drawRailPoints.length - 1];
-      const { allSegments, segmentIdByIndex } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, freeLines);
-      type SnapCandidate = { pt: { x: number; y: number }; target: { segmentId: string; endpoint: 'start' | 'end' }; dist: number };
-      const endCandidates: SnapCandidate[] = [];
-      for (let si = 0; si < allSegments.length; si++) {
-        const seg = allSegments[si];
-        if (!seg || seg.length < 1) continue;
-        const id = segmentIdByIndex[si];
-        endCandidates.push({ pt: seg[0], target: { segmentId: id, endpoint: 'start' }, dist: Math.hypot(endWorld.x - seg[0].x, endWorld.y - seg[0].y) });
-        endCandidates.push({ pt: seg[seg.length - 1], target: { segmentId: id, endpoint: 'end' }, dist: Math.hypot(endWorld.x - seg[seg.length - 1].x, endWorld.y - seg[seg.length - 1].y) });
-      }
+      // Build snap candidates from all segments (including freeLines)
+      const endSegs = buildIndividualSegmentsFromRailSegments(segments);
+      const endSnapPts = getSnapPoints(endSegs);
+      type SnapCandidate = { pt: { x: number; y: number }; dist: number };
+      const endCandidates: SnapCandidate[] = endSnapPts.map(sp => ({
+        pt: sp.point,
+        dist: Math.hypot(endWorld.x - sp.point.x, endWorld.y - sp.point.y),
+      }));
       const validEnd = endCandidates.filter(c => c.dist <= 45).sort((a, b) => a.dist - b.dist);
-      const endSnap = validEnd.length > 0 ? { pt: validEnd[0].pt, target: validEnd[0].target } : null;
+      const endSnap = validEnd.length > 0 ? { pt: validEnd[0].pt } : null;
       setDrawRailPending({ raw: drawRailPoints, attach: drawRailAttach, endSnap });
       setDrawRailPoints(null);
     } else if (tool === 'draw_rail' && drawRailPoints) {
@@ -1634,101 +1439,83 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
 
   const placeTile = (gx: number, gy: number) => {
     const key = tileKey(gx, gy);
+    const worldPt = { x: (gx + 0.5) * GRID_SIZE, y: (gy + 0.5) * GRID_SIZE };
+
     if (tool === 'eraser') {
-      removeRailConnections(key);
-      if (lastPlacedRailRef.current === key) lastPlacedRailRef.current = null;
+      // Erase obstacle at grid cell (rail segments are erased via hit-test in mousedown)
       setSelectedObstacleKey(prev => prev === key ? null : prev);
-      // Remove any smooth segments anchored to this tile + the other endpoint tile
-      const removedSegs = smoothSegments.filter(s => s.startKey === key || s.endKey === key);
-      const otherKeys: string[] = [];
-      if (removedSegs.length > 0) {
-        const conns = railConnectionsRef.current;
-        for (const s of removedSegs) {
-          conns[s.startKey]?.delete(s.endKey);
-          conns[s.endKey]?.delete(s.startKey);
-          const other = s.startKey === key ? s.endKey : s.startKey;
-          otherKeys.push(other);
-          removeRailConnections(other);
-          if (lastPlacedRailRef.current === other) lastPlacedRailRef.current = null;
+      setObstacleParams(prev => { const next = { ...prev }; delete next[key]; return next; });
+      setObstacles(prev => { const next = { ...prev }; delete next[key]; return next; });
+    } else if (tool === 'rail' || tool === 'rail_crossing') {
+      // Rail placement: extend existing segment endpoint or create new segment
+      const lastRef = lastPlacedRailRef.current;
+      if (lastRef) {
+        // Try to extend the segment we last placed on
+        const seg = segments[lastRef.segIdx];
+        if (seg) {
+          const endpoint = lastRef.endpoint === 'end'
+            ? seg.points[seg.points.length - 1]
+            : seg.points[0];
+          const d = Math.hypot(worldPt.x - endpoint.x, worldPt.y - endpoint.y);
+          if (d < GRID_SIZE * 1.5 && d > 0.1) {
+            // Extend this segment
+            setSegments(prev => prev.map((s, i) => {
+              if (i !== lastRef.segIdx) return s;
+              const pts = lastRef.endpoint === 'end'
+                ? [...s.points, worldPt]
+                : [worldPt, ...s.points];
+              return { ...s, points: pts };
+            }));
+            // lastPlacedRailRef stays on same segment, same endpoint
+            return;
+          }
         }
-        setSmoothSegments(prev => prev.filter(s => s.startKey !== key && s.endKey !== key));
       }
-      setTiles(prev => {
-        const next = { ...prev };
-        delete next[key];
-        for (const k of otherKeys) delete next[k];
-        return next;
-      });
-    } else if (tool === 'rail' || tool === 'rail_crossing' || obstacleDefMap.has(tool)) {
-      // Apply carried params if this is the first placement after a "pick up"
-      const isRelocation = obstacleDefMap.has(tool) && pendingObstacleParamsRef.current !== null;
+      // Autoconnect: check if near any existing segment endpoint
+      if (autoconnect) {
+        const allSnaps = getSnapPoints(buildIndividualSegmentsFromRailSegments(segments));
+        let bestSnap: { segIdx: number; endpoint: 'start' | 'end'; dist: number } | null = null;
+        for (const sp of allSnaps) {
+          const d = Math.hypot(worldPt.x - sp.point.x, worldPt.y - sp.point.y);
+          if (d < GRID_SIZE * 1.5 && d > 0.1 && (!bestSnap || d < bestSnap.dist)) {
+            const segIdx = parseInt(sp.segmentId.replace('seg_', ''), 10);
+            bestSnap = { segIdx, endpoint: sp.endpoint === 'A' ? 'start' : 'end', dist: d };
+          }
+        }
+        if (bestSnap) {
+          setSegments(prev => prev.map((s, i) => {
+            if (i !== bestSnap.segIdx) return s;
+            const pts = bestSnap.endpoint === 'end'
+              ? [...s.points, worldPt]
+              : [worldPt, ...s.points];
+            return { ...s, points: pts };
+          }));
+          lastPlacedRailRef.current = { segIdx: bestSnap.segIdx, endpoint: bestSnap.endpoint };
+          return;
+        }
+      }
+      // No nearby endpoint: create new single-point segment
+      setSegments(prev => [...prev, { points: [worldPt] }]);
+      lastPlacedRailRef.current = { segIdx: segments.length, endpoint: 'end' };
+    } else if (tool === 'rail_start') {
+      setStartMarker(worldPt);
+    } else if (tool === 'rail_end') {
+      setEndMarker(worldPt);
+    } else if (obstacleDefMap.has(tool)) {
+      // Obstacle placement
+      const isRelocation = pendingObstacleParamsRef.current !== null;
       if (isRelocation) {
         const carried = pendingObstacleParamsRef.current;
         pendingObstacleParamsRef.current = null;
         setObstacleParams(prev => ({ ...prev, [key]: carried }));
-        setTiles(prev => ({ ...prev, [key]: tool as TileType }));
+        setObstacles(prev => ({ ...prev, [key]: tool as ObstacleTileType }));
         setTool('none');
         setSelectedObstacleKey(key);
         return;
       }
-      const isRail = tool === 'rail' || tool === 'rail_crossing';
-      if (isRail) {
-        // Connect to last placed rail if adjacent
-        const last = lastPlacedRailRef.current;
-        if (last && last !== key) {
-          const [lx, ly] = parseTileKey(last);
-          const dx = Math.abs(gx - lx);
-          const dy = Math.abs(gy - ly);
-          if (dx <= 1 && dy <= 1 && (dx + dy > 0)) {
-            addRailConnection(last, key);
-          }
-        }
-        // Auto-connect to adjacent tiles
-        const neighborDirs: [number, number][] = [
-          [1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]
-        ];
-        if (autoconnect) {
-          // Autoconnect: connect to any adjacent rail tile that is a segment endpoint (snappoint)
-          const segs = buildIndividualSegments(tiles, railConnectionsRef.current, smoothSegments, freeLines);
-          // Collect endpoint tile keys (tiles at snappoints)
-          const endpointKeys = new Set<string>();
-          for (const seg of segs) {
-            if (!seg.sourceKeys) continue;
-            // First and last source keys are the endpoint tiles
-            endpointKeys.add(seg.sourceKeys[0]);
-            if (seg.sourceKeys.length > 1) endpointKeys.add(seg.sourceKeys[seg.sourceKeys.length - 1]);
-          }
-          for (const [ndx, ndy] of neighborDirs) {
-            const nk = tileKey(gx + ndx, gy + ndy);
-            if (nk === last) continue; // already connected above
-            const nt = tiles[nk];
-            const isRailLike = nt === 'rail' || nt === 'rail_start' || nt === 'rail_end' || nt === 'rail_crossing';
-            if (!isRailLike) continue;
-            // Connect if neighbor is a segment endpoint or we/they are crossings
-            if (endpointKeys.has(nk) || nt === 'rail_crossing' || tool === 'rail_crossing') {
-              addRailConnection(key, nk);
-            }
-          }
-        } else {
-          // Legacy behavior: only auto-connect crossings
-          for (const [ndx, ndy] of neighborDirs) {
-            const nk = tileKey(gx + ndx, gy + ndy);
-            if (nk !== last && tiles[nk] === 'rail_crossing') {
-              addRailConnection(key, nk);
-            }
-            if (tool === 'rail_crossing' && nk !== last) {
-              const nt = tiles[nk];
-              if (nt === 'rail' || nt === 'rail_start' || nt === 'rail_end' || nt === 'rail_crossing') {
-                addRailConnection(key, nk);
-              }
-            }
-          }
-        }
-        lastPlacedRailRef.current = key;
-      }
-      setTiles(prev => ({ ...prev, [key]: tool as TileType }));
+      setObstacles(prev => ({ ...prev, [key]: tool as ObstacleTileType }));
       // Store pre-set rotation from R key presses for this fresh placement
-      if (obstacleDefMap.has(tool) && pendingToolRotRef.current !== 0) {
+      if (pendingToolRotRef.current !== 0) {
         const def = obstacleDefMap.get(tool)!;
         const baseRot = (def.defaultParams as any).rotation ?? 0;
         setObstacleParams(prev => ({
@@ -1736,29 +1523,6 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           [key]: { ...def.defaultParams, rotation: baseRot + pendingToolRotRef.current },
         }));
       }
-    } else if (tool === 'rail_start' || tool === 'rail_end') {
-      setTiles(prev => {
-        const next = { ...prev };
-        for (const [k, v] of Object.entries(next)) {
-          if (v === tool) {
-            removeRailConnections(k);
-            delete next[k];
-          }
-        }
-        next[key] = tool as TileType;
-        return next;
-      });
-      // Connect to last placed rail if adjacent
-      const last = lastPlacedRailRef.current;
-      if (last && last !== key) {
-        const [lx, ly] = parseTileKey(last);
-        const dx = Math.abs(gx - lx);
-        const dy = Math.abs(gy - ly);
-        if (dx <= 1 && dy <= 1 && (dx + dy > 0)) {
-          addRailConnection(last, key);
-        }
-      }
-      lastPlacedRailRef.current = key;
     }
   };
 
@@ -1766,16 +1530,25 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
 
   // Test the level
   const startTest = () => {
-    const hasStart = Object.values(tiles).some(t => t === 'rail_start');
-    const hasEnd = Object.values(tiles).some(t => t === 'rail_end');
-    if (!hasStart || !hasEnd) {
-      setTestError('Place both a Start (🟢) and End (🏁) tile before testing.');
+    if (!startMarker || !endMarker) {
+      setTestError('Place both a Start (🟢) and End (🏁) marker before testing.');
       setTimeout(() => setTestError(null), 3000);
       return;
     }
-    const { railPoints } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, freeLines);
+    const level: EditorLevel = {
+      name: currentLevelName || 'Test',
+      id: currentLevelId || 'test',
+      version: 3,
+      segments,
+      obstacles,
+      startMarker,
+      endMarker,
+      createdAt: Date.now(),
+      obstacleParams: Object.keys(obstacleParams).length > 0 ? obstacleParams : undefined,
+    };
+    const { railPoints } = convertLevelToGameDataV3(level);
     if (railPoints.length < 3) {
-      setTestError('Place at least 3 rail tiles before testing.');
+      setTestError('Place at least 3 rail segments before testing.');
       setTimeout(() => setTestError(null), 3000);
       return;
     }
@@ -1797,8 +1570,19 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     resize();
     window.addEventListener('resize', resize);
 
-    // Convert tiles to engine-compatible format (already resampled at RAIL_SPACING)
-    const { railPoints, allSegments, obstacles: obsData, endTileWorldPos, isLoop } = convertLevelToGameData(tiles, railConnectionsRef.current, smoothSegments, freeLines, obstacleParams);
+    // Convert to engine-compatible format (already resampled at RAIL_SPACING)
+    const level: EditorLevel = {
+      name: currentLevelName || 'Test',
+      id: currentLevelId || 'test',
+      version: 3,
+      segments,
+      obstacles,
+      startMarker,
+      endMarker,
+      createdAt: Date.now(),
+      obstacleParams: Object.keys(obstacleParams).length > 0 ? obstacleParams : undefined,
+    };
+    const { railPoints, allSegments, obstacles: obsData, endTileWorldPos, isLoop } = convertLevelToGameDataV3(level);
 
     // Start level music if configured
     if (currentMusicFile) {
@@ -1870,7 +1654,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       window.removeEventListener('resize', resize);
       window.removeEventListener('keydown', handleKey);
     };
-  }, [testing, tiles, smoothSegments, freeLines]);
+  }, [testing, segments, obstacles, startMarker, endMarker]);
 
   // Save dialog
   const handleSave = () => {
@@ -1881,18 +1665,19 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     const level: EditorLevel = {
       name: levelName.trim(),
       id,
-      tiles,
+      version: 3,
+      segments,
+      obstacles,
+      startMarker: startMarker ?? undefined,
+      endMarker: endMarker ?? undefined,
       createdAt: Date.now(),
-      connections: serializeConnections(),
-      smoothSegments,
-      freeLines,
       musicFile: currentMusicFile || undefined,
       obstacleParams: Object.keys(obstacleParams).length > 0 ? obstacleParams : undefined,
     };
     saveCustomLevel(level);
-    lastSavedTilesRef.current = JSON.stringify(tiles);
-    lastSavedSmoothRef.current = JSON.stringify(smoothSegments);
-    lastSavedFreeLinesRef.current = JSON.stringify(freeLines);
+    lastSavedSegmentsRef.current = JSON.stringify(segments);
+    lastSavedObstaclesRef.current = JSON.stringify(obstacles);
+    lastSavedMarkersRef.current = JSON.stringify({ startMarker, endMarker });
     setCurrentLevelId(id);
     setCurrentLevelName(levelName.trim());
     setShowSaveDialog(false);
@@ -1908,61 +1693,37 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     const level: EditorLevel = {
       name: currentLevelName,
       id,
-      tiles,
+      version: 3,
+      segments,
+      obstacles,
+      startMarker: startMarker ?? undefined,
+      endMarker: endMarker ?? undefined,
       createdAt: Date.now(),
-      connections: serializeConnections(),
-      smoothSegments,
-      freeLines,
       musicFile: currentMusicFile || undefined,
       obstacleParams: Object.keys(obstacleParams).length > 0 ? obstacleParams : undefined,
     };
     saveCustomLevel(level);
-    lastSavedTilesRef.current = JSON.stringify(tiles);
-    lastSavedSmoothRef.current = JSON.stringify(smoothSegments);
-    lastSavedFreeLinesRef.current = JSON.stringify(freeLines);
+    lastSavedSegmentsRef.current = JSON.stringify(segments);
+    lastSavedObstaclesRef.current = JSON.stringify(obstacles);
+    lastSavedMarkersRef.current = JSON.stringify({ startMarker, endMarker });
     setCurrentLevelId(id);
   };
 
   const handleLoad = (level: EditorLevel) => {
-    setTiles(level.tiles);
-    lastSavedTilesRef.current = JSON.stringify(level.tiles);
-    setSmoothSegments(level.smoothSegments ?? []);
-    lastSavedSmoothRef.current = JSON.stringify(level.smoothSegments ?? []);
-    // Migrate legacy freeLines (attachTo/start/end or segmentIndex) to attach/target with segmentId
-    const connsForMigration = level.connections
-      ? (() => { const r: Record<string, Set<string>> = {}; for (const [k, arr] of Object.entries(level.connections)) r[k] = new Set(arr as string[]); return r; })()
-      : (rebuildConnectionsFromTiles(level.tiles), railConnectionsRef.current);
-    const { segmentIdByIndex } = convertLevelToGameData(level.tiles, connsForMigration, level.smoothSegments ?? undefined, undefined);
-    const loadedFreeLines = (level.freeLines ?? []) as any[];
-    const migrated: FreeLineSegment[] = loadedFreeLines.map(fl => {
-      if (!fl || !fl.end) return null;
-      if (fl.attach && fl.attach.segmentId) return fl as FreeLineSegment;
-      if (fl.attach && typeof fl.attach.segmentIndex === 'number') {
-        const id = segmentIdByIndex[fl.attach.segmentIndex];
-        return { ...fl, attach: { ...fl.attach, segmentId: id }, target: fl.target && typeof fl.target.segmentIndex === 'number' ? { segmentId: segmentIdByIndex[fl.target.segmentIndex], endpoint: fl.target.endpoint } : fl.target };
-      }
-      if (fl.attachTo) {
-        return { attach: { segmentId: segmentIdByIndex[0], endpoint: fl.attachTo === 'start' ? 'start' : 'end' }, end: fl.end, target: fl.target };
-      }
-      return null;
-    }).filter(Boolean) as FreeLineSegment[];
-    setFreeLines(migrated);
-    lastSavedFreeLinesRef.current = JSON.stringify(migrated);
-    setObstacleParams(level.obstacleParams ? { ...level.obstacleParams } : {});
-    setCurrentLevelName(level.name);
-    setCurrentLevelId(level.id || generateLevelId());
-    setCurrentMusicFile(level.musicFile ?? '');
+    // Migrate legacy formats to V3
+    const v3 = level.version === 3 ? level : migrateToV3(level);
+    setSegments(v3.segments ?? []);
+    setObstacles((v3.obstacles ?? {}) as Record<string, ObstacleTileType>);
+    setStartMarker(v3.startMarker ?? null);
+    setEndMarker(v3.endMarker ?? null);
+    lastSavedSegmentsRef.current = JSON.stringify(v3.segments ?? []);
+    lastSavedObstaclesRef.current = JSON.stringify(v3.obstacles ?? {});
+    lastSavedMarkersRef.current = JSON.stringify({ startMarker: v3.startMarker ?? null, endMarker: v3.endMarker ?? null });
+    setObstacleParams(v3.obstacleParams ? { ...v3.obstacleParams } : {});
+    setCurrentLevelName(v3.name);
+    setCurrentLevelId(v3.id || generateLevelId());
+    setCurrentMusicFile(v3.musicFile ?? '');
     setShowLoadDialog(false);
-    // Restore explicit connections if present; otherwise rebuild from adjacency.
-    if (level.connections) {
-      const restored: Record<string, Set<string>> = {};
-      for (const [key, arr] of Object.entries(level.connections)) {
-        restored[key] = new Set(arr);
-      }
-      railConnectionsRef.current = restored;
-    } else {
-      rebuildConnectionsFromTiles(level.tiles);
-    }
     lastPlacedRailRef.current = null;
   };
 
@@ -1978,17 +1739,53 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     setShowLoadDialog(true);
   };
 
+  const handleExport = () => {
+    const id = currentLevelId || generateLevelId();
+    const name = currentLevelName || 'Untitled';
+    const level: EditorLevel = {
+      name,
+      id,
+      version: 3,
+      segments,
+      obstacles,
+      startMarker: startMarker ?? undefined,
+      endMarker: endMarker ?? undefined,
+      createdAt: Date.now(),
+      musicFile: currentMusicFile || undefined,
+      obstacleParams: Object.keys(obstacleParams).length > 0 ? obstacleParams : undefined,
+    };
+    downloadLevelFile(level);
+  };
+
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = importLevel(reader.result as string);
+      if ('error' in result) {
+        alert(`Import failed: ${result.error}`);
+        return;
+      }
+      handleLoad(result);
+      saveCustomLevel(result);
+    };
+    reader.readAsText(file);
+    // Reset so the same file can be re-imported
+    e.target.value = '';
+  };
+
   const handleBack = () => {
     if (hasUnsavedChanges() && !confirm('You have unsaved changes. Leave the editor?')) return;
     onBack();
   };
 
   const clearAll = () => {
-    if (Object.keys(tiles).length > 0 && !confirm('Clear all tiles?')) return;
-    setTiles({});
-    setSmoothSegments([]);
-    setFreeLines([]);
-    railConnectionsRef.current = {};
+    if ((segments.length > 0 || Object.keys(obstacles).length > 0) && !confirm('Clear all?')) return;
+    setSegments([]);
+    setObstacles({});
+    setStartMarker(null);
+    setEndMarker(null);
     setObstacleParams({});
     lastPlacedRailRef.current = null;
     setLine2Start(null);
@@ -2122,27 +1919,23 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
               const smoothed = smoothDrawnRail(drawRailPending.raw, drawRailSmoothness);
               const startPt = drawRailPending.attach ? drawRailPending.attach.start : drawRailPending.raw[0];
               const endPt = drawRailPending.endSnap ? drawRailPending.endSnap.pt : smoothed[smoothed.length - 1];
-              // Build waypoints (intermediate points, excluding first/last which are attach/end)
-              const waypoints = smoothed.length > 2 ? smoothed.slice(1, -1) : [];
-              const newFl: FreeLineSegment = {
-                attach: drawRailPending.attach
-                  ? drawRailPending.attach.attach
-                  : { segmentId: '__orphan__', atWorld: startPt },
-                attachWorld: startPt,
-                end: endPt,
-                target: drawRailPending.endSnap?.target,
-                waypoints,
+              // Build full polyline: start → smoothed intermediates → end
+              const allPts = [startPt, ...(smoothed.length > 2 ? smoothed.slice(1, -1) : []), endPt];
+              const newSeg: RailSegment = {
+                points: allPts,
                 rawDrawnPoints: drawRailPending.raw,
                 smoothness: drawRailSmoothness,
               };
-              // Dedup: remove conflicting free lines at same start/end
-              setFreeLines(prev => [
-                ...prev.filter(fl => {
-                  if (fl.attachWorld && Math.hypot(fl.attachWorld.x - startPt.x, fl.attachWorld.y - startPt.y) < 5) return false;
-                  if (Math.hypot(fl.end.x - endPt.x, fl.end.y - endPt.y) < 5) return false;
+              // Dedup: remove conflicting segments at same start/end
+              setSegments(prev => [
+                ...prev.filter(seg => {
+                  const segStart = seg.points[0];
+                  const segEnd = seg.points[seg.points.length - 1];
+                  if (Math.hypot(segStart.x - startPt.x, segStart.y - startPt.y) < 5) return false;
+                  if (Math.hypot(segEnd.x - endPt.x, segEnd.y - endPt.y) < 5) return false;
                   return true;
                 }),
-                newFl,
+                newSeg,
               ]);
               setDrawRailPending(null);
               setDrawRailAttach(null);
@@ -2382,6 +2175,19 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
                 >
                   📂 Load
                 </button>
+                <hr className="border-game-card-border my-1" />
+                <button
+                  onClick={() => { handleExport(); setShowFileMenu(false); }}
+                  className="w-full text-left px-3 py-2 rounded font-bold text-sm text-game-title hover:bg-game-bar-bg"
+                >
+                  📤 Export
+                </button>
+                <button
+                  onClick={() => { importFileRef.current?.click(); setShowFileMenu(false); }}
+                  className="w-full text-left px-3 py-2 rounded font-bold text-sm text-game-title hover:bg-game-bar-bg"
+                >
+                  📥 Import
+                </button>
               </div>
             )}
           </div>
@@ -2496,17 +2302,19 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
                             const newLevel: EditorLevel = {
                               name: level.name,
                               id,
-                              tiles,
+                              version: 3,
+                              segments,
+                              obstacles,
+                              startMarker: startMarker ?? undefined,
+                              endMarker: endMarker ?? undefined,
                               createdAt: Date.now(),
-                              connections: serializeConnections(),
-                              smoothSegments,
-                              freeLines,
                               musicFile: currentMusicFile || undefined,
+                              obstacleParams: Object.keys(obstacleParams).length > 0 ? obstacleParams : undefined,
                             };
                             saveCustomLevel(newLevel);
-                            lastSavedTilesRef.current = JSON.stringify(tiles);
-                            lastSavedSmoothRef.current = JSON.stringify(smoothSegments);
-                            lastSavedFreeLinesRef.current = JSON.stringify(freeLines);
+                            lastSavedSegmentsRef.current = JSON.stringify(segments);
+                            lastSavedObstaclesRef.current = JSON.stringify(obstacles);
+                            lastSavedMarkersRef.current = JSON.stringify({ startMarker, endMarker });
                             setCurrentLevelId(id);
                             setCurrentLevelName(level.name);
                             setShowSaveDialog(false);
@@ -2518,7 +2326,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
                         <div>
                           <div className="text-game-title font-bold text-sm">{level.name}</div>
                           <div className="text-game-subtitle text-xs">
-                            {Object.keys(level.tiles).length} tiles • {new Date(level.createdAt).toLocaleDateString()}
+                            {(level.segments ?? []).length} segments • {new Date(level.createdAt).toLocaleDateString()}
                           </div>
                         </div>
                         <span className="text-game-subtitle text-xs">Overwrite</span>
@@ -2548,9 +2356,9 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
 
       {/* Inspector Panel */}
       {selectedObstacleKey && (() => {
-        const tileType = tiles[selectedObstacleKey];
-        if (!tileType) return null;
-        const def = obstacleDefMap.get(tileType);
+        const obsType = obstacles[selectedObstacleKey];
+        if (!obsType) return null;
+        const def = obstacleDefMap.get(obsType);
         if (!def) return null;
         const params = { ...def.defaultParams, ...(obstacleParams[selectedObstacleKey] ?? {}) } as Record<string, any>;
         const [selGx, selGy] = parseTileKey(selectedObstacleKey);
@@ -2650,7 +2458,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
                     <div>
                       <div className="text-game-title font-bold">{level.name}</div>
                       <div className="text-game-subtitle text-xs">
-                        {Object.keys(level.tiles).length} tiles • {new Date(level.createdAt).toLocaleDateString()}
+                        {(level.segments ?? []).length} segments • {new Date(level.createdAt).toLocaleDateString()}
                       </div>
                     </div>
                     <div className="flex gap-1">
@@ -2680,6 +2488,15 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           </div>
         </div>
       )}
+
+      {/* Hidden file input for level import */}
+      <input
+        ref={importFileRef}
+        type="file"
+        accept=".json,.gondola"
+        className="hidden"
+        onChange={handleImportFile}
+      />
     </div>
   );
 }

@@ -4,7 +4,8 @@
       "Bash(npm run:*)",
       "Bash(npx tsc:*)",
       "Bash(grep -n \"eraser\\\\|case ''eraser''\\\\|case ''line2''\\\\|case ''draw_rail''\" /g/Misc/github/sky-lift-dash/src/components/LevelEditor.tsx)",
-      "Bash(grep -n \"loadFiniteLevel\\\\|allRailSegments\" /Users/valetzub/git/sky-lift-dash/src/components/*.tsx)"
+      "Bash(grep -n \"loadFiniteLevel\\\\|allRailSegments\" /Users/valetzub/git/sky-lift-dash/src/components/*.tsx)",
+      "Bash(npx vite:*)"
     ]
   }
 }

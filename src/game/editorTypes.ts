@@ -25,6 +25,26 @@ export type TileType =
   | "mine"
   | "stalactite";
 
+export type ObstacleTileType =
+  | "spinner"
+  | "bouncer"
+  | "pendulum"
+  | "crusher"
+  | "laser"
+  | "swoop"
+  | "orbiter"
+  | "boulder"
+  | "mine"
+  | "stalactite";
+
+export function isRailTileType(t: string): boolean {
+  return t === "rail" || t === "rail_start" || t === "rail_end" || t === "rail_crossing";
+}
+
+export function isObstacleTileType(t: string): t is ObstacleTileType {
+  return obstacleDefMap.has(t);
+}
+
 export type EditorTool =
   | "none"
   | "rail"
@@ -63,29 +83,21 @@ export interface SmoothSegment {
   pivotGy: number;
 }
 
-/** Stable id for a rail component (min tile key by gx,gy) so it doesn't change when start tile moves */
-export function componentId(keys: string[]): string {
-  if (keys.length === 0) return "";
-  return keys.slice().sort((a, b) => {
-    const [ax, ay] = parseTileKey(a);
-    const [bx, by] = parseTileKey(b);
-    return ax - bx || ay - by;
-  })[0];
+export interface FreeLineSegment {
+  /** World-space start point of this free line */
+  start: { x: number; y: number };
+  end: { x: number; y: number };
+  /** Drawn rail: smoothed polyline between start and end */
+  waypoints?: { x: number; y: number }[];
+  /** Drawn rail: original freehand points for re-smoothing */
+  rawDrawnPoints?: { x: number; y: number }[];
+  /** Drawn rail: smoothness slider value 0..1 */
+  smoothness?: number;
 }
 
-export type FreeLineAttach =
-  | { segmentId: string; endpoint: "start" | "end" }
-  | { segmentId: string; atWorld: { x: number; y: number } };
-
-export interface FreeLineSegment {
-  /** Logical attach reference (segment + endpoint or world point on a segment) */
-  attach: FreeLineAttach;
-  /** Cached world position where the Line 2 started, so it survives rail graph changes */
-  attachWorld?: { x: number; y: number };
-  end: { x: number; y: number };
-  target?: { segmentId: string; endpoint: "start" | "end" };
-  /** Drawn rail: smoothed polyline between attach and end */
-  waypoints?: { x: number; y: number }[];
+/** A polyline rail segment — the unified storage format (v3). */
+export interface RailSegment {
+  points: { x: number; y: number }[];
   /** Drawn rail: original freehand points for re-smoothing */
   rawDrawnPoints?: { x: number; y: number }[];
   /** Drawn rail: smoothness slider value 0..1 */
@@ -125,14 +137,9 @@ export interface EditorLevel {
   name: string;
   /** Stable unique identifier used for music folder paths and deduplication. */
   id: string;
-  tiles: Record<string, TileType>; // "x,y" -> type
+  /** Level data version — 2 = legacy (tiles+connections), 3 = unified segments. */
+  version?: number;
   createdAt: number;
-  // Optional explicit rail connection graph: tileKey -> array of connected tileKeys.
-  connections?: Record<string, string[]>;
-  /** Smooth arcs/curves between tiles; expanded to dense world points for game rail */
-  smoothSegments?: SmoothSegment[];
-  /** World-space line extensions attached to main rail */
-  freeLines?: FreeLineSegment[];
   /** Music filename relative to public/assets/music/customLevels/{id}/ */
   musicFile?: string;
   /**
@@ -140,6 +147,26 @@ export interface EditorLevel {
    * Absence of a key means use the obstacle type's defaultParams.
    */
   obstacleParams?: Record<string, ObstacleParams>;
+
+  // ── V3 fields (unified polyline format) ───────────────────────────────────
+  /** All rail segments as polylines (v3+) */
+  segments?: RailSegment[];
+  /** Grid-based obstacles only — "gx,gy" → obstacle type (v3+) */
+  obstacles?: Record<string, ObstacleTileType>;
+  /** World-space start marker position (v3+, replaces rail_start tile) */
+  startMarker?: { x: number; y: number };
+  /** World-space end marker position (v3+, replaces rail_end tile) */
+  endMarker?: { x: number; y: number };
+
+  // ── Legacy V2 fields (kept for migration) ─────────────────────────────────
+  /** @deprecated V2 — grid tiles (rails + obstacles). Use segments + obstacles in V3. */
+  tiles?: Record<string, TileType>;
+  /** @deprecated V2 — explicit rail connection graph. */
+  connections?: Record<string, string[]>;
+  /** @deprecated V2 — smooth arcs/curves between tiles. */
+  smoothSegments?: SmoothSegment[];
+  /** @deprecated V2 — world-space line extensions. */
+  freeLines?: FreeLineSegment[];
 }
 
 /** Generate a short random level id that is stable across saves. */
@@ -390,62 +417,6 @@ export function smoothDrawnRail(
   return pts;
 }
 
-function getSmoothSegment(
-  segments: SmoothSegment[] | undefined,
-  keyA: string,
-  keyB: string,
-): SmoothSegment | undefined {
-  if (!segments) return undefined;
-  return segments.find(
-    (s) =>
-      (s.startKey === keyA && s.endKey === keyB) ||
-      (s.startKey === keyB && s.endKey === keyA),
-  );
-}
-
-/** Expand an ordered list of tile keys into world points, inserting smooth segment geometry where defined */
-export function expandPathWithSmoothSegments(
-  orderedKeys: string[],
-  smoothSegments: SmoothSegment[] | undefined,
-): {
-  points: { x: number; y: number }[];
-  keyToLastIndex: Record<string, number>;
-} {
-  const points: { x: number; y: number }[] = [];
-  const keyToLastIndex: Record<string, number> = {};
-  if (orderedKeys.length === 0) return { points, keyToLastIndex };
-  const keyToWorldPt = (k: string) => keyToWorld(k);
-  points.push(keyToWorldPt(orderedKeys[0]));
-  keyToLastIndex[orderedKeys[0]] = 0;
-  for (let i = 1; i < orderedKeys.length; i++) {
-    const keyA = orderedKeys[i - 1];
-    const keyB = orderedKeys[i];
-    const seg = getSmoothSegment(smoothSegments, keyA, keyB);
-    if (seg) {
-      // Always sample using the segment's stored direction so the arc shape is stable
-      const worldStart = keyToWorldPt(seg.startKey);
-      const worldEnd = keyToWorldPt(seg.endKey);
-      const worldPivot = {
-        x: seg.pivotGx * GRID_SIZE,
-        y: seg.pivotGy * GRID_SIZE,
-      };
-      let arcPts =
-        seg.type === "circular"
-          ? sampleCircularArcWorld(worldStart, worldEnd, worldPivot)
-          : sampleBezierWorld(worldStart, worldEnd, worldPivot);
-      // If walk direction is opposite to stored direction, reverse the sampled points
-      const reversed = seg.startKey === keyB;
-      if (reversed) arcPts = [...arcPts].reverse();
-      for (let j = 1; j < arcPts.length; j++) {
-        points.push(arcPts[j]);
-      }
-    } else {
-      points.push(keyToWorldPt(keyB));
-    }
-    keyToLastIndex[keyB] = points.length - 1;
-  }
-  return { points, keyToLastIndex };
-}
 
 export function saveCustomLevel(level: EditorLevel) {
   const levels = loadCustomLevels();
@@ -468,68 +439,7 @@ export function deleteCustomLevel(name: string) {
   localStorage.setItem("cable-riders-custom-levels", JSON.stringify(levels));
 }
 
-// Walk one connected component from startKey, return ordered keys.
-// crossingKeys: tiles that allow 4 connections; at crossings, the walker
-// picks the neighbor most collinear with its approach direction ("straight through").
-function walkRailComponent(
-  startKey: string,
-  connections: Record<string, Set<string>>,
-  crossingKeys?: Set<string>,
-): string[] {
-  const visited = new Set<string>();
-  const ordered: string[] = [];
-  let current: string | null = startKey;
-  while (current && !visited.has(current)) {
-    visited.add(current);
-    ordered.push(current);
-    const neighbors = connections[current];
-    if (!neighbors) break;
-
-    let next: string | null = null;
-    const isCrossing =
-      crossingKeys && crossingKeys.has(current) && neighbors.size > 2;
-
-    if (isCrossing && ordered.length >= 2) {
-      // Direction-aware: pick neighbor that continues "straight through"
-      const prev = ordered[ordered.length - 2];
-      const [cx, cy] = parseTileKey(current);
-      const [px, py] = parseTileKey(prev);
-      const dx = cx - px;
-      const dy = cy - py;
-      let bestDot = -Infinity;
-      for (const n of neighbors) {
-        if (visited.has(n)) continue;
-        const [nx, ny] = parseTileKey(n);
-        const ndx = nx - cx;
-        const ndy = ny - cy;
-        const dot = dx * ndx + dy * ndy;
-        if (dot > bestDot) {
-          bestDot = dot;
-          next = n;
-        }
-      }
-    } else {
-      for (const n of neighbors) {
-        if (!visited.has(n)) {
-          next = n;
-          break;
-        }
-      }
-    }
-    current = next;
-  }
-  // Close the loop if the last tile connects back to the start
-  if (ordered.length > 2) {
-    const lastKey = ordered[ordered.length - 1];
-    const lastNeighbors = connections[lastKey];
-    if (lastNeighbors && lastNeighbors.has(startKey)) {
-      ordered.push(startKey);
-    }
-  }
-  return ordered;
-}
-
-// Find connected components of the rail graph.
+// Find connected components of the rail graph via BFS.
 // Crossing tiles are NOT added to the global seen set so multiple
 // components can traverse through the same crossing.
 function getRailComponents(
@@ -538,387 +448,28 @@ function getRailComponents(
   crossingKeys?: Set<string>,
 ): string[][] {
   const seen = new Set<string>();
+  const railSet = new Set(railKeys);
   const components: string[][] = [];
   for (const key of railKeys) {
     if (seen.has(key)) continue;
-    const comp = walkRailComponent(key, connections, crossingKeys);
-    for (const k of comp) {
-      // Don't mark crossings as seen — they belong to multiple components
-      if (!crossingKeys || !crossingKeys.has(k)) {
-        seen.add(k);
+    const comp: string[] = [];
+    const queue = [key];
+    if (!crossingKeys || !crossingKeys.has(key)) seen.add(key);
+    while (queue.length > 0) {
+      const cur = queue.shift()!;
+      comp.push(cur);
+      const neighbors = connections[cur];
+      if (!neighbors) continue;
+      for (const n of neighbors) {
+        if (!railSet.has(n)) continue;
+        if (seen.has(n)) continue;
+        if (!crossingKeys || !crossingKeys.has(n)) seen.add(n);
+        queue.push(n);
       }
     }
     components.push(comp);
   }
   return components;
-}
-
-// Convert editor tiles to game-compatible rail + obstacles
-// Smooth segments are expanded to dense world-space points so rail is truly circular/bezier in-game
-export function convertLevelToGameData(
-  tiles: Record<string, TileType>,
-  connections?: Record<string, Set<string>>,
-  smoothSegments?: SmoothSegment[],
-  freeLines?: FreeLineSegment[],
-  obstacleParams?: Record<string, ObstacleParams>,
-): {
-  railPoints: { x: number; y: number }[];
-  allSegments: { x: number; y: number }[][];
-  /** Stable segment id per index (so Line 2 doesn't break when start tile moves) */
-  segmentIdByIndex: string[];
-  obstacles: {
-    tileType: string;
-    gx: number;
-    gy: number;
-    params: ObstacleParams;
-  }[];
-  endTileWorldPos: { x: number; y: number } | null;
-  isLoop: boolean;
-} {
-  const obstacles: {
-    tileType: string;
-    gx: number;
-    gy: number;
-    params: ObstacleParams;
-  }[] = [];
-  const railKeys: string[] = [];
-
-  for (const [key, type] of Object.entries(tiles)) {
-    if (
-      type === "rail" ||
-      type === "rail_start" ||
-      type === "rail_end" ||
-      type === "rail_crossing"
-    ) {
-      railKeys.push(key);
-    } else if (obstacleDefMap.has(type)) {
-      const [gx, gy] = parseTileKey(key);
-      const stored = obstacleParams ? obstacleParams[key] : undefined;
-      const params = resolveParams(type, stored);
-      if (params) obstacles.push({ tileType: type, gx, gy, params });
-    }
-  }
-
-  if (railKeys.length < 2) {
-    const rawRail = railKeys.map((k) => keyToWorld(k));
-    const segmentIdByIndex = rawRail.length > 0 ? [componentId(railKeys)] : [];
-    return {
-      railPoints: rawRail,
-      allSegments: rawRail.length > 0 ? [rawRail] : [],
-      segmentIdByIndex,
-      obstacles,
-      endTileWorldPos: null,
-      isLoop: false,
-    };
-  }
-
-  const conns =
-    connections && Object.keys(connections).length > 0
-      ? connections
-      : ({} as Record<string, Set<string>>);
-  // Build set of crossing tile keys for direction-aware traversal
-  const crossingKeys = new Set<string>();
-  for (const key of railKeys) {
-    if (tiles[key] === "rail_crossing") crossingKeys.add(key);
-  }
-  const hasCrossings = crossingKeys.size > 0;
-  const components = getRailComponents(
-    railKeys,
-    conns,
-    hasCrossings ? crossingKeys : undefined,
-  );
-
-  // Hoist start/end keys so they're available in the freeLine post-processing block
-  const startKey = railKeys.find((k) => tiles[k] === "rail_start");
-  const endKey = railKeys.find((k) => tiles[k] === "rail_end");
-
-  let railPoints: { x: number; y: number }[] = [];
-  // End tile world position for proximity-based trigger (no fragile index tracking)
-  const endTileWorldPos = endKey ? keyToWorld(endKey) : null;
-  let isLoop = false;
-  const allSegments: { x: number; y: number }[][] = [];
-  const segmentIdByIndex: string[] = [];
-
-  if (conns && Object.keys(conns).length > 0) {
-    // Direction-neutral: prefer any dead-end tile (1 connection) for walk start.
-    // rail_start only influences the final orientation step (reversing so index 0 is near spawn).
-    const walkStart =
-      railKeys.find((k) => conns[k] && conns[k].size === 1) ||
-      startKey ||
-      railKeys[0];
-
-    const startOrdered = walkRailComponent(
-      walkStart,
-      conns,
-      hasCrossings ? crossingKeys : undefined,
-    );
-    isLoop =
-      startOrdered.length > 2 &&
-      startOrdered[0] === startOrdered[startOrdered.length - 1];
-    const expanded = expandPathWithSmoothSegments(startOrdered, smoothSegments);
-    railPoints = expanded.points;
-
-    allSegments.push(railPoints);
-    segmentIdByIndex.push(componentId(startOrdered));
-    const startSet = new Set(startOrdered);
-    for (const comp of components) {
-      if (comp.some((k) => startSet.has(k))) continue;
-      const { points: pts } = expandPathWithSmoothSegments(
-        comp,
-        smoothSegments,
-      );
-      // Include even single-tile components so Line 2 can reliably
-      // target hand-placed isolated rail tiles.
-      if (pts.length >= 1) {
-        allSegments.push(pts);
-        segmentIdByIndex.push(componentId(comp));
-      }
-    }
-  } else {
-    const sorted = [...railKeys].sort((a, b) => {
-      const [ax, ay] = parseTileKey(a);
-      const [bx, by] = parseTileKey(b);
-      return ax - bx || ay - by;
-    });
-    const expanded = expandPathWithSmoothSegments(sorted, smoothSegments);
-    railPoints = expanded.points;
-    allSegments.push(railPoints);
-    segmentIdByIndex.push(componentId(sorted));
-  }
-
-  // ---------------------------------------------------------------------------
-  // Free line merging: chains are DIRECTIONLESS point arrays.
-  //
-  // Each free line is a bridge between two world positions (attachWorld → end).
-  // A bridge always connects at a chain's endpoint (first or last point).
-  // We orient the chain so the attach point is at the END, then always append.
-  // After all merges, we reverse the final rail once so rail_start is at index 0.
-  // ---------------------------------------------------------------------------
-  if (freeLines && freeLines.length > 0) {
-    const chainById: Record<string, { x: number; y: number }[]> = {};
-    const segToChain: Record<string, string> = {};
-
-    for (let i = 0; i < allSegments.length; i++) {
-      const sid = segmentIdByIndex[i];
-      if (sid) {
-        chainById[sid] = [...allSegments[i]];
-        segToChain[sid] = sid;
-      }
-    }
-
-    const resolveChainOf = (
-      segId: string,
-    ): [string, { x: number; y: number }[]] | null => {
-      const cid = segToChain[segId];
-      return cid && chainById[cid] ? [cid, chainById[cid]] : null;
-    };
-
-    /** Which end of `pts` is closer to `world`? Returns the endpoint position. Reverses `pts` in-place so the matched end is always at pts[last]. */
-    const orientChainToward = (
-      pts: { x: number; y: number }[],
-      world: { x: number; y: number },
-    ): { x: number; y: number } => {
-      const dFirst = Math.hypot(world.x - pts[0].x, world.y - pts[0].y);
-      const dLast = Math.hypot(
-        world.x - pts[pts.length - 1].x,
-        world.y - pts[pts.length - 1].y,
-      );
-      if (dFirst < dLast) pts.reverse(); // attach is at pts[0] → flip so it's at pts[last]
-      return pts[pts.length - 1];
-    };
-
-    /** Orient `pts` so the point closest to `world` is at pts[0] (for target joining). */
-    const orientChainAwayFrom = (
-      pts: { x: number; y: number }[],
-      world: { x: number; y: number },
-    ) => {
-      const dFirst = Math.hypot(world.x - pts[0].x, world.y - pts[0].y);
-      const dLast = Math.hypot(
-        world.x - pts[pts.length - 1].x,
-        world.y - pts[pts.length - 1].y,
-      );
-      if (dLast < dFirst) pts.reverse(); // match is at pts[last] → flip so it's at pts[0]
-    };
-
-    const mergeTarget = (
-      chainId: string,
-      pts: { x: number; y: number }[],
-      endWorld: { x: number; y: number },
-      mergeChainId: string,
-    ) => {
-      const mPts = chainById[mergeChainId];
-      if (!mPts) return;
-      // Orient target so the join point is at mPts[0]
-      orientChainAwayFrom(mPts, endWorld);
-      // Append target — only skip mPts[0] if it's actually a duplicate of the last appended point
-      const last = pts[pts.length - 1];
-      const gap = Math.hypot(mPts[0].x - last.x, mPts[0].y - last.y);
-      const startIdx = gap < 4 ? 1 : 0;
-      for (let i = startIdx; i < mPts.length; i++) pts.push(mPts[i]);
-      for (const [sid, cid] of Object.entries(segToChain)) {
-        if (cid === mergeChainId) segToChain[sid] = chainId;
-      }
-      delete chainById[mergeChainId];
-    };
-
-    for (const fl of freeLines) {
-      const attachWorld = fl.attachWorld ?? fl.end;
-
-      /* console.log('[FL-DEBUG] Processing free line:', JSON.stringify({ attachSegId: fl.attach.segmentId, attachWorld, end: fl.end, hasTarget: !!fl.target, targetSegId: fl.target?.segmentId }));
-      console.log('[FL-DEBUG] chainById keys:', Object.keys(chainById), 'segToChain:', JSON.stringify(segToChain)); */
-
-      const res = resolveChainOf(fl.attach.segmentId);
-      if (!res) {
-        /* console.log('[FL-DEBUG] resolveChainOf FAILED for attach segmentId:', fl.attach.segmentId); */
-        // Attach segment was erased — create an orphan chain from the bridge
-        if (!fl.attachWorld) continue;
-        let endWorld = fl.end;
-        let floatMergeChainId: string | null = null;
-        if (fl.target) {
-          const tgtRes = resolveChainOf(fl.target.segmentId);
-          if (tgtRes) {
-            const [tgtChainId, tgtPts] = tgtRes;
-            if (tgtChainId && tgtPts.length > 0) {
-              // Use whichever end of target chain is closer to fl.end
-              const dFirst = Math.hypot(
-                fl.end.x - tgtPts[0].x,
-                fl.end.y - tgtPts[0].y,
-              );
-              const dLast = Math.hypot(
-                fl.end.x - tgtPts[tgtPts.length - 1].x,
-                fl.end.y - tgtPts[tgtPts.length - 1].y,
-              );
-              endWorld =
-                dFirst <= dLast ? tgtPts[0] : tgtPts[tgtPts.length - 1];
-              floatMergeChainId = tgtChainId;
-            }
-          }
-        }
-        const raw =
-          fl.waypoints && fl.waypoints.length > 0
-            ? samplePolylineWorld([fl.attachWorld, ...fl.waypoints, endWorld])
-            : sampleLineWorld(fl.attachWorld, endWorld);
-        if (raw.length < 2) continue;
-        raw[0] = fl.attachWorld;
-        raw[raw.length - 1] = endWorld;
-        const floatId = `orphan_${fl.attachWorld.x.toFixed(0)}_${fl.attachWorld.y.toFixed(0)}`;
-        chainById[floatId] = raw;
-        if (floatMergeChainId) {
-          mergeTarget(floatId, raw, endWorld, floatMergeChainId);
-        }
-        continue;
-      }
-
-      const [chainId, pts] = res;
-
-      // Orient chain so the attach world position is at pts[last]
-      const startPt = orientChainToward(pts, attachWorld);
-
-      // Resolve bridge end: use whichever end of the target chain is closest to fl.end
-      let endWorld = fl.end;
-      let mergeChainId: string | null = null;
-
-      if (fl.target) {
-        const tgtRes = resolveChainOf(fl.target.segmentId);
-        /* console.log('[FL-DEBUG] target resolve:', fl.target.segmentId, '→', tgtRes ? tgtRes[0] : 'NULL'); */
-        if (tgtRes) {
-          const [tgtChainId, tgtPts] = tgtRes;
-          /* console.log('[FL-DEBUG] tgtChainId:', tgtChainId, 'chainId:', chainId, 'same?', tgtChainId === chainId, 'tgtPts.length:', tgtPts.length); */
-          if (tgtChainId !== chainId && tgtPts.length > 0) {
-            const dFirst = Math.hypot(
-              fl.end.x - tgtPts[0].x,
-              fl.end.y - tgtPts[0].y,
-            );
-            const dLast = Math.hypot(
-              fl.end.x - tgtPts[tgtPts.length - 1].x,
-              fl.end.y - tgtPts[tgtPts.length - 1].y,
-            );
-            endWorld = dFirst <= dLast ? tgtPts[0] : tgtPts[tgtPts.length - 1];
-            mergeChainId = tgtChainId;
-            /* console.log('[FL-DEBUG] WILL MERGE target chain:', mergeChainId); */
-          } else {
-            /* console.log('[FL-DEBUG] SKIP merge: same chain or empty target'); */
-          }
-        }
-      } else {
-        /* console.log('[FL-DEBUG] No target — bridge extends to fl.end without merge'); */
-      }
-
-      // Build bridge — use waypoints polyline if this is a drawn rail
-      const raw =
-        fl.waypoints && fl.waypoints.length > 0
-          ? samplePolylineWorld([startPt, ...fl.waypoints, endWorld])
-          : sampleLineWorld(startPt, endWorld);
-      if (raw.length < 2) continue;
-      raw[0] = startPt;
-      raw[raw.length - 1] = endWorld;
-
-      // Append bridge — only skip raw[0] if it's actually a duplicate of the last appended point
-      const lastPt = pts[pts.length - 1];
-      const bridgeGap = Math.hypot(raw[0].x - lastPt.x, raw[0].y - lastPt.y);
-      const bridgeStart = bridgeGap < 4 ? 1 : 0;
-      for (let i = bridgeStart; i < raw.length; i++) pts.push(raw[i]);
-
-      // Merge target chain if the bridge connects to a different chain
-      if (mergeChainId) {
-        mergeTarget(chainId, pts, endWorld, mergeChainId);
-      }
-    }
-
-    // Rebuild allSegments: main chain (containing segment 0) goes first
-    const mainChainId = segToChain[segmentIdByIndex[0]];
-    const newAllSegs: { x: number; y: number }[][] = [];
-    const addedChains = new Set<string>();
-    if (mainChainId && chainById[mainChainId]) {
-      newAllSegs.push(chainById[mainChainId]);
-      addedChains.add(mainChainId);
-    }
-    for (const [cid, cPts] of Object.entries(chainById)) {
-      if (!addedChains.has(cid)) {
-        newAllSegs.push(cPts);
-        addedChains.add(cid);
-      }
-    }
-    railPoints = newAllSegs[0] ?? allSegments[0] ?? [];
-    allSegments.splice(0, allSegments.length, ...newAllSegs);
-    /* console.log('[FL-DEBUG] Final: chains:', newAllSegs.length, 'railPoints.length:', railPoints.length, 'segment lengths:', newAllSegs.map(s => s.length)); */
-
-    // Final orientation: ensure railPoints[0] is near rail_start tile.
-    // Chains are directionless — riding direction is determined solely by
-    // where the player spawns (rail_start).
-    if (startKey && railPoints.length >= 2) {
-      const startWorld = keyToWorld(startKey);
-      const dFirst = Math.hypot(
-        railPoints[0].x - startWorld.x,
-        railPoints[0].y - startWorld.y,
-      );
-      const dLast = Math.hypot(
-        railPoints[railPoints.length - 1].x - startWorld.x,
-        railPoints[railPoints.length - 1].y - startWorld.y,
-      );
-      if (dLast < dFirst) {
-        railPoints.reverse();
-        allSegments[0] = railPoints;
-      }
-    }
-
-    // segmentIdByIndex must match the rebuilt allSegments order
-    const newSegIds: string[] = [];
-    if (mainChainId) newSegIds.push(mainChainId);
-    for (const cid of Object.keys(chainById)) {
-      if (cid !== mainChainId) newSegIds.push(cid);
-    }
-    segmentIdByIndex.splice(0, segmentIdByIndex.length, ...newSegIds);
-  }
-
-  return {
-    railPoints,
-    allSegments,
-    segmentIdByIndex,
-    obstacles,
-    endTileWorldPos,
-    isLoop,
-  };
 }
 
 // ─── Unified Segment Builders ────────────────────────────────────────────────
@@ -1078,7 +629,7 @@ export function buildIndividualSegments(
   // ── Free line segments ───────────────────────────────────────────────────
   for (let i = 0; i < freeLines.length; i++) {
     const fl = freeLines[i];
-    const startPt = fl.attachWorld ?? fl.end;
+    const startPt = fl.start;
     const endPt = fl.end;
 
     let points: { x: number; y: number }[];
@@ -1175,4 +726,404 @@ export function getSnapPoints(
     }
   }
   return result;
+}
+
+// ─── Unified Game Pipeline (V2) ─────────────────────────────────────────────
+
+const WALK_SNAP = 8; // px — same tolerance as buildContinuousSegments
+
+/** Walk individual segments within a continuous group into an ordered point sequence. */
+export function walkContinuousPath(
+  allIndividual: IndividualRailSegment[],
+  contSeg: ContinuousRailSegment,
+  tiles?: Record<string, TileType>,
+  startMarkerPos?: { x: number; y: number } | null,
+): { points: { x: number; y: number }[]; isLoop: boolean } {
+  const segMap = new Map<string, IndividualRailSegment>();
+  for (const seg of allIndividual) segMap.set(seg.id, seg);
+  const segs = contSeg.individualIds.map(id => segMap.get(id)!).filter(Boolean);
+  if (segs.length === 0) return { points: [], isLoop: false };
+  if (segs.length === 1) return { points: [...segs[0].points], isLoop: false };
+
+  // Build adjacency within this continuous group
+  const adj = new Map<string, { id: string; matchedVia: "A" | "B"; myEnd: "A" | "B" }[]>();
+  for (const s of segs) adj.set(s.id, []);
+
+  const near = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+    Math.hypot(a.x - b.x, a.y - b.y) < WALK_SNAP;
+
+  for (let i = 0; i < segs.length; i++) {
+    for (let j = i + 1; j < segs.length; j++) {
+      const si = segs[i], sj = segs[j];
+      const pairs: [("A" | "B"), ("A" | "B")][] = [];
+      if (near(si.snapA, sj.snapA)) pairs.push(["A", "A"]);
+      if (near(si.snapA, sj.snapB)) pairs.push(["A", "B"]);
+      if (near(si.snapB, sj.snapA)) pairs.push(["B", "A"]);
+      if (near(si.snapB, sj.snapB)) pairs.push(["B", "B"]);
+      for (const [myEnd, theirEnd] of pairs) {
+        adj.get(si.id)!.push({ id: sj.id, matchedVia: theirEnd, myEnd });
+        adj.get(sj.id)!.push({ id: si.id, matchedVia: myEnd, myEnd: theirEnd });
+      }
+    }
+  }
+
+  // Find start segment: prefer startMarkerPos (V3) or rail_start tile (V2), else dead-end
+  let startSeg = segs[0];
+  let startFromA = true;
+  let foundStart = false;
+
+  if (startMarkerPos) {
+    // V3: find segment nearest to startMarkerPos
+    let bestDist = Infinity;
+    for (const s of segs) {
+      const dA = Math.hypot(s.snapA.x - startMarkerPos.x, s.snapA.y - startMarkerPos.y);
+      const dB = Math.hypot(s.snapB.x - startMarkerPos.x, s.snapB.y - startMarkerPos.y);
+      const d = Math.min(dA, dB);
+      if (d < bestDist) {
+        bestDist = d;
+        startSeg = s;
+        startFromA = dA <= dB;
+        foundStart = d < WALK_SNAP;
+      }
+    }
+  } else if (tiles) {
+    // V2: find segment containing rail_start tile
+    for (const s of segs) {
+      if (s.sourceKeys?.some(k => tiles[k] === "rail_start")) {
+        startSeg = s;
+        const startKey = s.sourceKeys.find(k => tiles[k] === "rail_start")!;
+        const sw = keyToWorld(startKey);
+        const dA = Math.hypot(s.snapA.x - sw.x, s.snapA.y - sw.y);
+        const dB = Math.hypot(s.snapB.x - sw.x, s.snapB.y - sw.y);
+        startFromA = dA <= dB;
+        foundStart = true;
+        break;
+      }
+    }
+  }
+
+  // Fallback: prefer dead-end segment (neighbors on only one side)
+  if (!foundStart) {
+    for (const s of segs) {
+      const neighbors = adj.get(s.id)!;
+      const hasANeighbor = neighbors.some(n => n.myEnd === "A");
+      const hasBNeighbor = neighbors.some(n => n.myEnd === "B");
+      if (hasANeighbor && !hasBNeighbor) { startSeg = s; startFromA = true; break; }
+      if (hasBNeighbor && !hasANeighbor) { startSeg = s; startFromA = false; break; }
+    }
+  }
+
+  // Walk the chain
+  const visited = new Set<string>();
+  const result: { x: number; y: number }[] = [];
+  let current = startSeg;
+  let exitEnd: "A" | "B" = startFromA ? "B" : "A";
+
+  const firstPts = startFromA ? [...current.points] : [...current.points].reverse();
+  result.push(...firstPts);
+  visited.add(current.id);
+
+  while (true) {
+    const exitPt = exitEnd === "B" ? current.snapB : current.snapA;
+    const neighbors = adj.get(current.id)!.filter(n => !visited.has(n.id) && n.myEnd === exitEnd);
+
+    if (neighbors.length === 0) break;
+
+    // Crossing: prefer straightest continuation (dot product)
+    let next = neighbors[0];
+    if (neighbors.length > 1 && result.length >= 2) {
+      const prev = result[result.length - 2];
+      const curr = result[result.length - 1];
+      const dx = curr.x - prev.x, dy = curr.y - prev.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const dirX = dx / len, dirY = dy / len;
+      let bestDot = -Infinity;
+      for (const n of neighbors) {
+        const ns = segMap.get(n.id)!;
+        const otherEnd = n.matchedVia === "A" ? ns.snapB : ns.snapA;
+        const ndx = otherEnd.x - exitPt.x, ndy = otherEnd.y - exitPt.y;
+        const nlen = Math.hypot(ndx, ndy) || 1;
+        const dot = (ndx / nlen) * dirX + (ndy / nlen) * dirY;
+        if (dot > bestDot) { bestDot = dot; next = n; }
+      }
+    }
+
+    visited.add(next.id);
+    const nextSeg = segMap.get(next.id)!;
+    const readForward = next.matchedVia === "A";
+    const pts = readForward ? nextSeg.points : [...nextSeg.points].reverse();
+
+    // Deduplicate shared endpoint
+    const lastPt = result[result.length - 1];
+    const startIdx = (pts.length > 0 && Math.hypot(pts[0].x - lastPt.x, pts[0].y - lastPt.y) < WALK_SNAP) ? 1 : 0;
+    for (let i = startIdx; i < pts.length; i++) result.push(pts[i]);
+
+    current = nextSeg;
+    exitEnd = readForward ? "B" : "A";
+  }
+
+  const isLoop = result.length >= 3 && Math.hypot(
+    result[0].x - result[result.length - 1].x,
+    result[0].y - result[result.length - 1].y,
+  ) < WALK_SNAP;
+
+  return { points: result, isLoop };
+}
+
+/** V2 game data conversion: unified spatial pipeline.
+ *  Uses buildIndividualSegments + buildContinuousSegments + walkContinuousPath. */
+export function convertLevelToGameDataV2(
+  tiles: Record<string, TileType>,
+  connections?: Record<string, Set<string>>,
+  smoothSegments?: SmoothSegment[],
+  freeLines?: FreeLineSegment[],
+  obstacleParams?: Record<string, ObstacleParams>,
+): {
+  railPoints: { x: number; y: number }[];
+  allSegments: { x: number; y: number }[][];
+  segmentIdByIndex: string[];
+  obstacles: { tileType: string; gx: number; gy: number; params: ObstacleParams }[];
+  endTileWorldPos: { x: number; y: number } | null;
+  isLoop: boolean;
+} {
+  // Extract obstacles
+  const obstacles: { tileType: string; gx: number; gy: number; params: ObstacleParams }[] = [];
+  for (const [key, type] of Object.entries(tiles)) {
+    if (obstacleDefMap.has(type)) {
+      const [gx, gy] = parseTileKey(key);
+      const stored = obstacleParams ? obstacleParams[key] : undefined;
+      const params = resolveParams(type, stored);
+      if (params) obstacles.push({ tileType: type, gx, gy, params });
+    }
+  }
+
+  const endKey = Object.entries(tiles).find(([, t]) => t === "rail_end")?.[0];
+  const endTileWorldPos = endKey ? keyToWorld(endKey) : null;
+
+  const conns = connections && Object.keys(connections).length > 0
+    ? connections
+    : {} as Record<string, Set<string>>;
+  const individual = buildIndividualSegments(
+    tiles, conns, smoothSegments ?? [], freeLines ?? [],
+  );
+  const continuous = buildContinuousSegments(individual);
+
+  if (continuous.length === 0) {
+    return { railPoints: [], allSegments: [], segmentIdByIndex: [], obstacles, endTileWorldPos, isLoop: false };
+  }
+
+  // Walk each continuous segment into ordered points
+  const walkedSegments: { points: { x: number; y: number }[]; isLoop: boolean; contId: string }[] = [];
+  for (const cs of continuous) {
+    const { points, isLoop } = walkContinuousPath(individual, cs, tiles);
+    if (points.length > 0) walkedSegments.push({ points, isLoop, contId: cs.id });
+  }
+
+  // Find main segment: the one containing rail_start
+  const startKey = Object.entries(tiles).find(([, t]) => t === "rail_start")?.[0];
+  let mainIdx = 0;
+  if (startKey) {
+    const startWorld = keyToWorld(startKey);
+    for (let i = 0; i < walkedSegments.length; i++) {
+      const pts = walkedSegments[i].points;
+      const dFirst = Math.hypot(pts[0].x - startWorld.x, pts[0].y - startWorld.y);
+      const dLast = Math.hypot(pts[pts.length - 1].x - startWorld.x, pts[pts.length - 1].y - startWorld.y);
+      if (dFirst < WALK_SNAP || dLast < WALK_SNAP) { mainIdx = i; break; }
+    }
+  }
+
+  // Build output: main segment first
+  const allSegments: { x: number; y: number }[][] = [];
+  const segmentIdByIndex: string[] = [];
+  const order = [mainIdx, ...walkedSegments.map((_, i) => i).filter(i => i !== mainIdx)];
+  for (const i of order) {
+    allSegments.push(walkedSegments[i].points);
+    segmentIdByIndex.push(walkedSegments[i].contId);
+  }
+
+  let railPoints = allSegments[0] ?? [];
+  const isLoop = walkedSegments[mainIdx]?.isLoop ?? false;
+
+  // Final orientation: ensure railPoints[0] is near rail_start
+  if (startKey && railPoints.length >= 2) {
+    const startWorld = keyToWorld(startKey);
+    const dFirst = Math.hypot(railPoints[0].x - startWorld.x, railPoints[0].y - startWorld.y);
+    const dLast = Math.hypot(railPoints[railPoints.length - 1].x - startWorld.x, railPoints[railPoints.length - 1].y - startWorld.y);
+    if (dLast < dFirst) {
+      railPoints = [...railPoints].reverse();
+      allSegments[0] = railPoints;
+    }
+  }
+
+  return { railPoints, allSegments, segmentIdByIndex, obstacles, endTileWorldPos, isLoop };
+}
+
+// ─── V3 Game Pipeline (unified segments) ────────────────────────────────────
+
+/** Convert RailSegment[] to IndividualRailSegment[] (trivial mapping). */
+export function buildIndividualSegmentsFromRailSegments(
+  segments: RailSegment[],
+): IndividualRailSegment[] {
+  return segments.map((seg, i) => {
+    const pts = seg.points;
+    return {
+      id: `seg_${i}`,
+      kind: seg.rawDrawnPoints ? "drawn_rail" as const : "free_line" as const,
+      points: pts,
+      snapA: pts[0],
+      snapB: pts[pts.length - 1],
+    };
+  });
+}
+
+/** V3 game data conversion: works from unified segments format. */
+export function convertLevelToGameDataV3(
+  level: EditorLevel,
+): {
+  railPoints: { x: number; y: number }[];
+  allSegments: { x: number; y: number }[][];
+  segmentIdByIndex: string[];
+  obstacles: { tileType: string; gx: number; gy: number; params: ObstacleParams }[];
+  endTileWorldPos: { x: number; y: number } | null;
+  isLoop: boolean;
+} {
+  // Extract obstacles from V3 obstacles record
+  const obstacles: { tileType: string; gx: number; gy: number; params: ObstacleParams }[] = [];
+  if (level.obstacles) {
+    for (const [key, type] of Object.entries(level.obstacles)) {
+      const [gx, gy] = parseTileKey(key);
+      const stored = level.obstacleParams ? level.obstacleParams[key] : undefined;
+      const params = resolveParams(type, stored);
+      if (params) obstacles.push({ tileType: type, gx, gy, params });
+    }
+  }
+
+  const endTileWorldPos = level.endMarker ?? null;
+  const segs = level.segments ?? [];
+
+  const individual = buildIndividualSegmentsFromRailSegments(segs);
+  const continuous = buildContinuousSegments(individual);
+
+  if (continuous.length === 0) {
+    return { railPoints: [], allSegments: [], segmentIdByIndex: [], obstacles, endTileWorldPos, isLoop: false };
+  }
+
+  // Walk each continuous segment
+  const walkedSegments: { points: { x: number; y: number }[]; isLoop: boolean; contId: string }[] = [];
+  for (const cs of continuous) {
+    const { points, isLoop } = walkContinuousPath(individual, cs, undefined, level.startMarker);
+    if (points.length > 0) walkedSegments.push({ points, isLoop, contId: cs.id });
+  }
+
+  // Find main segment: nearest to startMarker
+  let mainIdx = 0;
+  if (level.startMarker) {
+    const sm = level.startMarker;
+    for (let i = 0; i < walkedSegments.length; i++) {
+      const pts = walkedSegments[i].points;
+      const dFirst = Math.hypot(pts[0].x - sm.x, pts[0].y - sm.y);
+      const dLast = Math.hypot(pts[pts.length - 1].x - sm.x, pts[pts.length - 1].y - sm.y);
+      if (dFirst < WALK_SNAP || dLast < WALK_SNAP) { mainIdx = i; break; }
+    }
+  }
+
+  // Build output: main segment first
+  const allSegments: { x: number; y: number }[][] = [];
+  const segmentIdByIndex: string[] = [];
+  const order = [mainIdx, ...walkedSegments.map((_, i) => i).filter(i => i !== mainIdx)];
+  for (const i of order) {
+    allSegments.push(walkedSegments[i].points);
+    segmentIdByIndex.push(walkedSegments[i].contId);
+  }
+
+  let railPoints = allSegments[0] ?? [];
+  const isLoop = walkedSegments[mainIdx]?.isLoop ?? false;
+
+  // Final orientation: ensure railPoints[0] is near startMarker
+  if (level.startMarker && railPoints.length >= 2) {
+    const sm = level.startMarker;
+    const dFirst = Math.hypot(railPoints[0].x - sm.x, railPoints[0].y - sm.y);
+    const dLast = Math.hypot(railPoints[railPoints.length - 1].x - sm.x, railPoints[railPoints.length - 1].y - sm.y);
+    if (dLast < dFirst) {
+      railPoints = [...railPoints].reverse();
+      allSegments[0] = railPoints;
+    }
+  }
+
+  return { railPoints, allSegments, segmentIdByIndex, obstacles, endTileWorldPos, isLoop };
+}
+
+// ─── V2 → V3 Migration ─────────────────────────────────────────────────────
+
+/** Migrate a legacy V2 (or V1) level to V3 unified segment format. */
+export function migrateToV3(level: EditorLevel): EditorLevel {
+  if (level.version === 3 && level.segments) return level;
+
+  const tiles = level.tiles ?? {};
+
+  // Build connections map
+  const connections: Record<string, Set<string>> = {};
+  if (level.connections) {
+    for (const [key, arr] of Object.entries(level.connections)) {
+      connections[key] = new Set(arr);
+    }
+  }
+
+  // Migrate legacy free line formats to { start, end }
+  const rawFreeLines = (level.freeLines ?? []) as any[];
+  const migratedFreeLines: FreeLineSegment[] = rawFreeLines.map(fl => {
+    if (!fl || !fl.end) return null;
+    if (fl.start) return fl as FreeLineSegment;
+    const startPt = fl.attachWorld ?? fl.attach?.atWorld ?? fl.end;
+    const result: FreeLineSegment = { start: startPt, end: fl.end };
+    if (fl.waypoints) result.waypoints = fl.waypoints;
+    if (fl.rawDrawnPoints) result.rawDrawnPoints = fl.rawDrawnPoints;
+    if (fl.smoothness !== undefined) result.smoothness = fl.smoothness;
+    return result;
+  }).filter(Boolean) as FreeLineSegment[];
+
+  // Build individual segments using existing V2 pipeline
+  const individual = buildIndividualSegments(
+    tiles, connections, level.smoothSegments ?? [], migratedFreeLines,
+  );
+
+  // Convert to RailSegment[], preserving rawDrawnPoints/smoothness from source free lines
+  const segments: RailSegment[] = individual.map(seg => {
+    const rs: RailSegment = { points: [...seg.points] };
+    if (seg.sourceFreeLineIndex !== undefined) {
+      const fl = migratedFreeLines[seg.sourceFreeLineIndex];
+      if (fl?.rawDrawnPoints) rs.rawDrawnPoints = fl.rawDrawnPoints;
+      if (fl?.smoothness !== undefined) rs.smoothness = fl.smoothness;
+    }
+    return rs;
+  });
+
+  // Extract markers
+  let startMarker: { x: number; y: number } | undefined;
+  let endMarker: { x: number; y: number } | undefined;
+  for (const [key, type] of Object.entries(tiles)) {
+    if (type === "rail_start") startMarker = keyToWorld(key);
+    if (type === "rail_end") endMarker = keyToWorld(key);
+  }
+
+  // Extract obstacles only
+  const obstacles: Record<string, ObstacleTileType> = {};
+  for (const [key, type] of Object.entries(tiles)) {
+    if (isObstacleTileType(type)) {
+      obstacles[key] = type;
+    }
+  }
+
+  return {
+    name: level.name,
+    id: level.id,
+    version: 3,
+    createdAt: level.createdAt,
+    musicFile: level.musicFile,
+    obstacleParams: level.obstacleParams,
+    segments,
+    obstacles,
+    startMarker,
+    endMarker,
+  };
 }
