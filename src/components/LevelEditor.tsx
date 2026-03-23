@@ -1375,6 +1375,64 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     setIsPanning(false);
     setIsDrawing(false);
 
+    // Autoconnect on mouse release: try to connect the last-placed segment's endpoint to a nearby existing segment
+    if (autoconnect && lastPlacedRailRef.current && (tool === 'rail' || tool === 'rail_crossing')) {
+      const ref = lastPlacedRailRef.current;
+      setSegments(prev => {
+        const placedSeg = prev[ref.segIdx];
+        if (!placedSeg || placedSeg.points.length === 0) return prev;
+        const tipPt = ref.endpoint === 'end'
+          ? placedSeg.points[placedSeg.points.length - 1]
+          : placedSeg.points[0];
+        // Count how many other segments connect to a given point
+        const connectionsAt = (pt: { x: number; y: number }, excludeIdx: number) => {
+          let count = 0;
+          for (let j = 0; j < prev.length; j++) {
+            if (j === excludeIdx || prev[j].points.length === 0) continue;
+            const f = prev[j].points[0];
+            const l = prev[j].points[prev[j].points.length - 1];
+            if (Math.hypot(pt.x - f.x, pt.y - f.y) < GRID_SIZE * 1.5) count++;
+            if (Math.hypot(pt.x - l.x, pt.y - l.y) < GRID_SIZE * 1.5) count++;
+          }
+          return count;
+        };
+        // Find closest snappoint on a *different* segment (skip if already has 2+ connections)
+        let bestSnap: { segIdx: number; endpoint: 'start' | 'end'; dist: number } | null = null;
+        for (let i = 0; i < prev.length; i++) {
+          if (i === ref.segIdx) continue;
+          const seg = prev[i];
+          if (seg.points.length === 0) continue;
+          const first = seg.points[0];
+          const last = seg.points[seg.points.length - 1];
+          const dFirst = Math.hypot(tipPt.x - first.x, tipPt.y - first.y);
+          const dLast = Math.hypot(tipPt.x - last.x, tipPt.y - last.y);
+          if (dFirst < GRID_SIZE * 1.5 && dFirst > 0.1 && (!bestSnap || dFirst < bestSnap.dist)) {
+            if (connectionsAt(first, i) < 2) {
+              bestSnap = { segIdx: i, endpoint: 'start', dist: dFirst };
+            }
+          }
+          if (dLast < GRID_SIZE * 1.5 && dLast > 0.1 && (!bestSnap || dLast < bestSnap.dist)) {
+            if (connectionsAt(last, i) < 2) {
+              bestSnap = { segIdx: i, endpoint: 'end', dist: dLast };
+            }
+          }
+        }
+        if (!bestSnap) return prev;
+        // Merge: append the placed segment's points onto the target segment
+        const target = prev[bestSnap.segIdx];
+        const placedPts = ref.endpoint === 'end' ? placedSeg.points : [...placedSeg.points].reverse();
+        const mergedPts = bestSnap.endpoint === 'end'
+          ? [...target.points, ...placedPts]
+          : [...[...placedPts].reverse(), ...target.points];
+        const merged = { ...target, points: mergedPts };
+        // Remove the placed segment, replace the target with merged
+        return prev
+          .map((s, i) => i === bestSnap.segIdx ? merged : s)
+          .filter((_, i) => i !== ref.segIdx);
+      });
+      lastPlacedRailRef.current = null;
+    }
+
     // Commit curve / circular curve on mouse up: sample to polyline and add as segment
     if (isDraggingCurve && curveStart && curveEnd && curveControl) {
       const wStart = keyToWorld(tileKey(curveStart.gx, curveStart.gy));
@@ -1490,30 +1548,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           }
         }
       }
-      // Autoconnect: check if near any existing segment endpoint
-      if (autoconnect) {
-        const allSnaps = getSnapPoints(buildIndividualSegmentsFromRailSegments(segments));
-        let bestSnap: { segIdx: number; endpoint: 'start' | 'end'; dist: number } | null = null;
-        for (const sp of allSnaps) {
-          const d = Math.hypot(worldPt.x - sp.point.x, worldPt.y - sp.point.y);
-          if (d < GRID_SIZE * 1.5 && d > 0.1 && (!bestSnap || d < bestSnap.dist)) {
-            const segIdx = parseInt(sp.segmentId.replace('seg_', ''), 10);
-            bestSnap = { segIdx, endpoint: sp.endpoint === 'A' ? 'start' : 'end', dist: d };
-          }
-        }
-        if (bestSnap) {
-          setSegments(prev => prev.map((s, i) => {
-            if (i !== bestSnap.segIdx) return s;
-            const pts = bestSnap.endpoint === 'end'
-              ? [...s.points, worldPt]
-              : [worldPt, ...s.points];
-            return { ...s, points: pts };
-          }));
-          lastPlacedRailRef.current = { segIdx: bestSnap.segIdx, endpoint: bestSnap.endpoint };
-          return;
-        }
-      }
-      // No nearby endpoint: create new single-point segment
+      // No nearby endpoint: create new single-point segment (autoconnect deferred to mouseUp)
       setSegments(prev => [...prev, { points: [worldPt] }]);
       lastPlacedRailRef.current = { segIdx: segments.length, endpoint: 'end' };
     } else if (tool === 'rail_start') {
