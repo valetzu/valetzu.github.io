@@ -2,6 +2,7 @@ export interface GameSettings {
   musicVolume: number; // 0–1
   snapRadius: number; // pixels, min 5
   defaultFreeLineToolBehaviour: "normal" | "grid_snap";
+  continuousLine: boolean;
 }
 
 const SETTINGS_KEY = "game-settings";
@@ -10,6 +11,7 @@ const defaults: GameSettings = {
   musicVolume: 0.7,
   snapRadius: 25,
   defaultFreeLineToolBehaviour: "normal",
+  continuousLine: false,
 };
 
 export function loadSettings(): GameSettings {

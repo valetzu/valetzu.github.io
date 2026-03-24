@@ -209,6 +209,9 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const [line2GridSnap, setLine2GridSnap] = useState(
     () => loadSettings().defaultFreeLineToolBehaviour === "grid_snap",
   );
+  const [continuousLine, setContinuousLine] = useState(
+    () => loadSettings().continuousLine,
+  );
   const [mouseWorld, setMouseWorld] = useState<{ x: number; y: number } | null>(
     null,
   );
@@ -1588,7 +1591,11 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
             }));
             setSegments((prev) => [...prev, { points: worldPts }]);
           }
-          setLineStart(null);
+          if (continuousLine) {
+            setLineStart({ gx, gy });
+          } else {
+            setLineStart(null);
+          }
           setLinePreview([]);
         }
         return;
@@ -1685,7 +1692,11 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           const endPoint = snapEnd ? snapEnd : line2ClickWorld;
           const startPt = line2Start.start;
           setSegments((prev) => [...prev, { points: [startPt, endPoint] }]);
-          setLine2Start(null);
+          if (continuousLine) {
+            setLine2Start({ start: endPoint });
+          } else {
+            setLine2Start(null);
+          }
         }
         return;
       }
@@ -2933,31 +2944,54 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
                   {t.emoji} {t.label}
                 </button>
 
-                {isFreeLine && isActive && (
-                  <div className="bg-game-card border border-game-card-border rounded-lg p-2 min-w-[180px] shadow-lg">
+                {(isFreeLine || t.tool === "line") && isActive && (
+                  <div className="bg-game-card border border-game-card-border rounded-lg p-2 min-w-[180px] shadow-lg flex flex-col gap-1">
+                    {isFreeLine && (
+                      <button
+                        onClick={() => {
+                          setLine2GridSnap((enabled) => {
+                            const nextEnabled = !enabled;
+                            updateSetting(
+                              "defaultFreeLineToolBehaviour",
+                              nextEnabled ? "grid_snap" : "normal",
+                            );
+                            return nextEnabled;
+                          });
+                        }}
+                        className={`w-full px-3 py-2 rounded-lg text-sm font-bold transition-all text-left ${
+                          line2GridSnap
+                            ? "bg-green-700 text-white hover:bg-green-600"
+                            : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+                        }`}
+                        title={
+                          line2GridSnap
+                            ? "Free Line grid snap: ON — empty clicked tiles snap to tile centers"
+                            : "Free Line grid snap: OFF"
+                        }
+                      >
+                        {line2GridSnap ? "🧲 Grid snap: On" : "🧲 Grid snap: Off"}
+                      </button>
+                    )}
                     <button
                       onClick={() => {
-                        setLine2GridSnap((enabled) => {
+                        setContinuousLine((enabled) => {
                           const nextEnabled = !enabled;
-                          updateSetting(
-                            "defaultFreeLineToolBehaviour",
-                            nextEnabled ? "grid_snap" : "normal",
-                          );
+                          updateSetting("continuousLine", nextEnabled);
                           return nextEnabled;
                         });
                       }}
                       className={`w-full px-3 py-2 rounded-lg text-sm font-bold transition-all text-left ${
-                        line2GridSnap
+                        continuousLine
                           ? "bg-green-700 text-white hover:bg-green-600"
                           : "bg-gray-700 text-gray-300 hover:bg-gray-600"
                       }`}
                       title={
-                        line2GridSnap
-                          ? "Free Line grid snap: ON — empty clicked tiles snap to tile centers"
-                          : "Free Line grid snap: OFF"
+                        continuousLine
+                          ? "Continuous: ON — endpoint becomes next start point"
+                          : "Continuous: OFF — each line placed independently"
                       }
                     >
-                      {line2GridSnap ? "🧲 Grid snap: On" : "🧲 Grid snap: Off"}
+                      {continuousLine ? "🔗 Continuous: On" : "🔗 Continuous: Off"}
                     </button>
                   </div>
                 )}
