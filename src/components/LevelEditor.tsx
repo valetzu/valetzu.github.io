@@ -922,6 +922,23 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       ctx.lineTo(previewEnd.x - cx, previewEnd.y - cy);
       ctx.stroke();
       ctx.setLineDash([]);
+
+      // Tile-length label at midpoint of the free line preview
+      const dx = previewEnd.x - line2Start.start.x;
+      const dy = previewEnd.y - line2Start.start.y;
+      const lineLenPx = Math.sqrt(dx * dx + dy * dy);
+      const lineTiles = Math.round(lineLenPx / GRID_SIZE) + 1;
+      const midSx = (line2Start.start.x + previewEnd.x) / 2 - cx;
+      const midSy = (line2Start.start.y + previewEnd.y) / 2 - cy;
+      const lenText = `${lineTiles}`;
+      ctx.font = "bold 11px system-ui";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+      ctx.fillStyle = "rgba(0,0,0,0.6)";
+      const ltw = ctx.measureText(lenText).width;
+      ctx.fillRect(midSx - ltw / 2 - 3, midSy - 18, ltw + 6, 14);
+      ctx.fillStyle = "#00FF88";
+      ctx.fillText(lenText, midSx, midSy - 5);
     }
 
     // Draw rail: live drawing preview
@@ -1012,6 +1029,19 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         const sy2 = p.gy * GRID_SIZE - cy;
         ctx.fillRect(sx2 + 2, sy2 + 2, GRID_SIZE - 4, GRID_SIZE - 4);
       }
+      // Tile count label near the last tile in the preview
+      const lastTile = linePreview[linePreview.length - 1];
+      const lblX = lastTile.gx * GRID_SIZE + GRID_SIZE / 2 - cx;
+      const lblY = lastTile.gy * GRID_SIZE - 6 - cy;
+      const countText = `${linePreview.length}`;
+      ctx.font = "bold 11px system-ui";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+      ctx.fillStyle = "rgba(0,0,0,0.6)";
+      const tw = ctx.measureText(countText).width;
+      ctx.fillRect(lblX - tw / 2 - 3, lblY - 12, tw + 6, 14);
+      ctx.fillStyle = "#00FF88";
+      ctx.fillText(countText, lblX, lblY);
     }
 
     // Line start marker
