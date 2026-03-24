@@ -66,6 +66,7 @@ const TOOLS: { tool: EditorTool; label: string; emoji: string }[] = [
   { tool: "rail", label: "Rail", emoji: "🛤️" },
   { tool: "rail_crossing", label: "Crossing", emoji: "✖️" },
   ...OBSTACLE_TOOLS,
+  { tool: "star", label: "Star", emoji: "⭐" },
   { tool: "eraser", label: "Eraser", emoji: "🧹" },
   { tool: "arc", label: "Arc Tool", emoji: "🔄" },
   { tool: "curve", label: "Curve", emoji: "〰️" },
@@ -81,6 +82,7 @@ const TILE_TOOL_TYPES = new Set<EditorTool>([
   "rail_end",
   "rail_crossing",
   ...OBSTACLE_DEFINITIONS.map((d) => d.tileType as EditorTool),
+  "star",
 ]);
 const SHAPE_TOOL_TYPES = new Set<EditorTool>([
   "arc",
@@ -142,6 +144,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const [obstacles, setObstacles] = useState<Record<string, ObstacleTileType>>(
     {},
   );
+  const [stars, setStars] = useState<Record<string, "star">>({});
   const [startMarker, setStartMarker] = useState<{
     x: number;
     y: number;
@@ -178,6 +181,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     time: number;
     records: LevelRecord[];
     isNewBest: boolean;
+    starsCollected: number;
   } | null>(null);
   const testCanvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
@@ -473,6 +477,21 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           ctx.globalAlpha = 1.0;
         }
       }
+    }
+
+    // Collectible stars — grid squares
+    for (const [key] of Object.entries(stars)) {
+      const [gx, gy] = parseTileKey(key);
+      const sx = gx * GRID_SIZE - cx;
+      const sy = gy * GRID_SIZE - cy;
+      if (sx < -GRID_SIZE || sx > vw + GRID_SIZE || sy < -GRID_SIZE || sy > vh + GRID_SIZE)
+        continue;
+      ctx.fillStyle = "rgba(255, 215, 0, 0.3)";
+      ctx.fillRect(sx + 2, sy + 2, GRID_SIZE - 4, GRID_SIZE - 4);
+      ctx.font = `${GRID_SIZE * 0.6}px system-ui`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("⭐", sx + GRID_SIZE / 2, sy + GRID_SIZE / 2);
     }
 
     // Arc preview
@@ -2174,6 +2193,15 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         delete next[key];
         return next;
       });
+      setStars((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    } else if (tool === "star") {
+      // Max 3 stars per level
+      if (Object.keys(stars).length >= 3 && !stars[key]) return;
+      setStars((prev) => ({ ...prev, [key]: "star" }));
     } else if (tool === "rail" || tool === "rail_crossing") {
       // Skip if we already placed on this exact tile during this drag
       if (lastPlacedKeyRef.current === key) return;
@@ -2297,6 +2325,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       createdAt: Date.now(),
       obstacleParams:
         Object.keys(obstacleParams).length > 0 ? obstacleParams : undefined,
+      stars: Object.keys(stars).length > 0 ? stars : undefined,
     };
     const { railPoints } = convertLevelToGameDataV3(level);
     if (railPoints.length < 3) {
@@ -2334,11 +2363,13 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       createdAt: Date.now(),
       obstacleParams:
         Object.keys(obstacleParams).length > 0 ? obstacleParams : undefined,
+      stars: Object.keys(stars).length > 0 ? stars : undefined,
     };
     const {
       railPoints,
       allSegments,
       obstacles: obsData,
+      stars: starData,
       endTileWorldPos,
       isLoop,
     } = convertLevelToGameDataV3(level);
@@ -2357,13 +2388,14 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         onGameOver: () => {
           gameOverRef.current = true;
         },
-        onLevelComplete: (time: number) => {
+        onLevelComplete: (time: number, starsCollected: number) => {
           const levelId = currentLevelId || "unsaved";
-          const result = recordTime(levelId, time);
+          const result = recordTime(levelId, time, starsCollected);
           setLevelComplete({
             time,
             records: result.records,
             isNewBest: result.isNewBest,
+            starsCollected,
           });
         },
       },
@@ -2397,6 +2429,14 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       );
       if (gameObs) engine.obstacles.push(gameObs);
     }
+
+    // Add collectible stars
+    engine.collectibleStars = starData.map((s) => ({
+      x: s.worldX,
+      y: s.worldY,
+      collected: false,
+    }));
+    engine.starsCollected = 0;
 
     // Prevent auto-generation of more rail; mark as finite path
     engine.generateRail = () => {};
@@ -2452,6 +2492,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       musicFile: currentMusicFile || undefined,
       obstacleParams:
         Object.keys(obstacleParams).length > 0 ? obstacleParams : undefined,
+      stars: Object.keys(stars).length > 0 ? stars : undefined,
     };
     saveCustomLevel(level);
     lastSavedSegmentsRef.current = JSON.stringify(segments);
@@ -2481,6 +2522,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       musicFile: currentMusicFile || undefined,
       obstacleParams:
         Object.keys(obstacleParams).length > 0 ? obstacleParams : undefined,
+      stars: Object.keys(stars).length > 0 ? stars : undefined,
     };
     saveCustomLevel(level);
     lastSavedSegmentsRef.current = JSON.stringify(segments);
@@ -2503,6 +2545,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       endMarker: v3.endMarker ?? null,
     });
     setObstacleParams(v3.obstacleParams ? { ...v3.obstacleParams } : {});
+    setStars((v3.stars ?? {}) as Record<string, "star">);
     setCurrentLevelName(v3.name);
     setCurrentLevelId(v3.id || generateLevelId());
     setCurrentMusicFile(v3.musicFile ?? "");
@@ -2541,6 +2584,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       musicFile: currentMusicFile || undefined,
       obstacleParams:
         Object.keys(obstacleParams).length > 0 ? obstacleParams : undefined,
+      stars: Object.keys(stars).length > 0 ? stars : undefined,
     };
     downloadLevelFile(level);
   };
@@ -2619,6 +2663,19 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
               </h2>
               <p className="text-game-subtitle text-lg mb-4">
                 You reached the finish line!
+              </p>
+              <div className="flex justify-center gap-2 mb-3">
+                {[0, 1, 2].map((i) => (
+                  <span
+                    key={i}
+                    className={`text-3xl ${i < levelComplete.starsCollected ? "opacity-100" : "opacity-25"}`}
+                  >
+                    ⭐
+                  </span>
+                ))}
+              </div>
+              <p className="text-game-subtitle text-sm mb-4">
+                {levelComplete.starsCollected}/3 Stars
               </p>
               <div className="bg-game-bg rounded-xl p-4 mb-4">
                 <p className="text-game-subtitle text-sm">Completion Time</p>
@@ -3326,6 +3383,10 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
                               obstacleParams:
                                 Object.keys(obstacleParams).length > 0
                                   ? obstacleParams
+                                  : undefined,
+                              stars:
+                                Object.keys(stars).length > 0
+                                  ? stars
                                   : undefined,
                             };
                             saveCustomLevel(newLevel);

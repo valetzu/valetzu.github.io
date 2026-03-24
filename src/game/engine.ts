@@ -87,9 +87,12 @@ export class GameEngine {
   nextObstacleX = 600;
   rng: () => number;
 
+  collectibleStars: { x: number; y: number; collected: boolean }[] = [];
+  starsCollected = 0;
+
   onUpdate?: (dist: number, passengers: number, speed: number) => void;
   onGameOver?: (dist: number, cash: number) => void;
-  onLevelComplete?: (time: number) => void;
+  onLevelComplete?: (time: number, starsCollected: number) => void;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -98,7 +101,7 @@ export class GameEngine {
     callbacks: {
       onUpdate?: (d: number, p: number, s: number) => void;
       onGameOver?: (d: number, c: number) => void;
-      onLevelComplete?: (time: number) => void;
+      onLevelComplete?: (time: number, starsCollected: number) => void;
     }
   ) {
     this.canvas = canvas;
@@ -369,7 +372,7 @@ export class GameEngine {
         if (this.touchedEndTile() && !this.levelCompleted) {
           this.speed = 0;
           this.levelCompleted = true;
-          this.onLevelComplete?.(this.elapsedTime);
+          this.onLevelComplete?.(this.elapsedTime, this.starsCollected);
         }
       }
 
@@ -398,7 +401,7 @@ export class GameEngine {
       if (this.hasFinitePath && this.touchedEndTile() && !this.levelCompleted) {
         this.speed = 0;
         this.levelCompleted = true;
-        this.onLevelComplete?.(this.elapsedTime);
+        this.onLevelComplete?.(this.elapsedTime, this.starsCollected);
         return;
       }
       // Otherwise ran off the end: launch into airborne mode.
@@ -466,7 +469,7 @@ export class GameEngine {
     if (this.hasFinitePath && this.touchedEndTile() && !this.levelCompleted) {
       this.speed = 0;
       this.levelCompleted = true;
-      this.onLevelComplete?.(this.elapsedTime);
+      this.onLevelComplete?.(this.elapsedTime, this.starsCollected);
       return;
     }
 
@@ -483,6 +486,7 @@ export class GameEngine {
 
     // Collision
     this.checkCollisions();
+    this.checkStarCollection();
 
     // Update obstacle state machines and animations
     this.updateObstacles(dt);
@@ -542,6 +546,20 @@ export class GameEngine {
       if (behavior && behavior.checkCollision(obs, cx, cy, HIT_RADIUS)) {
         this.hitPassenger(obs);
         return;
+      }
+    }
+  }
+
+  checkStarCollection() {
+    const gp = this.getGondolaPos();
+    const cx = gp.x;
+    const cy = gp.y + GONDOLA_HANG;
+    for (const star of this.collectibleStars) {
+      if (star.collected) continue;
+      const dist = Math.hypot(cx - star.x, cy - star.y);
+      if (dist < 30) {
+        star.collected = true;
+        this.starsCollected++;
       }
     }
   }
@@ -667,6 +685,7 @@ export class GameEngine {
 
     // Obstacles
     this.renderObstacles(cx, cy);
+    this.renderCollectibleStars(cx, cy);
 
     // Gondola
     this.renderGondola(cx, cy);
@@ -788,6 +807,46 @@ export class GameEngine {
       if (behavior) {
         behavior.render(obs, ctx, screenX, obs.y - cy, now);
       }
+    }
+  }
+
+  renderCollectibleStars(cx: number, cy: number) {
+    const { ctx } = this;
+    const now = performance.now() / 1000;
+    for (const star of this.collectibleStars) {
+      if (star.collected) continue;
+      const sx = star.x - cx;
+      if (sx < -60 || sx > this.canvas.width + 60) continue;
+      const sy = star.y - cy;
+
+      // Gentle pulse
+      const pulse = 1 + Math.sin(now * 3) * 0.08;
+      const r = 18 * pulse;
+
+      // Draw 5-pointed star
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate(Math.sin(now * 0.7) * 0.15);
+      ctx.beginPath();
+      for (let i = 0; i < 5; i++) {
+        const angle = -Math.PI / 2 + (i * 2 * Math.PI) / 5;
+        const innerAngle = angle + Math.PI / 5;
+        ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
+        ctx.lineTo(Math.cos(innerAngle) * r * 0.4, Math.sin(innerAngle) * r * 0.4);
+      }
+      ctx.closePath();
+      ctx.fillStyle = '#FFD700';
+      ctx.fill();
+      ctx.strokeStyle = '#DAA520';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Glow
+      ctx.shadowColor = '#FFD700';
+      ctx.shadowBlur = 12 * pulse;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.restore();
     }
   }
 

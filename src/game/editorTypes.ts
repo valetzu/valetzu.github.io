@@ -61,6 +61,7 @@ export type EditorTool =
   | "boulder"
   | "mine"
   | "stalactite"
+  | "star"
   | "eraser"
   | "arc"
   | "curve"
@@ -157,6 +158,8 @@ export interface EditorLevel {
   startMarker?: { x: number; y: number };
   /** World-space end marker position (v3+, replaces rail_end tile) */
   endMarker?: { x: number; y: number };
+  /** Collectible stars keyed by "gx,gy" — max 3 per level (v3+) */
+  stars?: Record<string, "star">;
 
   // ── Legacy V2 fields (kept for migration) ─────────────────────────────────
   /** @deprecated V2 — grid tiles (rails + obstacles). Use segments + obstacles in V3. */
@@ -991,6 +994,7 @@ export function convertLevelToGameDataV3(
   allSegments: { x: number; y: number }[][];
   segmentIdByIndex: string[];
   obstacles: { tileType: string; gx: number; gy: number; params: ObstacleParams }[];
+  stars: { gx: number; gy: number; worldX: number; worldY: number }[];
   endTileWorldPos: { x: number; y: number } | null;
   isLoop: boolean;
 } {
@@ -1005,6 +1009,15 @@ export function convertLevelToGameDataV3(
     }
   }
 
+  // Extract collectible stars
+  const stars: { gx: number; gy: number; worldX: number; worldY: number }[] = [];
+  if (level.stars) {
+    for (const key of Object.keys(level.stars)) {
+      const [gx, gy] = parseTileKey(key);
+      stars.push({ gx, gy, worldX: (gx + 0.5) * GRID_SIZE, worldY: (gy + 0.5) * GRID_SIZE });
+    }
+  }
+
   const endTileWorldPos = level.endMarker ?? null;
   const segs = level.segments ?? [];
 
@@ -1012,7 +1025,7 @@ export function convertLevelToGameDataV3(
   const continuous = buildContinuousSegments(individual);
 
   if (continuous.length === 0) {
-    return { railPoints: [], allSegments: [], segmentIdByIndex: [], obstacles, endTileWorldPos, isLoop: false };
+    return { railPoints: [], allSegments: [], segmentIdByIndex: [], obstacles, stars, endTileWorldPos, isLoop: false };
   }
 
   // Walk each continuous segment
@@ -1057,7 +1070,7 @@ export function convertLevelToGameDataV3(
     }
   }
 
-  return { railPoints, allSegments, segmentIdByIndex, obstacles, endTileWorldPos, isLoop };
+  return { railPoints, allSegments, segmentIdByIndex, obstacles, stars, endTileWorldPos, isLoop };
 }
 
 // ─── V2 → V3 Migration ─────────────────────────────────────────────────────

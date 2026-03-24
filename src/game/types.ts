@@ -140,6 +140,7 @@ export interface LevelRecord {
   levelId: string;
   time: number;
   date: number;
+  starsCollected?: number;
 }
 
 export type Leaderboard = Record<string, LevelRecord[]>;
@@ -157,11 +158,11 @@ export function saveLeaderboard(data: Leaderboard) {
 }
 
 /** Record a completion time. Returns the sorted top-5 list and whether this was a new personal best. */
-export function recordTime(levelId: string, time: number): { records: LevelRecord[]; isNewBest: boolean } {
+export function recordTime(levelId: string, time: number, starsCollected?: number): { records: LevelRecord[]; isNewBest: boolean } {
   const lb = loadLeaderboard();
   const records = lb[levelId] || [];
   const wasBest = records.length > 0 ? records[0].time : Infinity;
-  records.push({ levelId, time, date: Date.now() });
+  records.push({ levelId, time, date: Date.now(), starsCollected });
   records.sort((a, b) => a.time - b.time);
   lb[levelId] = records.slice(0, 5); // keep top 5
   saveLeaderboard(lb);

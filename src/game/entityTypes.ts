@@ -1,4 +1,4 @@
-export type EntityCategory = 'player' | 'obstacle' | 'enemy' | 'background' | 'rail';
+export type EntityCategory = 'player' | 'obstacle' | 'enemy' | 'collectible' | 'background' | 'rail';
 
 // Globally unique type identifiers for entities
 export type EntityTypeId =
@@ -17,6 +17,7 @@ export type EntityTypeId =
   | 'rail.segment'
    | 'rail.startTile'
    | 'rail.endTile'
+  | 'collectible.star'
   | 'background.mountain'
   | 'background.cloud';
 
