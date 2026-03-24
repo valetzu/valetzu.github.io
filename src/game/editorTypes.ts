@@ -268,18 +268,22 @@ export function sampleBezierWorld(
   end: { x: number; y: number },
   control: { x: number; y: number },
 ): { x: number; y: number }[] {
-  const dist = Math.hypot(end.x - start.x, end.y - start.y);
-  const steps = Math.max(16, Math.min(80, Math.ceil(dist / 6)));
-  const out: { x: number; y: number }[] = [];
+  // Sample densely using the control polygon length, then resample by arc
+  // length so the runtime sees a more uniform rail with cleaner endpoint tangents.
+  const controlPolyLen =
+    Math.hypot(control.x - start.x, control.y - start.y) +
+    Math.hypot(end.x - control.x, end.y - control.y);
+  const steps = Math.max(24, Math.min(240, Math.ceil(controlPolyLen / 3)));
+  const raw: { x: number; y: number }[] = [];
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
     const mt = 1 - t;
-    out.push({
+    raw.push({
       x: mt * mt * start.x + 2 * mt * t * control.x + t * t * end.x,
       y: mt * mt * start.y + 2 * mt * t * control.y + t * t * end.y,
     });
   }
-  return out;
+  return samplePolylineWorld(raw, 8);
 }
 
 export function sampleLineWorld(
@@ -808,8 +812,11 @@ export function walkContinuousPath(
       const neighbors = adj.get(s.id)!;
       const hasANeighbor = neighbors.some(n => n.myEnd === "A");
       const hasBNeighbor = neighbors.some(n => n.myEnd === "B");
-      if (hasANeighbor && !hasBNeighbor) { startSeg = s; startFromA = true; break; }
-      if (hasBNeighbor && !hasANeighbor) { startSeg = s; startFromA = false; break; }
+      // If only one endpoint is connected, start from the opposite dead-end so
+      // the walk continues through the rest of the chain instead of stopping
+      // immediately after the first individual segment.
+      if (hasANeighbor && !hasBNeighbor) { startSeg = s; startFromA = false; break; }
+      if (hasBNeighbor && !hasANeighbor) { startSeg = s; startFromA = true; break; }
     }
   }
 
