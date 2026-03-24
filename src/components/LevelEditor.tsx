@@ -93,6 +93,9 @@ const OBSTACLE_COLORS: Record<string, string> = Object.fromEntries(
   OBSTACLE_DEFINITIONS.map((d) => [d.tileType, d.tileColor]),
 );
 
+/** Snap radius for tile-based adjacency — larger than GRID_SIZE so adjacent tiles always connect. */
+const TILE_SNAP_RADIUS = GRID_SIZE * 1.5;
+
 const TILE_COLORS: Record<string, string> = {
   empty: "transparent",
   rail: "#FFD700",
@@ -1530,14 +1533,11 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         } else {
           const points = generateLine(lineStart, { gx, gy });
           if (points.length >= 2) {
-            const worldPts = filterOccupiedPoints(
-              points.map((p) => ({
-                x: (p.gx + 0.5) * GRID_SIZE,
-                y: (p.gy + 0.5) * GRID_SIZE,
-              })),
-            );
-            if (worldPts.length >= 2)
-              setSegments((prev) => [...prev, { points: worldPts }]);
+            const worldPts = points.map((p) => ({
+              x: (p.gx + 0.5) * GRID_SIZE,
+              y: (p.gy + 0.5) * GRID_SIZE,
+            }));
+            setSegments((prev) => [...prev, { points: worldPts }]);
           }
           setLineStart(null);
           setLinePreview([]);
@@ -1869,6 +1869,18 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   };
 
   const handleMouseUp = () => {
+    // Place final tile at current mouse position before autoconnect
+    // (mousemove may not have fired at the exact release position)
+    if (
+      isDrawing &&
+      mouseWorld &&
+      (tool === "rail" || tool === "rail_crossing")
+    ) {
+      const gx = Math.floor(mouseWorld.x / GRID_SIZE);
+      const gy = Math.floor(mouseWorld.y / GRID_SIZE);
+      placeTile(gx, gy);
+    }
+
     setIsPanning(false);
     setIsDrawing(false);
     lastPlacedKeyRef.current = null;
@@ -1880,6 +1892,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       (tool === "rail" || tool === "rail_crossing")
     ) {
       const ref = lastPlacedRailRef.current;
+      let keepLastPlacedRail = false;
       setSegments((prev) => {
         const placedSeg = prev[ref.segIdx];
         if (!placedSeg || placedSeg.points.length === 0) return prev;
@@ -1897,8 +1910,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
             if (j === excludeIdx || prev[j].points.length === 0) continue;
             const f = prev[j].points[0];
             const l = prev[j].points[prev[j].points.length - 1];
-            if (Math.hypot(pt.x - f.x, pt.y - f.y) < snapRadius) count++;
-            if (Math.hypot(pt.x - l.x, pt.y - l.y) < snapRadius) count++;
+            if (Math.hypot(pt.x - f.x, pt.y - f.y) < TILE_SNAP_RADIUS) count++;
+            if (Math.hypot(pt.x - l.x, pt.y - l.y) < TILE_SNAP_RADIUS) count++;
           }
           return count;
         };
@@ -1917,8 +1930,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           const dFirst = Math.hypot(tipPt.x - first.x, tipPt.y - first.y);
           const dLast = Math.hypot(tipPt.x - last.x, tipPt.y - last.y);
           if (
-            dFirst < snapRadius &&
-            dFirst > 0.1 &&
+            dFirst < TILE_SNAP_RADIUS &&
             (!bestSnap || dFirst < bestSnap.dist)
           ) {
             if (connectionsAt(first, i) < 2) {
@@ -1926,8 +1938,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
             }
           }
           if (
-            dLast < snapRadius &&
-            dLast > 0.1 &&
+            dLast < TILE_SNAP_RADIUS &&
             (!bestSnap || dLast < bestSnap.dist)
           ) {
             if (connectionsAt(last, i) < 2) {
@@ -1935,24 +1946,43 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
             }
           }
         }
-        if (!bestSnap) return prev;
-        // Merge: append the placed segment's points onto the target segment
+        if (!bestSnap) {
+          // No merge target — keep lastPlacedRailRef alive so next click can extend
+          keepLastPlacedRail = true;
+          return prev;
+        }
+        // Merge: use distance to determine which end of each segment faces the junction
         const target = prev[bestSnap.segIdx];
-        const placedPts =
-          ref.endpoint === "end"
-            ? placedSeg.points
-            : [...placedSeg.points].reverse();
-        const mergedPts =
+        const snapPt =
           bestSnap.endpoint === "end"
-            ? [...target.points, ...placedPts]
-            : [...[...placedPts].reverse(), ...target.points];
+            ? target.points[target.points.length - 1]
+            : target.points[0];
+        // Which end of placed segment is near the snappoint?
+        const pFirst = placedSeg.points[0];
+        const pLast = placedSeg.points[placedSeg.points.length - 1];
+        const firstIsNear =
+          Math.hypot(pFirst.x - snapPt.x, pFirst.y - snapPt.y) <=
+          Math.hypot(pLast.x - snapPt.x, pLast.y - snapPt.y);
+        // Order target so it ends at the snap point
+        const targetOrdered =
+          bestSnap.endpoint === "end"
+            ? target.points
+            : [...target.points].reverse();
+        // Order placed so the near end comes first (adjacent to the junction)
+        const placedOrdered = firstIsNear
+          ? placedSeg.points
+          : [...placedSeg.points].reverse();
+        // Merged: [target_far → snap_point → placed_near → placed_far]
+        const mergedPts = [...targetOrdered, ...placedOrdered];
         const merged = { ...target, points: mergedPts };
         // Remove the placed segment, replace the target with merged
         return prev
           .map((s, i) => (i === bestSnap.segIdx ? merged : s))
           .filter((_, i) => i !== ref.segIdx);
       });
-      lastPlacedRailRef.current = null;
+      if (!keepLastPlacedRail) {
+        lastPlacedRailRef.current = null;
+      }
     }
 
     // Commit curve / circular curve on mouse up: sample to polyline and add as segment
@@ -2021,7 +2051,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   /** Check if a world point overlaps an existing rail segment point within the same grid cell. */
   /** Check if a world point is near any segment endpoint (snappoint). */
   const isNearSnapPoint = (wx: number, wy: number) => {
-    const snapDist = snapRadius;
+    const snapDist = TILE_SNAP_RADIUS;
     return segments.some((seg) => {
       if (seg.points.length === 0) return false;
       const first = seg.points[0];
@@ -2074,28 +2104,12 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         !isNearSnapPoint(worldPt.x, worldPt.y)
       )
         return;
-      // Snap to existing segment endpoint if nearby (for precise junction matching)
-      let placePt = worldPt;
-      let bestSnapDist = Infinity;
-      for (const seg of segments) {
-        if (seg.points.length === 0) continue;
-        const first = seg.points[0];
-        const last = seg.points[seg.points.length - 1];
-        const dFirst = Math.hypot(worldPt.x - first.x, worldPt.y - first.y);
-        const dLast = Math.hypot(worldPt.x - last.x, worldPt.y - last.y);
-        if (dFirst < snapRadius && dFirst < bestSnapDist) {
-          bestSnapDist = dFirst;
-          placePt = first;
-        }
-        if (dLast < snapRadius && dLast < bestSnapDist) {
-          bestSnapDist = dLast;
-          placePt = last;
-        }
-      }
       // Rail placement: extend existing segment endpoint or create new segment
+      // First try lastPlacedRailRef, then fall back to nearest endpoint search
+      let extendIdx = -1;
+      let extendEndpoint: "start" | "end" = "end";
       const lastRef = lastPlacedRailRef.current;
       if (lastRef) {
-        // Try to extend the segment we last placed on
         const seg = segments[lastRef.segIdx];
         if (seg) {
           const endpoint =
@@ -2103,26 +2117,51 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
               ? seg.points[seg.points.length - 1]
               : seg.points[0];
           const d = Math.hypot(worldPt.x - endpoint.x, worldPt.y - endpoint.y);
-          if (d < snapRadius && d > 0.1) {
-            // Extend this segment
-            setSegments((prev) =>
-              prev.map((s, i) => {
-                if (i !== lastRef.segIdx) return s;
-                const pts =
-                  lastRef.endpoint === "end"
-                    ? [...s.points, placePt]
-                    : [placePt, ...s.points];
-                return { ...s, points: pts };
-              }),
-            );
-            // lastPlacedRailRef stays on same segment, same endpoint
-            lastPlacedKeyRef.current = key;
-            return;
+          if (d < TILE_SNAP_RADIUS && d > 0.1) {
+            extendIdx = lastRef.segIdx;
+            extendEndpoint = lastRef.endpoint;
           }
         }
       }
+      // Fallback: find nearest segment endpoint within TILE_SNAP_RADIUS
+      if (extendIdx < 0) {
+        let bestDist = TILE_SNAP_RADIUS;
+        for (let i = 0; i < segments.length; i++) {
+          const seg = segments[i];
+          if (seg.points.length === 0) continue;
+          const first = seg.points[0];
+          const last = seg.points[seg.points.length - 1];
+          const dFirst = Math.hypot(worldPt.x - first.x, worldPt.y - first.y);
+          const dLast = Math.hypot(worldPt.x - last.x, worldPt.y - last.y);
+          if (dFirst < bestDist && dFirst > 0.1) {
+            bestDist = dFirst;
+            extendIdx = i;
+            extendEndpoint = "start";
+          }
+          if (dLast < bestDist && dLast > 0.1) {
+            bestDist = dLast;
+            extendIdx = i;
+            extendEndpoint = "end";
+          }
+        }
+      }
+      if (extendIdx >= 0) {
+        setSegments((prev) =>
+          prev.map((s, i) => {
+            if (i !== extendIdx) return s;
+            const pts =
+              extendEndpoint === "end"
+                ? [...s.points, worldPt]
+                : [worldPt, ...s.points];
+            return { ...s, points: pts };
+          }),
+        );
+        lastPlacedRailRef.current = { segIdx: extendIdx, endpoint: extendEndpoint };
+        lastPlacedKeyRef.current = key;
+        return;
+      }
       // No nearby endpoint: create new single-point segment (autoconnect deferred to mouseUp)
-      setSegments((prev) => [...prev, { points: [placePt] }]);
+      setSegments((prev) => [...prev, { points: [worldPt] }]);
       lastPlacedRailRef.current = { segIdx: segments.length, endpoint: "end" };
       lastPlacedKeyRef.current = key;
     } else if (tool === "rail_start") {
