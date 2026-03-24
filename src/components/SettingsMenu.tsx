@@ -31,6 +31,13 @@ export default function SettingsMenu({
     setSettings(next);
   };
 
+  const handleDefaultFreeLineToolBehaviour = (
+    behaviour: GameSettings["defaultFreeLineToolBehaviour"],
+  ) => {
+    const next = updateSetting("defaultFreeLineToolBehaviour", behaviour);
+    setSettings(next);
+  };
+
   const tabClass = (tab: SettingsTab) =>
     `px-6 py-3 font-bold text-sm transition-colors ${
       activeTab === tab
@@ -125,6 +132,38 @@ export default function SettingsMenu({
                 <div className="flex justify-between text-xs text-game-subtitle mt-1">
                   <span>{MIN_SNAP}px</span>
                   <span>{MAX_SNAP}px</span>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="font-bold text-game-title">
+                    default free line tool behaviour
+                  </label>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleDefaultFreeLineToolBehaviour("normal")}
+                    className={`px-3 py-2 rounded-lg text-sm font-bold transition-all ${
+                      settings.defaultFreeLineToolBehaviour === "normal"
+                        ? "bg-game-accent text-game-bg"
+                        : "bg-game-bar-bg text-game-title hover:brightness-110"
+                    }`}
+                  >
+                    Regular
+                  </button>
+                  <button
+                    onClick={() =>
+                      handleDefaultFreeLineToolBehaviour("grid_snap")
+                    }
+                    className={`px-3 py-2 rounded-lg text-sm font-bold transition-all ${
+                      settings.defaultFreeLineToolBehaviour === "grid_snap"
+                        ? "bg-game-accent text-game-bg"
+                        : "bg-game-bar-bg text-game-title hover:brightness-110"
+                    }`}
+                  >
+                    Grid snap
+                  </button>
                 </div>
               </div>
             </>

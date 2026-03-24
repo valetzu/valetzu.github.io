@@ -48,7 +48,7 @@ import {
   ParamFieldMeta,
 } from "@/game/obstacleDefinitions";
 import SettingsMenu from "@/components/SettingsMenu";
-import { loadSettings } from "@/game/settings";
+import { loadSettings, updateSetting } from "@/game/settings";
 
 interface LevelEditorProps {
   onBack: () => void;
@@ -206,6 +206,9 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const [line2Start, setLine2Start] = useState<{
     start: { x: number; y: number };
   } | null>(null);
+  const [line2GridSnap, setLine2GridSnap] = useState(
+    () => loadSettings().defaultFreeLineToolBehaviour === "grid_snap",
+  );
   const [mouseWorld, setMouseWorld] = useState<{ x: number; y: number } | null>(
     null,
   );
@@ -898,12 +901,25 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
 
     // Line2 preview line (after picking start)
     if (tool === "line2" && line2Start && mouseWorld) {
+      const previewGridX = Math.floor(mouseWorld.x / GRID_SIZE);
+      const previewGridY = Math.floor(mouseWorld.y / GRID_SIZE);
+      const previewKey = tileKey(previewGridX, previewGridY);
+      const previewCenter = {
+        x: (previewGridX + 0.5) * GRID_SIZE,
+        y: (previewGridY + 0.5) * GRID_SIZE,
+      };
+      const previewTileEmpty =
+        !obstacles[previewKey] &&
+        !isWorldPtOccupied(previewCenter.x, previewCenter.y);
+      const previewEnd =
+        line2GridSnap && previewTileEmpty ? previewCenter : mouseWorld;
+
       ctx.strokeStyle = "rgba(0, 204, 102, 0.9)";
       ctx.lineWidth = 3;
       ctx.setLineDash([6, 6]);
       ctx.beginPath();
       ctx.moveTo(line2Start.start.x - cx, line2Start.start.y - cy);
-      ctx.lineTo(mouseWorld.x - cx, mouseWorld.y - cy);
+      ctx.lineTo(previewEnd.x - cx, previewEnd.y - cy);
       ctx.stroke();
       ctx.setLineDash([]);
     }
@@ -1048,6 +1064,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     lineStart,
     linePreview,
     line2Start,
+    line2GridSnap,
     mouseWorld,
     obstacleParams,
     selectedObstacleKey,
@@ -1548,6 +1565,17 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       }
 
       if (tool === "line2") {
+        const clickedKey = tileKey(gx, gy);
+        const clickedTileCenter = {
+          x: (gx + 0.5) * GRID_SIZE,
+          y: (gy + 0.5) * GRID_SIZE,
+        };
+        const clickedTileEmpty =
+          !obstacles[clickedKey] &&
+          !isWorldPtOccupied(clickedTileCenter.x, clickedTileCenter.y);
+        const line2ClickWorld =
+          line2GridSnap && clickedTileEmpty ? clickedTileCenter : world;
+
         // First click: pick nearest snap point. Use BASE segments (no freeLines) so hints are stable and the selected start is always used.
         if (!line2Start) {
           // Build snap hints from all segment endpoints
@@ -1557,7 +1585,10 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           type Hint = { pt: { x: number; y: number }; dist: number; segmentId: string };
           const hints: Hint[] = allSnapPtsForSnap.map((sp) => ({
             pt: sp.point,
-            dist: Math.hypot(world.x - sp.point.x, world.y - sp.point.y),
+            dist: Math.hypot(
+              line2ClickWorld.x - sp.point.x,
+              line2ClickWorld.y - sp.point.y,
+            ),
             segmentId: sp.segmentId,
           }));
           // Find all candidates within snap radius, then use cycle index to disambiguate overlapping ones
@@ -1566,7 +1597,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
             .sort((a, b) => a.dist - b.dist);
           if (candidates.length === 0) {
             // No snap point nearby — start a free-standing line
-            setLine2Start({ start: world });
+            setLine2Start({ start: line2ClickWorld });
           } else {
             // Group candidates that are at nearly the same position (within 5px), dedup within same continuous segment
             const best = candidates[0];
@@ -1593,7 +1624,10 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           type SnapCandidate = { pt: { x: number; y: number }; dist: number; segmentId: string };
           const endCandidates: SnapCandidate[] = allSnapPts.map((sp) => ({
             pt: sp.point,
-            dist: Math.hypot(world.x - sp.point.x, world.y - sp.point.y),
+            dist: Math.hypot(
+              line2ClickWorld.x - sp.point.x,
+              line2ClickWorld.y - sp.point.y,
+            ),
             segmentId: sp.segmentId,
           }));
           const validEnd = endCandidates
@@ -1618,7 +1652,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
             }
             snapEnd = chosenEnd.pt;
           }
-          const endPoint = snapEnd ? snapEnd : world;
+          const endPoint = snapEnd ? snapEnd : line2ClickWorld;
           const startPt = line2Start.start;
           setSegments((prev) => [...prev, { points: [startPt, endPoint] }]);
           setLine2Start(null);
@@ -2831,40 +2865,75 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           {/* Standalone tools: Eraser, Line, Line2 */}
           {TOOLS.filter((t) =>
             ["rail", "eraser", "line", "line2", "draw_rail"].includes(t.tool),
-          ).map((t) => (
-            <button
-              key={t.tool}
-              onClick={() => {
-                if (tool === t.tool) {
-                  setTool("none");
-                } else {
-                  setTool(t.tool as EditorTool);
-                }
-                lastPlacedRailRef.current = null;
-                setArcCenter(null);
-                setArcPreview([]);
-                setCurveStart(null);
-                setCurveEnd(null);
-                setCurveControl(null);
-                setCurvePreview([]);
-                setIsDraggingCurve(false);
-                setLineStart(null);
-                setLinePreview([]);
-                if (t.tool === "line2") setLine2Start(null);
-                setDrawRailPoints(null);
-                setDrawRailAttach(null);
-                setDrawRailPending(null);
-                setShowTilesMenu(false);
-              }}
-              className={`px-3 py-2 rounded-lg font-bold text-sm transition-all ${
-                tool === t.tool
-                  ? "bg-game-accent text-game-bg scale-105"
-                  : "bg-game-card text-game-title border border-game-card-border hover:border-game-accent"
-              }`}
-            >
-              {t.emoji} {t.label}
-            </button>
-          ))}
+          ).map((t) => {
+            const isActive = tool === t.tool;
+            const isFreeLine = t.tool === "line2";
+
+            return (
+              <div key={t.tool} className="flex flex-col items-start gap-1">
+                <button
+                  onClick={() => {
+                    if (tool === t.tool) {
+                      setTool("none");
+                    } else {
+                      setTool(t.tool as EditorTool);
+                    }
+                    lastPlacedRailRef.current = null;
+                    setArcCenter(null);
+                    setArcPreview([]);
+                    setCurveStart(null);
+                    setCurveEnd(null);
+                    setCurveControl(null);
+                    setCurvePreview([]);
+                    setIsDraggingCurve(false);
+                    setLineStart(null);
+                    setLinePreview([]);
+                    if (t.tool === "line2") setLine2Start(null);
+                    setDrawRailPoints(null);
+                    setDrawRailAttach(null);
+                    setDrawRailPending(null);
+                    setShowTilesMenu(false);
+                  }}
+                  className={`px-3 py-2 rounded-lg font-bold text-sm transition-all ${
+                    isActive
+                      ? "bg-game-accent text-game-bg scale-105"
+                      : "bg-game-card text-game-title border border-game-card-border hover:border-game-accent"
+                  }`}
+                >
+                  {t.emoji} {t.label}
+                </button>
+
+                {isFreeLine && isActive && (
+                  <div className="bg-game-card border border-game-card-border rounded-lg p-2 min-w-[180px] shadow-lg">
+                    <button
+                      onClick={() => {
+                        setLine2GridSnap((enabled) => {
+                          const nextEnabled = !enabled;
+                          updateSetting(
+                            "defaultFreeLineToolBehaviour",
+                            nextEnabled ? "grid_snap" : "normal",
+                          );
+                          return nextEnabled;
+                        });
+                      }}
+                      className={`w-full px-3 py-2 rounded-lg text-sm font-bold transition-all text-left ${
+                        line2GridSnap
+                          ? "bg-green-700 text-white hover:bg-green-600"
+                          : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+                      }`}
+                      title={
+                        line2GridSnap
+                          ? "Free Line grid snap: ON — empty clicked tiles snap to tile centers"
+                          : "Free Line grid snap: OFF"
+                      }
+                    >
+                      {line2GridSnap ? "🧲 Grid snap: On" : "🧲 Grid snap: Off"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
 
           {/* Hand tool (select/inspect) */}
           <button
@@ -3423,7 +3492,11 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           initialTab="editor"
           onClose={() => {
             setShowSettings(false);
-            setSnapRadius(loadSettings().snapRadius);
+            const settings = loadSettings();
+            setSnapRadius(settings.snapRadius);
+            setLine2GridSnap(
+              settings.defaultFreeLineToolBehaviour === "grid_snap",
+            );
           }}
         />
       )}
