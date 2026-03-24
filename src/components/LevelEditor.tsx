@@ -791,9 +791,11 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       }
     }
 
-    // Endpoint hints for line2 and draw_rail tools
+    // Endpoint hints for line2, draw_rail, and tile-based rail tools
     if (
       tool === "line2" ||
+      tool === "rail" ||
+      tool === "rail_crossing" ||
       (tool === "draw_rail" && !drawRailPoints && !drawRailPending)
     ) {
       // Build hints from all segment endpoints (preserve segmentId for highlight)
@@ -1785,9 +1787,11 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
 
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
-    // When using line2 tool, scroll cycles through overlapping snap candidates
+    // When using line2/rail tools, scroll cycles through overlapping snap candidates
     if (
       (tool === "line2" ||
+        tool === "rail" ||
+        tool === "rail_crossing" ||
         (tool === "draw_rail" && !drawRailPoints && !drawRailPending)) &&
       mouseWorld
     ) {
