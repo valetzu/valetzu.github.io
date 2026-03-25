@@ -32,6 +32,7 @@ export class GameEngine {
   ground: number[] = []; // groundY for each rail point
   pos: number = 0;
   speed: number = 0;
+  direction: 1 | -1 = 1;
   passengers: number = 3;
   distance: number = 0;
   obstacles: Obstacle[] = [];
@@ -54,6 +55,7 @@ export class GameEngine {
   airVY = 0;
   airRotation = 0;
   airRotVel = 0;
+  airborneTime = 0; // time spent airborne — prevents immediate snap-back
 
   elapsedTime = 0;
   levelCompleted = false;
@@ -330,8 +332,9 @@ export class GameEngine {
       // Update distance for HUD (approximate)
       this.distance += vMag * dt * 0.1;
       this.elapsedTime += dt;
+      this.airborneTime += dt;
 
-      // Try to snap back to any rail segment if we pass near it
+      // Try to snap back to any rail segment if we pass near it (after brief cooldown)
       const snapRadius = 40;
       const segmentsToSearch = this.allRailSegments.length > 0 ? this.allRailSegments : [this.rail];
       let bestSeg: Point[] | null = null;
@@ -352,7 +355,7 @@ export class GameEngine {
         }
       }
 
-      if (bestSeg != null && bestIdx >= 0 && bestIdx < bestSeg.length - 1) {
+      if (this.airborneTime > 0.3 && bestSeg != null && bestIdx >= 0 && bestIdx < bestSeg.length - 1) {
         const p0 = bestSeg[bestIdx];
         const p1 = bestSeg[bestIdx + 1];
         const segDx = p1.x - p0.x;
@@ -365,7 +368,8 @@ export class GameEngine {
         this.onRail = true;
         this.rail = bestSeg;
         this.pos = bestIdx;
-        this.speed = tangentialSpeed;
+        this.direction = tangentialSpeed >= 0 ? 1 : -1;
+        this.speed = Math.abs(tangentialSpeed);
         this.airVX = this.airVY = 0;
 
         // Level complete when we snapped onto the end tile (any segment)
@@ -395,34 +399,34 @@ export class GameEngine {
     }
 
     const i = Math.floor(this.pos);
-    if (i < 0) return;
-    if (i >= this.rail.length - 1) {
-      // Reached or passed the end of this segment. Complete if we touched the end tile (on any segment).
-      if (this.hasFinitePath && this.touchedEndTile() && !this.levelCompleted) {
+    if (i < 0 || i >= this.rail.length - 1) {
+      // Reached or passed the end of this segment. Complete if we touched the end tile.
+      if (i >= this.rail.length - 1 && this.hasFinitePath && this.touchedEndTile() && !this.levelCompleted) {
         this.speed = 0;
         this.levelCompleted = true;
         this.onLevelComplete?.(this.elapsedTime, this.starsCollected);
         return;
       }
-      // Otherwise ran off the end: launch into airborne mode.
+      // Launch into airborne mode from whichever end was crossed
       if (this.hasFinitePath && this.onRail && !this.levelCompleted && this.rail.length >= 2) {
-        const lastIdx = this.rail.length - 2;
-        const p0 = this.rail[lastIdx];
-        const p1 = this.rail[lastIdx + 1];
+        const atEnd = i >= this.rail.length - 1;
+        const segIdx = atEnd ? this.rail.length - 2 : 0;
+        const p0 = this.rail[segIdx];
+        const p1 = this.rail[segIdx + 1];
         const dx = p1.x - p0.x;
         const dy = p1.y - p0.y;
         const segLen = Math.sqrt(dx * dx + dy * dy) || 1;
-        const dir = this.speed >= 0 ? 1 : -1;
-        const tx = (dx / segLen) * dir;
-        const ty = (dy / segLen) * dir;
+        // Effective speed in index-space (positive = toward end, negative = toward start)
+        const effSpeed = this.direction * this.speed;
+        const launchPoint = atEnd ? p1 : p0;
 
         this.onRail = false;
-        const launchPoint = dir >= 0 ? p1 : p0;
+        this.airborneTime = 0;
         this.airX = launchPoint.x;
         this.airY = launchPoint.y;
-        this.airVX = tx * Math.abs(this.speed);
-        this.airVY = ty * Math.abs(this.speed);
-        this.airRotation = Math.atan2(dy, dx);
+        this.airVX = (dx / segLen) * effSpeed;
+        this.airVY = (dy / segLen) * effSpeed;
+        this.airRotation = 0;
         this.airRotVel = 0;
       }
       return;
@@ -442,24 +446,22 @@ export class GameEngine {
 
     let throttle = 0;
     if (this.keys.up) throttle = THROTTLE_BASE * motorMult;
-    if (this.keys.down) throttle = -THROTTLE_BASE * motorMult * 0.7;
+    if (this.keys.down) throttle = -THROTTLE_BASE * motorMult;
     if (this.rocketTimer > 0) throttle += THROTTLE_BASE * 1.5;
 
-    const gravity = cfg.gravity * Math.sin(angle) * 0.15;
+    const gravity = this.direction * cfg.gravity * Math.sin(angle) * 0.15;
     const friction = -this.speed * cfg.friction * gripMult;
     const drag = -this.speed * Math.abs(this.speed) * 0.0003;
 
     this.speed += (throttle + gravity + friction + drag) * dt;
-    this.speed = Math.max(-maxSpeed * 0.4, Math.min(maxSpeed, this.speed));
+    this.speed = Math.max(-maxSpeed, Math.min(maxSpeed, this.speed));
 
-    const dPos = (this.speed * dt) / segLen;
+    const dPos = (this.direction * this.speed * dt) / segLen;
     this.pos += dPos;
     if (this.isLoop && this.rail.length > 2) {
       const cycleLen = this.rail.length - 1;
       while (this.pos >= cycleLen) this.pos -= cycleLen;
       while (this.pos < 0) this.pos += cycleLen;
-    } else {
-      this.pos = Math.max(0, this.pos);
     }
 
     this.distance += Math.abs(this.speed * dt) * 0.1; // px to meters
@@ -1039,26 +1041,13 @@ export class GameEngine {
     this.roundRect(barX - 80, barY - 2, barW + 160, barH + 4, 8);
     ctx.fill();
 
-    // Labels (highlight when key is actively pressed)
-    const throttleActive = this.keys.up;
-    const brakeActive = this.keys.down;
-
-    ctx.font = 'bold 13px system-ui';
-    ctx.textAlign = 'right';
-    ctx.fillStyle = throttleActive ? '#A5D6A7' : '#4CAF50';
-    ctx.fillText('THROTTLE ▶', barX - 8, barY + 20);
-
-    ctx.textAlign = 'left';
-    ctx.fillStyle = brakeActive ? '#FFCDD2' : '#E53935';
-    ctx.fillText('◀ BRAKE', barX + barW + 8, barY + 20);
-
     // Bar background
     ctx.fillStyle = '#333';
     this.roundRect(barX, barY, barW, barH, 4);
     ctx.fill();
 
     // Speed indicator
-    const speedFrac = this.speed / (MAX_SPEED_BASE + this.upgrades.motor * 80);
+    const speedFrac = (this.direction * this.speed) / (MAX_SPEED_BASE + this.upgrades.motor * 80);
     const fillW = Math.abs(speedFrac) * barW / 2;
     if (speedFrac > 0) {
       ctx.fillStyle = '#4CAF50';
