@@ -2443,6 +2443,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     engine.spawnObstacles = () => {};
     engine.hasFinitePath = true;
     engine.pos = 0;
+    engine.initDirection();
     engineRef.current = engine;
     engine.start();
 

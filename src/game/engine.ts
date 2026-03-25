@@ -368,8 +368,9 @@ export class GameEngine {
         this.onRail = true;
         this.rail = bestSeg;
         this.pos = bestIdx;
-        this.direction = tangentialSpeed >= 0 ? 1 : -1;
-        this.speed = Math.abs(tangentialSpeed);
+        this.initDirection();
+        // Speed sign: positive if tangential velocity aligns with direction, negative otherwise
+        this.speed = tangentialSpeed * this.direction;
         this.airVX = this.airVY = 0;
 
         // Level complete when we snapped onto the end tile (any segment)
@@ -509,6 +510,22 @@ export class GameEngine {
     const p0 = this.rail[i];
     const p1 = this.rail[i + 1];
     return { x: p0.x + (p1.x - p0.x) * f, y: p0.y + (p1.y - p0.y) * f };
+  }
+
+  /** Set initial direction so arrow-up moves right (or up for purely vertical rails). */
+  initDirection() {
+    if (this.rail.length < 2) return;
+    const first = this.rail[0];
+    const last = this.rail[this.rail.length - 1];
+    const dx = last.x - first.x;
+    const dy = last.y - first.y;
+    if (dx === 0) {
+      // 100% vertical: throttle moves up (screen y inverted)
+      this.direction = dy <= 0 ? 1 : -1;
+    } else {
+      // Any horizontal component: throttle moves right
+      this.direction = dx > 0 ? 1 : -1;
+    }
   }
 
   /** True if the gondola is within the end tile trigger area (world-space proximity). */
@@ -1048,7 +1065,7 @@ export class GameEngine {
     ctx.fill();
 
     // Speed indicator
-    const speedFrac = (this.direction * this.speed) / (MAX_SPEED_BASE + this.upgrades.motor * 80);
+    const speedFrac = this.speed / (MAX_SPEED_BASE + this.upgrades.motor * 80);
     const fillW = Math.abs(speedFrac) * barW / 2;
     if (speedFrac > 0) {
       ctx.fillStyle = '#4CAF50';
