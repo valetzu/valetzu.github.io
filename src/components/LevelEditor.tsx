@@ -73,7 +73,7 @@ const TOOLS: { tool: EditorTool; label: string; emoji: string }[] = [
   { tool: "curve", label: "Curve", emoji: "〰️" },
   { tool: "loop", label: "Loop", emoji: "🔁" },
   { tool: "circular_curve", label: "Circular Curve", emoji: "🟠" },
-  { tool: "circle", label: "Circle", emoji: "⭕" },
+  { tool: "polygon", label: "Polygon", emoji: "⭕" },
   { tool: "line", label: "Line", emoji: "📏" },
   { tool: "line2", label: "Free Line", emoji: "📐" },
   { tool: "draw_rail", label: "Draw", emoji: "✏️" },
@@ -91,7 +91,7 @@ const SHAPE_TOOL_TYPES = new Set<EditorTool>([
   "curve",
   "loop",
   "circular_curve",
-  "circle",
+  "polygon",
 ]);
 
 const OBSTACLE_COLORS: Record<string, string> = Object.fromEntries(
@@ -1184,9 +1184,9 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     return points;
   };
 
-  // Generate a discrete circle path around a center using only straight and
+  // Generate a discrete polygon path around a center using only straight and
   // diagonal steps on the grid.
-  const generateCircleRail = (
+  const generatePolygonRail = (
     centerGX: number,
     centerGY: number,
     edgeGX: number,
@@ -1622,13 +1622,13 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         return;
       }
 
-      // Circle tool: first click sets center, second click sets radius and
-      // creates a circular rail loop using only straight and diagonal steps.
-      if (tool === "circle") {
+      // Polygon tool: first click sets center, second click sets radius and
+      // creates a polygonal rail loop using only straight and diagonal steps.
+      if (tool === "polygon") {
         if (!arcCenter) {
           setArcCenter({ gx, gy });
         } else {
-          const points = generateCircleRail(arcCenter.gx, arcCenter.gy, gx, gy);
+          const points = generatePolygonRail(arcCenter.gx, arcCenter.gy, gx, gy);
           if (points.length >= 2) {
             const worldPts = filterOccupiedPoints(
               points.map((p) => ({
@@ -1976,9 +1976,9 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     }
 
     // Circle preview
-    if (tool === "circle" && arcCenter) {
+    if (tool === "polygon" && arcCenter) {
       const { gx, gy } = screenToGrid(e.clientX, e.clientY);
-      setArcPreview(generateCircleRail(arcCenter.gx, arcCenter.gy, gx, gy));
+      setArcPreview(generatePolygonRail(arcCenter.gx, arcCenter.gy, gx, gy));
     }
 
     // Curve / loop control point shaping
@@ -2452,6 +2452,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     // Override the rail with our resampled one (already in world coordinates)
     engine.rail = railPoints;
     engine.allRailSegments = allSegments;
+    engine.buildSegmentBounds();
     (engine as any).hasFinitePath = true;
     (engine as any).isLoop = isLoop;
     // Start tile is the beginning of the main rail path
@@ -2981,7 +2982,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
                     onClick={() => {
                       setTool(t.tool);
                       lastPlacedRailRef.current = null;
-                      if (t.tool !== "circle" && t.tool !== "arc") {
+                      if (t.tool !== "polygon" && t.tool !== "arc") {
                         setArcCenter(null);
                         setArcPreview([]);
                       }

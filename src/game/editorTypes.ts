@@ -67,7 +67,7 @@ export type EditorTool =
   | "curve"
   | "loop"
   | "circular_curve"
-  | "circle"
+  | "polygon"
   | "line"
   | "line2"
   | "draw_rail";
@@ -976,11 +976,15 @@ export function convertLevelToGameDataV2(
     return { railPoints: [], allSegments: [], segmentIdByIndex: [], obstacles, endTileWorldPos, isLoop: false };
   }
 
-  // Walk each continuous segment into ordered points
+  // Walk each continuous segment into ordered points, then resample to uniform spacing
+  const RESAMPLE_STEP = 20;
   const walkedSegments: { points: { x: number; y: number }[]; isLoop: boolean; contId: string }[] = [];
   for (const cs of continuous) {
     const { points, isLoop } = walkContinuousPath(individual, cs, tiles);
-    if (points.length > 0) walkedSegments.push({ points, isLoop, contId: cs.id });
+    if (points.length > 0) {
+      const resampled = points.length >= 2 ? samplePolylineWorld(points, RESAMPLE_STEP) : points;
+      walkedSegments.push({ points: resampled, isLoop, contId: cs.id });
+    }
   }
 
   // Find main segment: the one containing rail_start
@@ -1082,11 +1086,15 @@ export function convertLevelToGameDataV3(
     return { railPoints: [], allSegments: [], segmentIdByIndex: [], obstacles, stars, endTileWorldPos, isLoop: false };
   }
 
-  // Walk each continuous segment
+  // Walk each continuous segment and resample to uniform spacing
+  const RESAMPLE_STEP = 20;
   const walkedSegments: { points: { x: number; y: number }[]; isLoop: boolean; contId: string }[] = [];
   for (const cs of continuous) {
     const { points, isLoop } = walkContinuousPath(individual, cs, undefined, level.startMarker);
-    if (points.length > 0) walkedSegments.push({ points, isLoop, contId: cs.id });
+    if (points.length > 0) {
+      const resampled = points.length >= 2 ? samplePolylineWorld(points, RESAMPLE_STEP) : points;
+      walkedSegments.push({ points: resampled, isLoop, contId: cs.id });
+    }
   }
 
   // Find main segment: nearest to startMarker

@@ -10,6 +10,7 @@ const GONDOLA_HANG = 38;
 const CABIN_W = 56;
 const CABIN_H = 36;
 const HIT_RADIUS = 26;
+const WHEEL_RADIUS = 7;
 const INVULN_TIME = 2;
 const ROCKET_DURATION = 3;
 const SHIELD_DURATION = 2.5;
@@ -29,10 +30,13 @@ export class GameEngine {
   rail: Point[] = [];
   /** All rail segments for finite levels (for rendering + snap). Index 0 = start segment. */
   allRailSegments: Point[][] = [];
+  /** Precomputed AABBs for each rail segment (built once at level load) */
+  segmentBounds: { seg: Point[]; minX: number; minY: number; maxX: number; maxY: number }[] = [];
   ground: number[] = []; // groundY for each rail point
   pos: number = 0;
   speed: number = 0;
   direction: 1 | -1 = 1;
+  directionFlipped: boolean = false;
   passengers: number = 3;
   distance: number = 0;
   obstacles: Obstacle[] = [];
@@ -220,7 +224,11 @@ export class GameEngine {
     if (e.code === 'ArrowDown') { this.keys.down = true; e.preventDefault(); }
     if (e.code === 'ArrowLeft') { this.keys.left = true; e.preventDefault(); }
     if (e.code === 'ArrowRight') { this.keys.right = true; e.preventDefault(); }
-    if (e.code === 'Space' && this.rocketTimer <= 0 && this.rocketCharges > 0) {
+    if (e.code === 'Space') {
+      this.directionFlipped = !this.directionFlipped;
+      e.preventDefault();
+    }
+    if (e.code === 'KeyX' && this.rocketTimer <= 0 && this.rocketCharges > 0) {
       this.rocketTimer = ROCKET_DURATION;
       this.rocketCharges--;
       e.preventDefault();
@@ -326,41 +334,53 @@ export class GameEngine {
       this.airRotVel *= Math.exp(-2 * dt);
       this.airRotation += this.airRotVel * dt;
 
-      // Integrate position
-      this.airX += this.airVX * dt;
-      this.airY += this.airVY * dt;
+      // Swept circle collision + position integration
+      const moveX = this.airVX * dt;
+      const moveY = this.airVY * dt;
+
+      let earliestT = 1.0;
+      let hitSeg: Point[] | null = null;
+      let hitSegIdx = -1;
+
+      // Movement AABB expanded by wheel radius for broad-phase
+      const movMinX = Math.min(this.airX, this.airX + moveX) - WHEEL_RADIUS;
+      const movMinY = Math.min(this.airY, this.airY + moveY) - WHEEL_RADIUS;
+      const movMaxX = Math.max(this.airX, this.airX + moveX) + WHEEL_RADIUS;
+      const movMaxY = Math.max(this.airY, this.airY + moveY) + WHEEL_RADIUS;
+
+      for (const bound of this.segmentBounds) {
+        // AABB overlap test (broad-phase)
+        if (bound.maxX < movMinX || bound.minX > movMaxX ||
+            bound.maxY < movMinY || bound.minY > movMaxY) continue;
+        // Skip the exited segment during cooldown
+        if (bound.seg === this.airborneFromSeg && this.airborneTime <= 0.3) continue;
+
+        for (let i = 0; i < bound.seg.length - 1; i++) {
+          const result = this.sweepCircleVsSegment(
+            this.airX, this.airY, moveX, moveY,
+            WHEEL_RADIUS, bound.seg[i], bound.seg[i + 1]
+          );
+          if (result && result.t < earliestT) {
+            earliestT = result.t;
+            hitSeg = bound.seg;
+            hitSegIdx = i;
+          }
+        }
+      }
+
+      // Apply movement (full or partial up to collision)
+      this.airX += moveX * earliestT;
+      this.airY += moveY * earliestT;
 
       // Update distance for HUD (approximate)
       this.distance += vMag * dt * 0.1;
       this.elapsedTime += dt;
       this.airborneTime += dt;
 
-      // Try to snap back to any rail segment if we pass near it (after brief cooldown)
-      const snapRadius = 20
-      const segmentsToSearch = this.allRailSegments.length > 0 ? this.allRailSegments : [this.rail];
-      let bestSeg: Point[] | null = null;
-      let bestIdx = -1;
-      let bestDist = snapRadius;
-      for (const seg of segmentsToSearch) {
-        if (seg.length < 2) continue;
-        // Skip the exited segment during cooldown
-        if (seg === this.airborneFromSeg && this.airborneTime <= 0.3) continue;
-        for (let i = 0; i < seg.length; i++) {
-          const p = seg[i];
-          const dx = p.x - this.airX;
-          const dy = p.y - this.airY;
-          const d = Math.sqrt(dx * dx + dy * dy);
-          if (d < bestDist) {
-            bestDist = d;
-            bestSeg = seg;
-            bestIdx = i;
-          }
-        }
-      }
-
-      if (bestSeg != null && bestIdx >= 0 && bestIdx < bestSeg.length - 1) {
-        const p0 = bestSeg[bestIdx];
-        const p1 = bestSeg[bestIdx + 1];
+      if (hitSeg != null) {
+        // Snap to rail at collision point
+        const p0 = hitSeg[hitSegIdx];
+        const p1 = hitSeg[hitSegIdx + 1];
         const segDx = p1.x - p0.x;
         const segDy = p1.y - p0.y;
         const segLen = Math.sqrt(segDx * segDx + segDy * segDy) || 1;
@@ -368,24 +388,78 @@ export class GameEngine {
         const ty = segDy / segLen;
         const tangentialSpeed = this.airVX * tx + this.airVY * ty;
 
-        // Interpolate pos along segment for smooth placement
         const relX = this.airX - p0.x;
         const relY = this.airY - p0.y;
         const proj = Math.max(0, Math.min(1, (relX * tx + relY * ty) / segLen));
 
         this.onRail = true;
-        this.rail = bestSeg;
-        this.pos = bestIdx + proj;
+        this.rail = hitSeg;
+        this.pos = hitSegIdx + proj;
+        this.directionFlipped = false;
         this.initDirection(this.pos);
-        // Use only the rail-aligned component of velocity
         this.speed = tangentialSpeed * this.direction;
         this.airVX = this.airVY = 0;
 
-        // Level complete when we snapped onto the end tile (any segment)
         if (this.touchedEndTile() && !this.levelCompleted) {
           this.speed = 0;
           this.levelCompleted = true;
           this.onLevelComplete?.(this.elapsedTime, this.starsCollected);
+        }
+      } else {
+        // No swept collision — fallback proximity snap for slow approaches
+        const snapRadius = 20;
+        const snapMinX = this.airX - snapRadius;
+        const snapMinY = this.airY - snapRadius;
+        const snapMaxX = this.airX + snapRadius;
+        const snapMaxY = this.airY + snapRadius;
+
+        let bestSeg: Point[] | null = null;
+        let bestIdx = -1;
+        let bestDist = snapRadius;
+        for (const bound of this.segmentBounds) {
+          if (bound.maxX < snapMinX || bound.minX > snapMaxX ||
+              bound.maxY < snapMinY || bound.minY > snapMaxY) continue;
+          if (bound.seg === this.airborneFromSeg && this.airborneTime <= 0.3) continue;
+          for (let i = 0; i < bound.seg.length; i++) {
+            const p = bound.seg[i];
+            const pdx = p.x - this.airX;
+            const pdy = p.y - this.airY;
+            const d = Math.sqrt(pdx * pdx + pdy * pdy);
+            if (d < bestDist) {
+              bestDist = d;
+              bestSeg = bound.seg;
+              bestIdx = i;
+            }
+          }
+        }
+
+        if (bestSeg != null && bestIdx >= 0 && bestIdx < bestSeg.length - 1) {
+          const p0 = bestSeg[bestIdx];
+          const p1 = bestSeg[bestIdx + 1];
+          const segDx = p1.x - p0.x;
+          const segDy = p1.y - p0.y;
+          const segLen = Math.sqrt(segDx * segDx + segDy * segDy) || 1;
+          const tx = segDx / segLen;
+          const ty = segDy / segLen;
+          const tangentialSpeed = this.airVX * tx + this.airVY * ty;
+
+          const relX = this.airX - p0.x;
+          const relY = this.airY - p0.y;
+          const proj = Math.max(0, Math.min(1, (relX * tx + relY * ty) / segLen));
+
+          this.onRail = true;
+          this.rail = bestSeg;
+          this.pos = bestIdx + proj;
+          this.directionFlipped = false;
+          this.initDirection(this.pos);
+          this.speed = tangentialSpeed * this.direction;
+          this.airVX = this.airVY = 0;
+
+          if (this.touchedEndTile() && !this.levelCompleted) {
+            this.speed = 0;
+            this.levelCompleted = true;
+            this.onLevelComplete?.(this.elapsedTime, this.starsCollected);
+          }
         }
       }
 
@@ -455,8 +529,10 @@ export class GameEngine {
     const maxSpeed = (MAX_SPEED_BASE + this.upgrades.motor * 80) * (this.rocketTimer > 0 ? 1.8 : 1);
 
     let throttle = 0;
-    if (this.keys.up) throttle = THROTTLE_BASE * motorMult;
-    if (this.keys.down) throttle = -THROTTLE_BASE * motorMult;
+    const goForward = this.directionFlipped ? this.keys.down : this.keys.up;
+    const goBackward = this.directionFlipped ? this.keys.up : this.keys.down;
+    if (goForward) throttle = THROTTLE_BASE * motorMult;
+    if (goBackward) throttle = -THROTTLE_BASE * motorMult;
     if (this.rocketTimer > 0) throttle += THROTTLE_BASE * 1.5;
 
     const gravity = this.direction * cfg.gravity * Math.sin(angle) * 0.15;
@@ -522,27 +598,102 @@ export class GameEngine {
   }
 
   /**
-   * Set direction so arrow-up moves toward the farther rail end from the entry point.
-   * Exception: purely vertical rails — arrow-up moves upward.
+   * Set direction so positive speed moves rightward (increasing X).
+   * Exception: purely vertical rails — positive speed moves upward.
    */
-  initDirection(entryPos?: number) {
+  initDirection(_entryPos?: number) {
     if (this.rail.length < 2) return;
     const first = this.rail[0];
     const last = this.rail[this.rail.length - 1];
 
-    // Purely vertical: arrow-up moves upward (screen y inverted)
+    // Purely vertical: positive speed moves upward (screen y inverted)
     if (first.x === last.x) {
       this.direction = last.y <= first.y ? 1 : -1;
       return;
     }
 
-    // Arrow-up moves toward the farther end from entry
-    const idx = entryPos != null ? Math.floor(Math.max(0, Math.min(this.rail.length - 1, entryPos))) : 0;
-    const entry = this.rail[idx];
-    const dFirst = Math.hypot(first.x - entry.x, first.y - entry.y);
-    const dLast = Math.hypot(last.x - entry.x, last.y - entry.y);
-    // Farther end is at higher indices → direction 1, at lower indices → direction -1
-    this.direction = dLast >= dFirst ? 1 : -1;
+    // Positive speed moves rightward (increasing X)
+    this.direction = last.x > first.x ? 1 : -1;
+  }
+
+  /** Build AABBs for all rail segments (call once after allRailSegments is set). */
+  buildSegmentBounds() {
+    this.segmentBounds = this.allRailSegments.map(seg => {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const p of seg) {
+        if (p.x < minX) minX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y > maxY) maxY = p.y;
+      }
+      return { seg, minX, minY, maxX, maxY };
+    });
+  }
+
+  /**
+   * Swept circle vs line segment collision.
+   * Returns earliest t ∈ [0,1] where a circle of `radius` moving from (cx,cy) by (dx,dy)
+   * first touches the segment A→B, or null if no collision.
+   */
+  sweepCircleVsSegment(
+    cx: number, cy: number,
+    dx: number, dy: number,
+    radius: number,
+    a: Point, b: Point
+  ): { t: number } | null {
+    let bestT: number | null = null;
+    const accept = (t: number) => {
+      if (t >= 0 && t <= 1 && (bestT === null || t < bestT)) bestT = t;
+    };
+
+    const ex = b.x - a.x;
+    const ey = b.y - a.y;
+    const eLenSq = ex * ex + ey * ey;
+    const eLen = Math.sqrt(eLenSq);
+    if (eLen < 0.001) {
+      // Degenerate segment — treat as endpoint circle only
+    } else {
+      // Sub-check 1: ray vs infinite line at distance = radius (linear in t)
+      const fx = cx - a.x;
+      const fy = cy - a.y;
+      const crossFE = fx * ey - fy * ex;
+      const crossDE = dx * ey - dy * ex;
+
+      if (Math.abs(crossDE) > 0.0001) {
+        // Two solutions: cross = +radius*eLen and cross = -radius*eLen
+        const t1 = (radius * eLen - crossFE) / crossDE;
+        const t2 = (-radius * eLen - crossFE) / crossDE;
+        for (const t of [t1, t2]) {
+          if (t >= 0 && t <= 1) {
+            // Check projection s ∈ [0,1]
+            const px = cx + t * dx - a.x;
+            const py = cy + t * dy - a.y;
+            const s = (px * ex + py * ey) / eLenSq;
+            if (s >= 0 && s <= 1) accept(t);
+          }
+        }
+      }
+    }
+
+    // Sub-check 2 & 3: ray vs endpoint circles (quadratic)
+    const endpoints = [a, b];
+    for (const ep of endpoints) {
+      const gx = cx - ep.x;
+      const gy = cy - ep.y;
+      const A = dx * dx + dy * dy;
+      const B = 2 * (gx * dx + gy * dy);
+      const C = gx * gx + gy * gy - radius * radius;
+      const disc = B * B - 4 * A * C;
+      if (disc >= 0 && A > 0) {
+        const sqrtDisc = Math.sqrt(disc);
+        const t1 = (-B - sqrtDisc) / (2 * A);
+        const t2 = (-B + sqrtDisc) / (2 * A);
+        accept(t1);
+        accept(t2);
+      }
+    }
+
+    return bestT !== null ? { t: bestT } : null;
   }
 
   /** True if the gondola is within the end tile trigger area (world-space proximity). */
