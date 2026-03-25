@@ -55,7 +55,8 @@ export class GameEngine {
   airVY = 0;
   airRotation = 0;
   airRotVel = 0;
-  airborneTime = 0; // time spent airborne — prevents immediate snap-back
+  airborneTime = 0; // time spent airborne — cooldown for snap-back to exited rail
+  airborneFromSeg: Point[] | null = null; // the rail segment the player launched from
 
   elapsedTime = 0;
   levelCompleted = false;
@@ -335,13 +336,15 @@ export class GameEngine {
       this.airborneTime += dt;
 
       // Try to snap back to any rail segment if we pass near it (after brief cooldown)
-      const snapRadius = 40;
+      const snapRadius = 20
       const segmentsToSearch = this.allRailSegments.length > 0 ? this.allRailSegments : [this.rail];
       let bestSeg: Point[] | null = null;
       let bestIdx = -1;
       let bestDist = snapRadius;
       for (const seg of segmentsToSearch) {
         if (seg.length < 2) continue;
+        // Skip the exited segment during cooldown
+        if (seg === this.airborneFromSeg && this.airborneTime <= 0.3) continue;
         for (let i = 0; i < seg.length; i++) {
           const p = seg[i];
           const dx = p.x - this.airX;
@@ -355,7 +358,7 @@ export class GameEngine {
         }
       }
 
-      if (this.airborneTime > 0.3 && bestSeg != null && bestIdx >= 0 && bestIdx < bestSeg.length - 1) {
+      if (bestSeg != null && bestIdx >= 0 && bestIdx < bestSeg.length - 1) {
         const p0 = bestSeg[bestIdx];
         const p1 = bestSeg[bestIdx + 1];
         const segDx = p1.x - p0.x;
@@ -365,11 +368,16 @@ export class GameEngine {
         const ty = segDy / segLen;
         const tangentialSpeed = this.airVX * tx + this.airVY * ty;
 
+        // Interpolate pos along segment for smooth placement
+        const relX = this.airX - p0.x;
+        const relY = this.airY - p0.y;
+        const proj = Math.max(0, Math.min(1, (relX * tx + relY * ty) / segLen));
+
         this.onRail = true;
         this.rail = bestSeg;
-        this.pos = bestIdx;
-        this.initDirection();
-        // Speed sign: positive if tangential velocity aligns with direction, negative otherwise
+        this.pos = bestIdx + proj;
+        this.initDirection(this.pos);
+        // Use only the rail-aligned component of velocity
         this.speed = tangentialSpeed * this.direction;
         this.airVX = this.airVY = 0;
 
@@ -423,6 +431,7 @@ export class GameEngine {
 
         this.onRail = false;
         this.airborneTime = 0;
+        this.airborneFromSeg = this.rail;
         this.airX = launchPoint.x;
         this.airY = launchPoint.y;
         this.airVX = (dx / segLen) * effSpeed;
@@ -512,20 +521,28 @@ export class GameEngine {
     return { x: p0.x + (p1.x - p0.x) * f, y: p0.y + (p1.y - p0.y) * f };
   }
 
-  /** Set initial direction so arrow-up moves right (or up for purely vertical rails). */
-  initDirection() {
+  /**
+   * Set direction so arrow-up moves toward the farther rail end from the entry point.
+   * Exception: purely vertical rails — arrow-up moves upward.
+   */
+  initDirection(entryPos?: number) {
     if (this.rail.length < 2) return;
     const first = this.rail[0];
     const last = this.rail[this.rail.length - 1];
-    const dx = last.x - first.x;
-    const dy = last.y - first.y;
-    if (dx === 0) {
-      // 100% vertical: throttle moves up (screen y inverted)
-      this.direction = dy <= 0 ? 1 : -1;
-    } else {
-      // Any horizontal component: throttle moves right
-      this.direction = dx > 0 ? 1 : -1;
+
+    // Purely vertical: arrow-up moves upward (screen y inverted)
+    if (first.x === last.x) {
+      this.direction = last.y <= first.y ? 1 : -1;
+      return;
     }
+
+    // Arrow-up moves toward the farther end from entry
+    const idx = entryPos != null ? Math.floor(Math.max(0, Math.min(this.rail.length - 1, entryPos))) : 0;
+    const entry = this.rail[idx];
+    const dFirst = Math.hypot(first.x - entry.x, first.y - entry.y);
+    const dLast = Math.hypot(last.x - entry.x, last.y - entry.y);
+    // Farther end is at higher indices → direction 1, at lower indices → direction -1
+    this.direction = dLast >= dFirst ? 1 : -1;
   }
 
   /** True if the gondola is within the end tile trigger area (world-space proximity). */
