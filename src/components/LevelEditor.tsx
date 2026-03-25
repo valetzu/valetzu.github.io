@@ -15,6 +15,7 @@ import {
   RailSegment,
   sampleCircularArcWorld,
   sampleBezierWorld,
+  sampleLoopRailWorld,
   keyToWorld,
   smoothDrawnRail,
   generateLevelId,
@@ -70,6 +71,7 @@ const TOOLS: { tool: EditorTool; label: string; emoji: string }[] = [
   { tool: "eraser", label: "Eraser", emoji: "🧹" },
   { tool: "arc", label: "Arc Tool", emoji: "🔄" },
   { tool: "curve", label: "Curve", emoji: "〰️" },
+  { tool: "loop", label: "Loop", emoji: "🔁" },
   { tool: "circular_curve", label: "Circular Curve", emoji: "🟠" },
   { tool: "circle", label: "Circle", emoji: "⭕" },
   { tool: "line", label: "Line", emoji: "📏" },
@@ -87,6 +89,7 @@ const TILE_TOOL_TYPES = new Set<EditorTool>([
 const SHAPE_TOOL_TYPES = new Set<EditorTool>([
   "arc",
   "curve",
+  "loop",
   "circular_curve",
   "circle",
 ]);
@@ -252,7 +255,7 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     [],
   );
 
-  // Curve tool state: click start, click end, then drag control point
+  // Curve / loop tool state: click start, click end, then shape with a control point
   const [curveStart, setCurveStart] = useState<{
     gx: number;
     gy: number;
@@ -518,26 +521,14 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       ctx.arc(acx, acy, 4, 0, Math.PI * 2);
       ctx.fill();
     }
-    // Curve / circular curve preview: draw smooth arc/bezier (no tiles)
+    // Curve / loop preview: draw smooth shaped rail (no tiles)
     if (
       curveStart &&
       curveEnd &&
       curveControl &&
-      (tool === "curve" || tool === "circular_curve")
+      (tool === "curve" || tool === "circular_curve" || tool === "loop")
     ) {
-      const wStart = {
-        x: curveStart.gx * GRID_SIZE,
-        y: curveStart.gy * GRID_SIZE,
-      };
-      const wEnd = { x: curveEnd.gx * GRID_SIZE, y: curveEnd.gy * GRID_SIZE };
-      const wPivot = {
-        x: curveControl.gx * GRID_SIZE,
-        y: curveControl.gy * GRID_SIZE,
-      };
-      const pts =
-        tool === "circular_curve"
-          ? sampleCircularArcWorld(wStart, wEnd, wPivot)
-          : sampleBezierWorld(wStart, wEnd, wPivot);
+      const pts = sampleShapedRailWorld(tool, curveStart, curveEnd, curveControl);
       ctx.strokeStyle = "rgba(100,200,255,0.9)";
       ctx.lineWidth = 4;
       ctx.beginPath();
@@ -1510,6 +1501,43 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     return result;
   };
 
+  const sampleShapedRailWorld = (
+    shapeTool: "curve" | "circular_curve" | "loop",
+    start: { gx: number; gy: number },
+    end: { gx: number; gy: number },
+    control: { gx: number; gy: number },
+  ) => {
+    const wStart = keyToWorld(tileKey(start.gx, start.gy));
+    const wEnd = keyToWorld(tileKey(end.gx, end.gy));
+    const wControl = keyToWorld(tileKey(control.gx, control.gy));
+    if (shapeTool === "circular_curve") {
+      return sampleCircularArcWorld(wStart, wEnd, wControl);
+    }
+    if (shapeTool === "loop") {
+      return sampleLoopRailWorld(wStart, wEnd, wControl);
+    }
+    return sampleBezierWorld(wStart, wEnd, wControl);
+  };
+
+  const getDefaultLoopControl = (
+    start: { gx: number; gy: number },
+    end: { gx: number; gy: number },
+  ) => {
+    const dx = end.gx - start.gx;
+    const dy = end.gy - start.gy;
+    const length = Math.hypot(dx, dy);
+    if (length < 0.01) {
+      return { gx: start.gx, gy: start.gy - 2 };
+    }
+    const offset = Math.max(2, Math.round(length / 4));
+    const perpX = -dy / length;
+    const perpY = dx / length;
+    return {
+      gx: Math.round((start.gx + end.gx) / 2 + perpX * offset),
+      gy: Math.round((start.gy + end.gy) / 2 + perpY * offset),
+    };
+  };
+
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button === 1 || e.button === 2) {
       setIsPanning(true);
@@ -1547,30 +1575,49 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
         return;
       }
 
-      // Curve tools: click start, click end, then click/drag control point.
-      if (tool === "curve" || tool === "circular_curve") {
+      // Curve/loop tools: click start, click end, then shape with a control point.
+      if (tool === "curve" || tool === "circular_curve" || tool === "loop") {
         if (!curveStart) {
           setCurveStart({ gx, gy });
         } else if (!curveEnd) {
           setCurveEnd({ gx, gy });
-          const mid = {
-            gx: Math.round((curveStart.gx + gx) / 2),
-            gy: Math.round((curveStart.gy + gy) / 2),
-          };
-          setCurveControl(mid);
+          const defaultControl =
+            tool === "loop"
+              ? getDefaultLoopControl(curveStart, { gx, gy })
+              : {
+                  gx: Math.round((curveStart.gx + gx) / 2),
+                  gy: Math.round((curveStart.gy + gy) / 2),
+                };
+          setCurveControl(defaultControl);
           setCurvePreview(
             tool === "curve"
-              ? generateBezierCurve(curveStart, { gx, gy }, mid)
-              : generateCircularArc(curveStart, { gx, gy }, mid),
+              ? generateBezierCurve(curveStart, { gx, gy }, defaultControl)
+              : tool === "circular_curve"
+                ? generateCircularArc(curveStart, { gx, gy }, defaultControl)
+                : [],
           );
         } else {
-          setIsDraggingCurve(true);
-          setCurveControl({ gx, gy });
-          setCurvePreview(
-            tool === "curve"
-              ? generateBezierCurve(curveStart, curveEnd, { gx, gy })
-              : generateCircularArc(curveStart, curveEnd, { gx, gy }),
-          );
+          const nextControl = { gx, gy };
+          if (tool === "loop") {
+            const pts = sampleShapedRailWorld(tool, curveStart, curveEnd, nextControl);
+            if (pts.length >= 2) {
+              setSegments((prev) => [...prev, { points: pts }]);
+            }
+            lastPlacedRailRef.current = null;
+            setCurveStart(null);
+            setCurveEnd(null);
+            setCurveControl(null);
+            setCurvePreview([]);
+            setIsDraggingCurve(false);
+          } else {
+            setIsDraggingCurve(true);
+            setCurveControl(nextControl);
+            setCurvePreview(
+              tool === "curve"
+                ? generateBezierCurve(curveStart, curveEnd, nextControl)
+                : generateCircularArc(curveStart, curveEnd, nextControl),
+            );
+          }
         }
         return;
       }
@@ -1934,19 +1981,21 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       setArcPreview(generateCircleRail(arcCenter.gx, arcCenter.gy, gx, gy));
     }
 
-    // Curve / circular curve control point dragging
+    // Curve / loop control point shaping
     if (
-      (tool === "curve" || tool === "circular_curve") &&
+      (tool === "curve" || tool === "circular_curve" || tool === "loop") &&
       curveStart &&
       curveEnd &&
-      isDraggingCurve
+      (tool === "loop" || isDraggingCurve)
     ) {
       const { gx, gy } = screenToGrid(e.clientX, e.clientY);
       setCurveControl({ gx, gy });
       setCurvePreview(
         tool === "curve"
           ? generateBezierCurve(curveStart, curveEnd, { gx, gy })
-          : generateCircularArc(curveStart, curveEnd, { gx, gy }),
+          : tool === "circular_curve"
+            ? generateCircularArc(curveStart, curveEnd, { gx, gy })
+            : [],
       );
     }
 
@@ -2085,13 +2134,12 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
 
     // Commit curve / circular curve on mouse up: sample to polyline and add as segment
     if (isDraggingCurve && curveStart && curveEnd && curveControl) {
-      const wStart = keyToWorld(tileKey(curveStart.gx, curveStart.gy));
-      const wEnd = keyToWorld(tileKey(curveEnd.gx, curveEnd.gy));
-      const wPivot = keyToWorld(tileKey(curveControl.gx, curveControl.gy));
-      const pts =
-        tool === "circular_curve"
-          ? sampleCircularArcWorld(wStart, wEnd, wPivot)
-          : sampleBezierWorld(wStart, wEnd, wPivot);
+      const pts = sampleShapedRailWorld(
+        tool as "curve" | "circular_curve",
+        curveStart,
+        curveEnd,
+        curveControl,
+      );
       if (pts.length >= 2) {
         setSegments((prev) => [...prev, { points: pts }]);
       }
@@ -2937,7 +2985,11 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
                         setArcCenter(null);
                         setArcPreview([]);
                       }
-                      if (t.tool !== "curve" && t.tool !== "circular_curve") {
+                      if (
+                        t.tool !== "curve" &&
+                        t.tool !== "circular_curve" &&
+                        t.tool !== "loop"
+                      ) {
                         setCurveStart(null);
                         setCurveEnd(null);
                         setCurveControl(null);
@@ -3629,3 +3681,4 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     </div>
   );
 }
+

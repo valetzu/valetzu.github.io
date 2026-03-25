@@ -4,6 +4,7 @@ import {
   buildIndividualSegmentsFromRailSegments,
   convertLevelToGameDataV3,
   sampleBezierWorld,
+  sampleLoopRailWorld,
   walkContinuousPath,
   type EditorLevel,
   type RailSegment,
@@ -98,5 +99,33 @@ describe("editor rail conversion", () => {
     const sampledAngle = Math.atan2(last.y - prev.y, last.x - prev.x);
     const tangentAngle = Math.atan2(end.y - control.y, end.x - control.x);
     expect(Math.abs(sampledAngle - tangentAngle)).toBeLessThan(0.02);
+  });
+
+  it("samples loop rails with preserved open endpoints and a repeated crossover midpoint", () => {
+    const start = { x: 0, y: 0 };
+    const end = { x: 200, y: 0 };
+    const control = { x: 100, y: 120 };
+
+    const points = sampleLoopRailWorld(start, end, control);
+
+    expect(points[0]).toEqual(start);
+    expect(points[points.length - 1]).toEqual(end);
+
+    const midpointHits = points.filter(
+      (p) => Math.abs(p.x - 100) < 1e-6 && Math.abs(p.y) < 1e-6,
+    );
+    expect(midpointHits.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("falls back to a straight line when the requested loop height is negligible", () => {
+    const start = { x: 0, y: 0 };
+    const end = { x: 120, y: 0 };
+    const control = { x: 60, y: 1 };
+
+    const points = sampleLoopRailWorld(start, end, control);
+
+    expect(points[0]).toEqual(start);
+    expect(points[points.length - 1]).toEqual(end);
+    expect(points.every((p) => Math.abs(p.y) < 1e-6)).toBe(true);
   });
 });

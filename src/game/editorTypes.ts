@@ -65,6 +65,7 @@ export type EditorTool =
   | "eraser"
   | "arc"
   | "curve"
+  | "loop"
   | "circular_curve"
   | "circle"
   | "line"
@@ -287,6 +288,59 @@ export function sampleBezierWorld(
     });
   }
   return samplePolylineWorld(raw, 8);
+}
+
+/** Sample a loop-the-loop style rail with open endpoints and a full circular loop through the midpoint. */
+export function sampleLoopRailWorld(
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+  control: { x: number; y: number },
+): { x: number; y: number }[] {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const chordLength = Math.hypot(dx, dy);
+  if (chordLength < 1) return [start, end];
+
+  const ux = dx / chordLength;
+  const uy = dy / chordLength;
+  const perpX = -uy;
+  const perpY = ux;
+  const midpoint = {
+    x: (start.x + end.x) / 2,
+    y: (start.y + end.y) / 2,
+  };
+
+  const controlOffsetX = control.x - midpoint.x;
+  const controlOffsetY = control.y - midpoint.y;
+  const signedHeight = controlOffsetX * perpX + controlOffsetY * perpY;
+  const radius = Math.abs(signedHeight);
+
+  if (radius < 8) {
+    return sampleLineWorld(start, end, 20);
+  }
+
+  const normalSign = signedHeight >= 0 ? 1 : -1;
+  const nx = perpX * normalSign;
+  const ny = perpY * normalSign;
+  const center = {
+    x: midpoint.x + nx * radius,
+    y: midpoint.y + ny * radius,
+  };
+
+  const entry = sampleLineWorld(start, midpoint, 20);
+  const circumference = 2 * Math.PI * radius;
+  const loopSteps = Math.max(24, Math.min(240, Math.ceil(circumference / 8)));
+  const loop: { x: number; y: number }[] = [];
+  for (let i = 0; i <= loopSteps; i++) {
+    const angle = (i / loopSteps) * Math.PI * 2;
+    loop.push({
+      x: center.x + radius * (-nx * Math.cos(angle) + ux * Math.sin(angle)),
+      y: center.y + radius * (-ny * Math.cos(angle) + uy * Math.sin(angle)),
+    });
+  }
+  const exit = sampleLineWorld(midpoint, end, 20);
+
+  return [...entry, ...loop.slice(1), ...exit.slice(1)];
 }
 
 export function sampleLineWorld(
