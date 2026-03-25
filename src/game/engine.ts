@@ -504,7 +504,8 @@ export class GameEngine {
 
     const i = Math.floor(this.pos);
     const f = this.pos - i;
-    if (i < 0 || i >= this.rail.length - 1) return { x: 0, y: 300 };
+    if (i < 0) return this.rail.length > 0 ? this.rail[0] : { x: 0, y: 300 };
+    if (i >= this.rail.length - 1) return this.rail.length > 0 ? this.rail[this.rail.length - 1] : { x: 0, y: 300 };
     const p0 = this.rail[i];
     const p1 = this.rail[i + 1];
     return { x: p0.x + (p1.x - p0.x) * f, y: p0.y + (p1.y - p0.y) * f };
