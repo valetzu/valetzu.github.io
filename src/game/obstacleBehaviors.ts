@@ -6,6 +6,7 @@ import { Obstacle, Point } from './types';
 
 export interface GameUpdateContext {
   getGondolaPos: () => Point;
+  getCabinCenter: () => Point;
   gondolaHang: number;
   hitRadius: number;
   dealDamage: (obs: Obstacle) => void;
@@ -353,9 +354,9 @@ export const swoopBehavior: ObstacleBehavior = {
       }
     } else {
       obs.angle += obs.bounceSpeed * dt;
-      const gp = gameCtx.getGondolaPos();
-      const px = gp.x;
-      const py = gp.y + gameCtx.gondolaHang;
+      const cab = gameCtx.getCabinCenter();
+      const px = cab.x;
+      const py = cab.y;
       const birdWorldX = obs.x + Math.sin(obs.angle) * pw / 2;
       const birdWorldY = obs.baseY + obs.amplitude;
       const dxP = px - birdWorldX;
@@ -555,9 +556,9 @@ export const boulderBehavior: ObstacleBehavior = {
   update(obs, dt, gameCtx) {
     const GRAVITY = 700;
     if (obs.armLength === 0) {
-      const gp = gameCtx.getGondolaPos();
-      const dx = gp.x - obs.x;
-      const dy = (gp.y + gameCtx.gondolaHang) - obs.y;
+      const cab = gameCtx.getCabinCenter();
+      const dx = cab.x - obs.x;
+      const dy = cab.y - obs.y;
       if (Math.sqrt(dx * dx + dy * dy) < (obs.triggerRadius ?? 120)) {
         obs.armLength = 1;
       }
@@ -651,9 +652,9 @@ export const mineBehavior: ObstacleBehavior = {
     const EXPLOSION_DURATION = 0.55;
     if (obs.armLength === 0) {
       obs.angle += 0.4 * dt;
-      const gp = gameCtx.getGondolaPos();
-      const dx = gp.x - obs.x;
-      const dy = (gp.y + gameCtx.gondolaHang) - obs.y;
+      const cab1 = gameCtx.getCabinCenter();
+      const dx = cab1.x - obs.x;
+      const dy = cab1.y - obs.y;
       if (Math.sqrt(dx * dx + dy * dy) < (obs.triggerRadius ?? 40)) {
         obs.armLength = 1;
       }
@@ -663,9 +664,9 @@ export const mineBehavior: ObstacleBehavior = {
       if (obs.bounceSpeed <= 0) {
         obs.armLength = 2;
         obs.amplitude = 0;
-        const gp = gameCtx.getGondolaPos();
-        const dx = gp.x - obs.x;
-        const dy = (gp.y + gameCtx.gondolaHang) - obs.y;
+        const cab2 = gameCtx.getCabinCenter();
+        const dx = cab2.x - obs.x;
+        const dy = cab2.y - obs.y;
         if (Math.sqrt(dx * dx + dy * dy) < gameCtx.hitRadius + (obs.explosionRadius ?? 80)) {
           gameCtx.dealDamage(obs);
         }

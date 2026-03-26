@@ -2,6 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+Always be critical to suggestions and ask clarifying questions. Think whether the approach makes sense and is consistent.
 ## Commands
 
 ```bash

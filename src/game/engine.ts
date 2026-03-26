@@ -16,6 +16,11 @@ const ROCKET_DURATION = 3;
 const SHIELD_DURATION = 2.5;
 const OBSTACLE_MIN_GAP = 280;
 const OBSTACLE_MAX_GAP = 500;
+const ROLLING_INERTIA_FACTOR = 1.5; // effective mass multiplier (solid disk: 1 + I/mr² = 1.5)
+const PENDULUM_DAMPING = 4.5;        // angular velocity damping (~0.5× critical, settles naturally)
+const PENDULUM_PLAYER_TORQUE = 2;    // rad/s² gentle player nudge on pendulum (on-rail)
+const AIRBORNE_PLAYER_TORQUE = 25;   // rad/s² strong torque for full rotation in air
+const PENDULUM_MASS_RATIO = 0.15;    // cabin reaction force ratio on wheel
 
 interface Cloud { x: number; y: number; w: number; h: number }
 interface Star { x: number; y: number; s: number }
@@ -57,10 +62,16 @@ export class GameEngine {
   airY = 0;
   airVX = 0;
   airVY = 0;
-  airRotation = 0;
-  airRotVel = 0;
   airborneTime = 0; // time spent airborne — cooldown for snap-back to exited rail
   airborneFromSeg: Point[] | null = null; // the rail segment the player launched from
+
+  wheelAngle = 0; // cumulative rotation for visual spin
+
+  // Pendulum state — cabin swings from wheel joint
+  pendulumAngle = 0;   // angle from vertical (radians, positive = right)
+  pendulumVel = 0;     // angular velocity (rad/s)
+  prevWheelVX = 0;     // previous frame wheel world velocity X
+  prevWheelVY = 0;     // previous frame wheel world velocity Y
 
   elapsedTime = 0;
   levelCompleted = false;
@@ -325,14 +336,15 @@ export class GameEngine {
         this.airVY -= dragY * dt;
       }
 
-      // Mid-air rotation via left/right keys
-      const rotAccel = 4;
-      if (this.keys.left) this.airRotVel -= rotAccel * dt;
-      if (this.keys.right) this.airRotVel += rotAccel * dt;
-
-      // Rotation damping
-      this.airRotVel *= Math.exp(-2 * dt);
-      this.airRotation += this.airRotVel * dt;
+      // Pendulum physics — gravity restores cabin, strong torque for full rotation control
+      const gEff = cfg.gravity * 0.9;
+      let pendAlpha = -(gEff / GONDOLA_HANG) * Math.sin(this.pendulumAngle);
+      if (this.keys.left) pendAlpha -= AIRBORNE_PLAYER_TORQUE;
+      if (this.keys.right) pendAlpha += AIRBORNE_PLAYER_TORQUE;
+      pendAlpha -= PENDULUM_DAMPING * this.pendulumVel;
+      this.pendulumVel += pendAlpha * dt;
+      this.pendulumAngle += this.pendulumVel * dt;
+      // No angle clamp — full 360° rotation allowed
 
       // Swept circle collision + position integration
       const moveX = this.airVX * dt;
@@ -399,6 +411,9 @@ export class GameEngine {
         this.initDirection(this.pos);
         this.speed = tangentialSpeed * this.direction;
         this.airVX = this.airVY = 0;
+        // Pendulum keeps running — just init prevWheel to avoid acceleration spike
+        this.prevWheelVX = this.direction * this.speed * tx;
+        this.prevWheelVY = this.direction * this.speed * ty;
 
         if (this.touchedEndTile() && !this.levelCompleted) {
           this.speed = 0;
@@ -454,6 +469,9 @@ export class GameEngine {
           this.initDirection(this.pos);
           this.speed = tangentialSpeed * this.direction;
           this.airVX = this.airVY = 0;
+          // Pendulum keeps running — just init prevWheel to avoid acceleration spike
+          this.prevWheelVX = this.direction * this.speed * tx;
+          this.prevWheelVY = this.direction * this.speed * ty;
 
           if (this.touchedEndTile() && !this.levelCompleted) {
             this.speed = 0;
@@ -503,15 +521,18 @@ export class GameEngine {
         const effSpeed = this.direction * this.speed;
         const launchPoint = atEnd ? p1 : p0;
 
+        // Offset launch point by rail normal so wheel center is continuous
+        const endPos = atEnd ? this.rail.length - 1.001 : 0.001;
+        const { nx: lnx, ny: lny } = this.getRailNormal(endPos);
+
         this.onRail = false;
         this.airborneTime = 0;
         this.airborneFromSeg = this.rail;
-        this.airX = launchPoint.x;
-        this.airY = launchPoint.y;
+        this.airX = launchPoint.x + lnx * WHEEL_RADIUS;
+        this.airY = launchPoint.y + lny * WHEEL_RADIUS;
         this.airVX = (dx / segLen) * effSpeed;
         this.airVY = (dy / segLen) * effSpeed;
-        this.airRotation = 0;
-        this.airRotVel = 0;
+        // Pendulum continues running in airborne — no transfer needed
       }
       return;
     }
@@ -539,16 +560,45 @@ export class GameEngine {
     const friction = -this.speed * cfg.friction * gripMult;
     const drag = -this.speed * Math.abs(this.speed) * 0.0003;
 
-    this.speed += (throttle + gravity + friction + drag) * dt;
+    this.speed += (throttle + gravity + friction + drag) * dt / ROLLING_INERTIA_FACTOR;
     this.speed = Math.max(-maxSpeed, Math.min(maxSpeed, this.speed));
 
     const dPos = (this.direction * this.speed * dt) / segLen;
     this.pos += dPos;
+    this.wheelAngle += (this.direction * this.speed * dt) / WHEEL_RADIUS;
     if (this.isLoop && this.rail.length > 2) {
       const cycleLen = this.rail.length - 1;
       while (this.pos >= cycleLen) this.pos -= cycleLen;
       while (this.pos < 0) this.pos += cycleLen;
     }
+
+    // --- Pendulum physics ---
+    const { tx: rTx, ty: rTy } = this.getRailNormal(this.pos);
+    const wheelVX = this.direction * this.speed * rTx;
+    const wheelVY = this.direction * this.speed * rTy;
+    const wheelAX = (wheelVX - this.prevWheelVX) / dt;
+    const wheelAY = (wheelVY - this.prevWheelVY) / dt;
+
+    // Pendulum equation: θ̈ = -(1/L)*((g - aY)*sin(θ) - aX*cos(θ)) + input - damping
+    const gEff = cfg.gravity * 0.9;
+    let pendAlpha = -(1 / GONDOLA_HANG) * ((gEff - wheelAY) * Math.sin(this.pendulumAngle) - wheelAX * Math.cos(this.pendulumAngle));
+
+    // Player tilt input (on-rail only)
+    if (this.keys.left) pendAlpha -= PENDULUM_PLAYER_TORQUE;
+    if (this.keys.right) pendAlpha += PENDULUM_PLAYER_TORQUE;
+
+    pendAlpha -= PENDULUM_DAMPING * this.pendulumVel;
+
+    this.pendulumVel += pendAlpha * dt;
+    this.pendulumAngle += this.pendulumVel * dt;
+    // No angle clamp — full 360° rotation allowed
+
+    // Reaction force: cabin weight component along rail tangent
+    const pendForceX = PENDULUM_MASS_RATIO * gEff * Math.sin(this.pendulumAngle);
+    this.speed += pendForceX * rTx * dt / ROLLING_INERTIA_FACTOR;
+
+    this.prevWheelVX = wheelVX;
+    this.prevWheelVY = wheelVY;
 
     this.distance += Math.abs(this.speed * dt) * 0.1; // px to meters
     this.elapsedTime += dt;
@@ -594,7 +644,71 @@ export class GameEngine {
     if (i >= this.rail.length - 1) return this.rail.length > 0 ? this.rail[this.rail.length - 1] : { x: 0, y: 300 };
     const p0 = this.rail[i];
     const p1 = this.rail[i + 1];
-    return { x: p0.x + (p1.x - p0.x) * f, y: p0.y + (p1.y - p0.y) * f };
+    const rx = p0.x + (p1.x - p0.x) * f;
+    const ry = p0.y + (p1.y - p0.y) * f;
+    // Offset wheel center perpendicular to rail (wheel sits on top of rail)
+    const { nx, ny } = this.getRailNormal(this.pos);
+    return { x: rx + nx * WHEEL_RADIUS, y: ry + ny * WHEEL_RADIUS };
+  }
+
+  /**
+   * Smoothed upward-pointing normal and tangent at any fractional pos along this.rail.
+   * Uses Phong-style averaging at polyline joints to prevent jitter.
+   */
+  getRailNormal(pos: number): { nx: number; ny: number; tx: number; ty: number } {
+    const rail = this.rail;
+    const len = rail.length;
+    if (len < 2) return { nx: 0, ny: -1, tx: 1, ty: 0 };
+
+    let i = Math.floor(pos);
+    let f = pos - i;
+    if (i < 0) { i = 0; f = 0; }
+    if (i >= len - 1) { i = len - 2; f = 1; }
+
+    // Segment tangent helper (normalized)
+    const segTan = (a: number) => {
+      const dx = rail[a + 1].x - rail[a].x;
+      const dy = rail[a + 1].y - rail[a].y;
+      const l = Math.sqrt(dx * dx + dy * dy) || 1;
+      return { tx: dx / l, ty: dy / l };
+    };
+
+    // Smoothed tangent at a rail point by averaging adjacent segment tangents
+    const smoothTanAt = (idx: number) => {
+      if (idx <= 0) return segTan(0);
+      if (idx >= len - 1) return segTan(len - 2);
+      const prev = segTan(idx - 1);
+      const curr = segTan(idx);
+      const ax = prev.tx + curr.tx;
+      const ay = prev.ty + curr.ty;
+      const al = Math.sqrt(ax * ax + ay * ay) || 1;
+      return { tx: ax / al, ty: ay / al };
+    };
+
+    // Lerp smoothed tangents at endpoints of current segment
+    const t0 = smoothTanAt(i);
+    const t1 = smoothTanAt(i + 1);
+    let tx = t0.tx + (t1.tx - t0.tx) * f;
+    let ty = t0.ty + (t1.ty - t0.ty) * f;
+    const tl = Math.sqrt(tx * tx + ty * ty) || 1;
+    tx /= tl;
+    ty /= tl;
+
+    // Perpendicular — choose the direction that points upward (ny <= 0)
+    let nx = -ty;
+    let ny = tx;
+    if (ny > 0) { nx = ty; ny = -tx; }
+
+    return { nx, ny, tx, ty };
+  }
+
+  /** Actual world-space cabin center, accounting for pendulum swing or airborne rotation. */
+  getCabinCenter(): Point {
+    const gp = this.getGondolaPos();
+    return {
+      x: gp.x + Math.sin(this.pendulumAngle) * GONDOLA_HANG,
+      y: gp.y + Math.cos(this.pendulumAngle) * GONDOLA_HANG,
+    };
   }
 
   /**
@@ -707,6 +821,7 @@ export class GameEngine {
   getGameUpdateContext(): GameUpdateContext {
     return {
       getGondolaPos: () => this.getGondolaPos(),
+      getCabinCenter: () => this.getCabinCenter(),
       gondolaHang: GONDOLA_HANG,
       hitRadius: HIT_RADIUS,
       dealDamage: (obs: Obstacle) => this.hitPassenger(obs),
@@ -724,9 +839,9 @@ export class GameEngine {
 
   checkCollisions() {
     if (this.invulnTimer > 0 || this.shieldTimer > 0) return;
-    const gp = this.getGondolaPos();
-    const cx = gp.x;
-    const cy = gp.y + GONDOLA_HANG;
+    const cabin = this.getCabinCenter();
+    const cx = cabin.x;
+    const cy = cabin.y;
 
     for (const obs of this.obstacles) {
       if (obs.hit) continue;
@@ -739,9 +854,9 @@ export class GameEngine {
   }
 
   checkStarCollection() {
-    const gp = this.getGondolaPos();
-    const cx = gp.x;
-    const cy = gp.y + GONDOLA_HANG;
+    const cabin = this.getCabinCenter();
+    const cx = cabin.x;
+    const cy = cabin.y;
     for (const star of this.collectibleStars) {
       if (star.collected) continue;
       const dist = Math.hypot(cx - star.x, cy - star.y);
@@ -1057,22 +1172,51 @@ export class GameEngine {
     // Flash effect when hit
     if (this.invulnTimer > 0 && Math.floor(this.invulnTimer * 8) % 2 === 0) return;
 
-    // Apply rotation around gondola center when airborne
-    ctx.save();
-    const pivotX = sx;
-    const pivotY = sy + GONDOLA_HANG;
-    if (this.hasFinitePath && !this.onRail) {
-      ctx.translate(pivotX, pivotY);
-      ctx.rotate(this.airRotation);
-      ctx.translate(-pivotX, -pivotY);
+    // Wheel on rail — rotating with spokes
+    ctx.fillStyle = '#555';
+    ctx.beginPath();
+    ctx.arc(sx, sy, WHEEL_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+    // 3 spokes at 120° intervals
+    ctx.strokeStyle = '#888';
+    ctx.lineWidth = 1.5;
+    for (let s = 0; s < 3; s++) {
+      const a = this.wheelAngle + (s * Math.PI * 2) / 3;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(sx + Math.cos(a) * (WHEEL_RADIUS - 1), sy + Math.sin(a) * (WHEEL_RADIUS - 1));
+      ctx.stroke();
     }
+    // Hub
+    ctx.fillStyle = '#AAA';
+    ctx.beginPath();
+    ctx.arc(sx, sy, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    const swing = this.pendulumAngle;
+
+    // Rotate everything (cable + cabin) around the wheel pivot
+    ctx.save();
+    ctx.translate(sx, sy);
+    ctx.rotate(swing);
+
+    // Cable from wheel to cabin (straight down in rotated frame)
+    ctx.strokeStyle = '#444';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, WHEEL_RADIUS);
+    ctx.lineTo(0, GONDOLA_HANG - CABIN_H / 2);
+    ctx.stroke();
+
+    // Cabin center is straight down from wheel in the rotated frame
+    ctx.translate(0, GONDOLA_HANG);
 
     // Shield glow
     if (this.shieldTimer > 0) {
       ctx.strokeStyle = 'rgba(100, 200, 255, 0.6)';
       ctx.lineWidth = 4;
       ctx.beginPath();
-      ctx.arc(sx, sy + GONDOLA_HANG, HIT_RADIUS + 15, 0, Math.PI * 2);
+      ctx.arc(0, 0, HIT_RADIUS + 15, 0, Math.PI * 2);
       ctx.stroke();
     }
 
@@ -1081,41 +1225,23 @@ export class GameEngine {
       ctx.fillStyle = '#FF6600';
       ctx.beginPath();
       const flameLen = 15 + Math.random() * 15;
-      ctx.moveTo(sx - CABIN_W / 2, sy + GONDOLA_HANG);
-      ctx.lineTo(sx - CABIN_W / 2 - flameLen, sy + GONDOLA_HANG + 5);
-      ctx.lineTo(sx - CABIN_W / 2, sy + GONDOLA_HANG + 10);
+      ctx.moveTo(-CABIN_W / 2, 0);
+      ctx.lineTo(-CABIN_W / 2 - flameLen, 5);
+      ctx.lineTo(-CABIN_W / 2, 10);
       ctx.closePath();
       ctx.fill();
       ctx.fillStyle = '#FFCC00';
       ctx.beginPath();
-      ctx.moveTo(sx - CABIN_W / 2, sy + GONDOLA_HANG + 2);
-      ctx.lineTo(sx - CABIN_W / 2 - flameLen * 0.6, sy + GONDOLA_HANG + 5);
-      ctx.lineTo(sx - CABIN_W / 2, sy + GONDOLA_HANG + 8);
+      ctx.moveTo(-CABIN_W / 2, 2);
+      ctx.lineTo(-CABIN_W / 2 - flameLen * 0.6, 5);
+      ctx.lineTo(-CABIN_W / 2, 8);
       ctx.closePath();
       ctx.fill();
     }
 
-    // Wheel on rail
-    ctx.fillStyle = '#555';
-    ctx.beginPath();
-    ctx.arc(sx, sy, 7, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#888';
-    ctx.beginPath();
-    ctx.arc(sx, sy, 4, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Cable to cabin
-    ctx.strokeStyle = '#444';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(sx, sy + 7);
-    ctx.lineTo(sx, sy + GONDOLA_HANG - CABIN_H / 2);
-    ctx.stroke();
-
-    // Cabin body
-    const cabX = sx - CABIN_W / 2;
-    const cabY = sy + GONDOLA_HANG - CABIN_H / 2;
+    // Cabin body (drawn centered at 0,0 = cabin center)
+    const cabX = -CABIN_W / 2;
+    const cabY = -CABIN_H / 2;
 
     // Main body
     ctx.fillStyle = '#E53935';
@@ -1162,7 +1288,8 @@ export class GameEngine {
       ctx.arc(px + 2.5, py - 1, 0.8, 0, Math.PI * 2);
       ctx.fill();
     }
-    ctx.restore();
+
+    ctx.restore(); // cabin rotation
   }
 
   roundRect(x: number, y: number, w: number, h: number, r: number) {
