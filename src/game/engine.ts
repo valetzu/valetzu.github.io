@@ -18,7 +18,7 @@ const OBSTACLE_MIN_GAP = 280;
 const OBSTACLE_MAX_GAP = 500;
 const ROLLING_INERTIA_FACTOR = 1.5; // effective mass multiplier (solid disk: 1 + I/mr² = 1.5)
 const PENDULUM_DAMPING = 4.5;        // angular velocity damping (~0.5× critical, settles naturally)
-const PENDULUM_PLAYER_TORQUE = 2;    // rad/s² gentle player nudge on pendulum (on-rail)
+const PENDULUM_PLAYER_TORQUE = 15;   // rad/s² strong torque matching airborne rotation control
 const AIRBORNE_PLAYER_TORQUE = 25;   // rad/s² strong torque for full rotation in air
 const PENDULUM_MASS_RATIO = 0.15;    // cabin reaction force ratio on wheel
 
@@ -72,6 +72,10 @@ export class GameEngine {
   pendulumVel = 0;     // angular velocity (rad/s)
   prevWheelVX = 0;     // previous frame wheel world velocity X
   prevWheelVY = 0;     // previous frame wheel world velocity Y
+
+  // Tracked rail normal for continuity (prevents flipping on loops)
+  prevNormalX = 0;
+  prevNormalY = -1;    // default: upward
 
   elapsedTime = 0;
   levelCompleted = false;
@@ -411,6 +415,8 @@ export class GameEngine {
         this.initDirection(this.pos);
         this.speed = tangentialSpeed * this.direction;
         this.airVX = this.airVY = 0;
+        // Seed normal direction from approach side (wheel was above/below rail)
+        this.seedNormalFromApproach(hitSegIdx + proj, this.airX, this.airY);
         // Pendulum keeps running — just init prevWheel to avoid acceleration spike
         this.prevWheelVX = this.direction * this.speed * tx;
         this.prevWheelVY = this.direction * this.speed * ty;
@@ -469,6 +475,8 @@ export class GameEngine {
           this.initDirection(this.pos);
           this.speed = tangentialSpeed * this.direction;
           this.airVX = this.airVY = 0;
+          // Seed normal direction from approach side (wheel was above/below rail)
+          this.seedNormalFromApproach(bestIdx + proj, this.airX, this.airY);
           // Pendulum keeps running — just init prevWheel to avoid acceleration spike
           this.prevWheelVX = this.direction * this.speed * tx;
           this.prevWheelVY = this.direction * this.speed * ty;
@@ -694,12 +702,51 @@ export class GameEngine {
     tx /= tl;
     ty /= tl;
 
-    // Perpendicular — choose the direction that points upward (ny <= 0)
+    // Perpendicular — two candidates
     let nx = -ty;
     let ny = tx;
-    if (ny > 0) { nx = ty; ny = -tx; }
+
+    // Use continuity with previous normal to prevent flipping on loops.
+    // If we have a meaningful previous normal, pick the candidate that agrees with it.
+    const dot = nx * this.prevNormalX + ny * this.prevNormalY;
+    if (dot < 0) {
+      // The other perpendicular is closer to previous normal
+      nx = ty;
+      ny = -tx;
+    } else if (dot === 0) {
+      // Ambiguous (perpendicular to previous) — fall back to upward heuristic
+      if (ny > 0) { nx = ty; ny = -tx; }
+    }
+
+    // Update tracked normal
+    this.prevNormalX = nx;
+    this.prevNormalY = ny;
 
     return { nx, ny, tx, ty };
+  }
+
+  /**
+   * Seed prevNormal based on which side the wheel is approaching from.
+   * This ensures getRailNormal picks the correct side after landing.
+   */
+  seedNormalFromApproach(pos: number, fromX: number, fromY: number) {
+    const rail = this.rail;
+    const len = rail.length;
+    if (len < 2) { this.prevNormalX = 0; this.prevNormalY = -1; return; }
+    let i = Math.floor(pos);
+    let f = pos - i;
+    if (i < 0) { i = 0; f = 0; }
+    if (i >= len - 1) { i = len - 2; f = 1; }
+    const p0 = rail[i];
+    const p1 = rail[i + 1];
+    const rx = p0.x + (p1.x - p0.x) * f;
+    const ry = p0.y + (p1.y - p0.y) * f;
+    // Direction from rail point toward where the wheel came from
+    let dx = fromX - rx;
+    let dy = fromY - ry;
+    const dl = Math.sqrt(dx * dx + dy * dy) || 1;
+    this.prevNormalX = dx / dl;
+    this.prevNormalY = dy / dl;
   }
 
   /** Actual world-space cabin center, accounting for pendulum swing or airborne rotation. */
