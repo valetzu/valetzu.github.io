@@ -2,6 +2,8 @@ import { WorldType, Upgrades, Point, Obstacle, WORLD_CONFIG } from './types';
 import { spriteManager } from './spriteManager';
 import { OBSTACLE_BEHAVIORS, GameUpdateContext } from './obstacleBehaviors';
 import { createRng } from './rng';
+import { GhostRecorder, GhostPlayer } from './replay';
+import type { BgTile } from './editorTypes';
 
 const RAIL_SPACING = 100;
 const THROTTLE_BASE = 350;
@@ -47,6 +49,9 @@ export class GameEngine {
   obstacles: Obstacle[] = [];
   keys = { up: false, down: false, left: false, right: false, space: false, shift: false };
   noBackground = false;
+  skyOverride: { skyTop: string; skyBottom: string } | null = null;
+  bgTiles: Record<string, BgTile> = {};
+  bgTileSize = 50;
   hasFinitePath = false;
   isLoop = false;
   /** Trigger radius for end tile proximity check (world pixels) */
@@ -111,6 +116,9 @@ export class GameEngine {
 
   collectibleStars: { x: number; y: number; collected: boolean }[] = [];
   starsCollected = 0;
+
+  ghostRecorder: GhostRecorder | null = null;
+  ghostPlayer: GhostPlayer | null = null;
 
   onUpdate?: (dist: number, passengers: number, speed: number) => void;
   onGameOver?: (dist: number, cash: number) => void;
@@ -638,6 +646,7 @@ export class GameEngine {
     this.updateObstacles(dt);
 
     // Callbacks
+    this.ghostRecorder?.onTick(this);
     this.onUpdate?.(this.distance, this.passengers, Math.abs(this.speed) * 0.1);
   }
 
@@ -886,16 +895,37 @@ export class GameEngine {
 
   checkCollisions() {
     if (this.invulnTimer > 0 || this.shieldTimer > 0) return;
+    const wheel = this.getGondolaPos();
     const cabin = this.getCabinCenter();
-    const cx = cabin.x;
-    const cy = cabin.y;
+
+    // Cable direction (wheel → cabin) and cabin's horizontal axis
+    const cableX = Math.sin(this.pendulumAngle);
+    const cableY = Math.cos(this.pendulumAngle);
+    const ax = cableY;   // cabin horizontal axis (perpendicular to cable)
+    const ay = -cableX;
+
+    // Probes along the full gondola shape:
+    // - Cabin: center + left/right edges (half cabin width)
+    // - Cable: midpoint between wheel and cabin
+    const halfW = CABIN_W / 2;
+    const cabinR = CABIN_H / 2;
+    const cableR = 4;
+    const probes: { x: number; y: number; r: number }[] = [
+      { x: cabin.x, y: cabin.y, r: cabinR },
+      { x: cabin.x + ax * halfW, y: cabin.y + ay * halfW, r: cabinR },
+      { x: cabin.x - ax * halfW, y: cabin.y - ay * halfW, r: cabinR },
+      { x: (wheel.x + cabin.x) / 2, y: (wheel.y + cabin.y) / 2, r: cableR },
+    ];
 
     for (const obs of this.obstacles) {
       if (obs.hit) continue;
       const behavior = OBSTACLE_BEHAVIORS[obs.type];
-      if (behavior && behavior.checkCollision(obs, cx, cy, HIT_RADIUS)) {
-        this.hitPassenger(obs);
-        return;
+      if (!behavior) continue;
+      for (const p of probes) {
+        if (behavior.checkCollision(obs, p.x, p.y, p.r)) {
+          this.hitPassenger(obs);
+          return;
+        }
       }
     }
   }
@@ -943,8 +973,8 @@ export class GameEngine {
 
     // Sky
     const skyGrad = ctx.createLinearGradient(0, 0, 0, h);
-    skyGrad.addColorStop(0, cfg.skyTop);
-    skyGrad.addColorStop(1, cfg.skyBottom);
+    skyGrad.addColorStop(0, this.skyOverride?.skyTop ?? cfg.skyTop);
+    skyGrad.addColorStop(1, this.skyOverride?.skyBottom ?? cfg.skyBottom);
     ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, w, h);
 
@@ -1008,6 +1038,26 @@ export class GameEngine {
       this.renderGround(cx, cy, w, h, cfg);
     }
 
+    // Background decoration tiles
+    const bgKeys = Object.keys(this.bgTiles);
+    if (bgKeys.length > 0) {
+      const gs = this.bgTileSize;
+      for (const key of bgKeys) {
+        const ci = key.indexOf(',');
+        const bgx = +key.slice(0, ci) * gs - cx;
+        const bgy = +key.slice(ci + 1) * gs - cy;
+        if (bgx + gs < 0 || bgx > w || bgy + gs < 0 || bgy > h) continue;
+        const bg = this.bgTiles[key];
+        ctx.fillStyle = bg.color;
+        ctx.fillRect(bgx, bgy, gs, gs);
+        if (bg.outline) {
+          ctx.strokeStyle = bg.outlineColor ?? '#000000';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(bgx + 1, bgy + 1, gs - 2, gs - 2);
+        }
+      }
+    }
+
     // Rail cable
     this.renderRail(cx, cy, w);
 
@@ -1038,6 +1088,7 @@ export class GameEngine {
     this.renderCollectibleStars(cx, cy);
 
     // Gondola
+    this.renderGhost(cx, cy);
     this.renderGondola(cx, cy);
 
     // HUD
@@ -1208,6 +1259,80 @@ export class GameEngine {
       x: this.prevGondolaX + (current.x - this.prevGondolaX) * alpha,
       y: this.prevGondolaY + (current.y - this.prevGondolaY) * alpha,
     };
+  }
+
+  renderGhost(cx: number, cy: number) {
+    const gp = this.ghostPlayer;
+    if (!gp) return;
+
+    const frame = gp.getFrame(this.elapsedTime);
+    const { ctx } = this;
+
+    if (frame) {
+      const sx = frame.x - cx;
+      const sy = frame.y - cy;
+
+      ctx.save();
+      ctx.globalAlpha = 0.35;
+
+      // Wheel
+      ctx.fillStyle = '#888';
+      ctx.beginPath();
+      ctx.arc(sx, sy, WHEEL_RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Spokes
+      ctx.strokeStyle = '#aaa';
+      ctx.lineWidth = 1.5;
+      for (let s = 0; s < 3; s++) {
+        const a = frame.wa + (s * Math.PI * 2) / 3;
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(sx + Math.cos(a) * (WHEEL_RADIUS - 1), sy + Math.sin(a) * (WHEEL_RADIUS - 1));
+        ctx.stroke();
+      }
+
+      // Cable + cabin in rotated frame
+      ctx.translate(sx, sy);
+      ctx.rotate(frame.pa);
+
+      ctx.strokeStyle = '#888';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, WHEEL_RADIUS);
+      ctx.lineTo(0, GONDOLA_HANG - CABIN_H / 2);
+      ctx.stroke();
+
+      ctx.translate(0, GONDOLA_HANG);
+      ctx.fillStyle = '#888';
+      ctx.fillRect(-CABIN_W / 2, -CABIN_H / 2, CABIN_W, CABIN_H);
+
+      // Shield indicator
+      if (frame.flags & 1) {
+        ctx.strokeStyle = 'rgba(100, 200, 255, 0.5)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(0, 0, CABIN_W / 2 + 6, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    } else if (gp.lastFrame && gp.finishedAge < 2) {
+      // Ghost finished — show checkered flag indicator for 2s
+      gp.finishedAge += this.FIXED_DT;
+      const lf = gp.lastFrame;
+      const sx = lf.x - cx;
+      const sy = lf.y - cy;
+      const alpha = Math.max(0, 0.6 * (1 - gp.finishedAge / 2));
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.font = 'bold 14px monospace';
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.fillText('🏁 Ghost finished!', sx, sy - 30);
+      ctx.restore();
+    }
   }
 
   renderGondola(cx: number, cy: number) {

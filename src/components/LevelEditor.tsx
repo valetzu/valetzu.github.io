@@ -23,6 +23,10 @@ import {
   buildIndividualSegmentsFromRailSegments,
   buildContinuousSegments,
   getSnapPoints,
+  SKY_THEMES,
+  SkyThemeId,
+  BgTile,
+  BG_PALETTE,
 } from "@/game/editorTypes";
 import { downloadLevelFile, importLevel } from "@/game/levelIO";
 import {
@@ -50,6 +54,14 @@ import {
 } from "@/game/obstacleDefinitions";
 import SettingsMenu from "@/components/SettingsMenu";
 import { loadSettings, updateSetting } from "@/game/settings";
+import {
+  GhostRecorder,
+  GhostPlayer,
+  computeLevelHash,
+  saveReplay,
+  getReplay,
+  getReplaysForLevel,
+} from "@/game/replay";
 
 interface LevelEditorProps {
   onBack: () => void;
@@ -160,7 +172,12 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     endpoint: "start" | "end";
   } | null>(null);
   const lastPlacedKeyRef = useRef<string | null>(null);
-  const [skyOnly, setSkyOnly] = useState(true);
+  const [skyTheme, setSkyTheme] = useState<SkyThemeId>('day');
+  const [bgTiles, setBgTiles] = useState<Record<string, BgTile>>({});
+  const [paintColor, setPaintColor] = useState(BG_PALETTE[0]);
+  const [paintOutline, setPaintOutline] = useState(false);
+  const [paintOutlineColor, setPaintOutlineColor] = useState('#000000');
+  const [paintSize, setPaintSize] = useState(1);
   const [autoconnect, setAutoconnect] = useState(true);
 
   const SNAP_TOLERANCE = 8; // px — for merging segment endpoints
@@ -190,6 +207,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
   const engineRef = useRef<GameEngine | null>(null);
   const importFileRef = useRef<HTMLInputElement>(null);
   const gameOverRef = useRef(false);
+  const ghostRecorderRef = useRef<GhostRecorder | null>(null);
+  const [ghostEnabled, setGhostEnabled] = useState(true);
   const lastSavedSegmentsRef = useRef<string>("[]");
   const lastSavedObstaclesRef = useRef<string>("{}");
   const lastSavedMarkersRef = useRef<string>("{}");
@@ -350,11 +369,44 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     const vw = w / zoom;
     const vh = h / zoom;
 
-    // Grid
+    // Background tiles (render behind everything)
     const startGX = Math.floor(cx / GRID_SIZE);
     const startGY = Math.floor(cy / GRID_SIZE);
     const endGX = Math.ceil((cx + vw) / GRID_SIZE);
     const endGY = Math.ceil((cy + vh) / GRID_SIZE);
+
+    for (const [key, bg] of Object.entries(bgTiles)) {
+      const [gx, gy] = parseTileKey(key);
+      if (gx < startGX - 1 || gx > endGX || gy < startGY - 1 || gy > endGY) continue;
+      const sx = gx * GRID_SIZE - cx;
+      const sy = gy * GRID_SIZE - cy;
+      ctx.fillStyle = bg.color;
+      ctx.fillRect(sx, sy, GRID_SIZE, GRID_SIZE);
+      if (bg.outline) {
+        ctx.strokeStyle = bg.outlineColor ?? '#000000';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(sx + 1, sy + 1, GRID_SIZE - 2, GRID_SIZE - 2);
+      }
+    }
+
+    // Paint tool brush preview
+    if (tool === "paint" && mouseWorld) {
+      const hoverGX = Math.floor(mouseWorld.x / GRID_SIZE);
+      const hoverGY = Math.floor(mouseWorld.y / GRID_SIZE);
+      const half = Math.floor(paintSize / 2);
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = paintColor;
+      for (let dx = 0; dx < paintSize; dx++) {
+        for (let dy = 0; dy < paintSize; dy++) {
+          const bx = (hoverGX - half + dx) * GRID_SIZE - cx;
+          const by = (hoverGY - half + dy) * GRID_SIZE - cy;
+          ctx.fillRect(bx, by, GRID_SIZE, GRID_SIZE);
+        }
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // Grid
 
     ctx.strokeStyle = "rgba(255,255,255,0.08)";
     ctx.lineWidth = 1;
@@ -1115,6 +1167,11 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     drawRailAttach,
     drawRailPending,
     drawRailSmoothness,
+    bgTiles,
+    paintColor,
+    paintSize,
+    paintOutline,
+    paintOutlineColor,
   ]);
 
   // Resize & render loop
@@ -2224,12 +2281,49 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       (p) => !isWorldPtOccupied(p.x, p.y) || isNearSnapPoint(p.x, p.y),
     );
 
+  const placeBgTiles = (gx: number, gy: number) => {
+    const half = Math.floor(paintSize / 2);
+    setBgTiles((prev) => {
+      const next = { ...prev };
+      for (let dx = 0; dx < paintSize; dx++) {
+        for (let dy = 0; dy < paintSize; dy++) {
+          const k = tileKey(gx - half + dx, gy - half + dy);
+          next[k] = {
+            color: paintColor,
+            outline: paintOutline || undefined,
+            outlineColor: paintOutline ? paintOutlineColor : undefined,
+          };
+        }
+      }
+      return next;
+    });
+  };
+
+  const eraseBgTiles = (gx: number, gy: number) => {
+    const half = Math.floor(paintSize / 2);
+    setBgTiles((prev) => {
+      const next = { ...prev };
+      for (let dx = 0; dx < paintSize; dx++) {
+        for (let dy = 0; dy < paintSize; dy++) {
+          delete next[tileKey(gx - half + dx, gy - half + dy)];
+        }
+      }
+      return next;
+    });
+  };
+
   const placeTile = (gx: number, gy: number) => {
     const key = tileKey(gx, gy);
     const worldPt = { x: (gx + 0.5) * GRID_SIZE, y: (gy + 0.5) * GRID_SIZE };
 
+    if (tool === "paint") {
+      placeBgTiles(gx, gy);
+      return;
+    }
+
     if (tool === "eraser") {
       // Erase obstacle at grid cell (rail segments are erased via hit-test in mousedown)
+      eraseBgTiles(gx, gy);
       setSelectedObstacleKey((prev) => (prev === key ? null : prev));
       setObstacleParams((prev) => {
         const next = { ...prev };
@@ -2460,7 +2554,13 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     // End tile world position for proximity-based trigger
     (engine as any).endTilePos = endTileWorldPos;
     engine.ground = engine.rail.map((p) => p.y + 150);
-    engine.noBackground = skyOnly;
+    engine.noBackground = true;
+    const theme = SKY_THEMES[skyTheme];
+    engine.skyOverride = { skyTop: theme.skyTop, skyBottom: theme.skyBottom };
+    if (Object.keys(bgTiles).length > 0) {
+      engine.bgTiles = bgTiles;
+      engine.bgTileSize = GRID_SIZE;
+    }
     engine.obstacles = [];
 
     // Add obstacles - convert grid coords to world coords using the registry
@@ -2493,6 +2593,26 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     engine.hasFinitePath = true;
     engine.pos = 0;
     engine.initDirection();
+
+    // Ghost recording — always record so player can save after completion
+    const recorder = new GhostRecorder();
+    engine.ghostRecorder = recorder;
+    ghostRecorderRef.current = recorder;
+
+    // Ghost playback — load saved replay if available and enabled
+    const levelId = currentLevelId || "unsaved";
+    if (ghostEnabled) {
+      const replay = getReplay(levelId);
+      if (replay) {
+        const currentHash = computeLevelHash(level);
+        if (replay.levelHash !== currentHash) {
+          // Level changed since replay was recorded — still load but could warn
+          console.warn("Ghost replay was recorded on a different version of this level");
+        }
+        engine.ghostPlayer = new GhostPlayer(replay);
+      }
+    }
+
     engineRef.current = engine;
     engine.start();
 
@@ -2540,6 +2660,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       endMarker: endMarker ?? undefined,
       createdAt: Date.now(),
       musicFile: currentMusicFile || undefined,
+      skyTheme: skyTheme !== 'day' ? skyTheme : undefined,
+      bgTiles: Object.keys(bgTiles).length > 0 ? bgTiles : undefined,
       obstacleParams:
         Object.keys(obstacleParams).length > 0 ? obstacleParams : undefined,
       stars: Object.keys(stars).length > 0 ? stars : undefined,
@@ -2570,6 +2692,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       endMarker: endMarker ?? undefined,
       createdAt: Date.now(),
       musicFile: currentMusicFile || undefined,
+      skyTheme: skyTheme !== 'day' ? skyTheme : undefined,
+      bgTiles: Object.keys(bgTiles).length > 0 ? bgTiles : undefined,
       obstacleParams:
         Object.keys(obstacleParams).length > 0 ? obstacleParams : undefined,
       stars: Object.keys(stars).length > 0 ? stars : undefined,
@@ -2599,6 +2723,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     setCurrentLevelName(v3.name);
     setCurrentLevelId(v3.id || generateLevelId());
     setCurrentMusicFile(v3.musicFile ?? "");
+    setSkyTheme(v3.skyTheme ?? 'day');
+    setBgTiles(v3.bgTiles ?? {});
     setShowLoadDialog(false);
     lastPlacedRailRef.current = null;
   };
@@ -2632,6 +2758,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
       endMarker: endMarker ?? undefined,
       createdAt: Date.now(),
       musicFile: currentMusicFile || undefined,
+      skyTheme: skyTheme !== 'day' ? skyTheme : undefined,
+      bgTiles: Object.keys(bgTiles).length > 0 ? bgTiles : undefined,
       obstacleParams:
         Object.keys(obstacleParams).length > 0 ? obstacleParams : undefined,
       stars: Object.keys(stars).length > 0 ? stars : undefined,
@@ -2755,6 +2883,82 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
                   ))}
                 </div>
               )}
+              <div className="flex gap-2 mb-3">
+                <button
+                  onClick={() => {
+                    const recorder = ghostRecorderRef.current;
+                    if (!recorder || recorder.frames.length === 0) return;
+                    const levelId = currentLevelId || "unsaved";
+                    const level: EditorLevel = {
+                      name: currentLevelName || "Test",
+                      id: levelId,
+                      version: 3,
+                      segments,
+                      obstacles,
+                      startMarker: startMarker!,
+                      endMarker: endMarker!,
+                      createdAt: Date.now(),
+                      obstacleParams: Object.keys(obstacleParams).length > 0 ? obstacleParams : undefined,
+                      stars: Object.keys(stars).length > 0 ? stars : undefined,
+                    };
+                    const hash = computeLevelHash(level);
+                    const replay = recorder.toReplayData(
+                      levelId, hash, "Personal Best",
+                      levelComplete.time, levelComplete.starsCollected,
+                    );
+                    saveReplay(replay);
+                    alert("Ghost saved as Personal Best!");
+                  }}
+                  className="flex-1 py-2 rounded-lg bg-purple-600 text-white font-bold text-sm hover:bg-purple-500"
+                >
+                  👻 Save Ghost
+                </button>
+                <button
+                  onClick={() => {
+                    const recorder = ghostRecorderRef.current;
+                    if (!recorder || recorder.frames.length === 0) return;
+                    const name = prompt("Name this ghost replay:");
+                    if (!name) return;
+                    const levelId = currentLevelId || "unsaved";
+                    const level: EditorLevel = {
+                      name: currentLevelName || "Test",
+                      id: levelId,
+                      version: 3,
+                      segments,
+                      obstacles,
+                      startMarker: startMarker!,
+                      endMarker: endMarker!,
+                      createdAt: Date.now(),
+                      obstacleParams: Object.keys(obstacleParams).length > 0 ? obstacleParams : undefined,
+                      stars: Object.keys(stars).length > 0 ? stars : undefined,
+                    };
+                    const hash = computeLevelHash(level);
+                    const replay = recorder.toReplayData(
+                      levelId, hash, name,
+                      levelComplete.time, levelComplete.starsCollected,
+                    );
+                    saveReplay(replay);
+                    alert(`Ghost saved as "${name}"!`);
+                  }}
+                  className="flex-1 py-2 rounded-lg bg-purple-800 text-white font-bold text-sm hover:bg-purple-700"
+                >
+                  💾 Save As...
+                </button>
+                {getReplaysForLevel(currentLevelId || "unsaved").length > 0 && (
+                  <button
+                    onClick={() => {
+                      setGhostEnabled(true);
+                      engineRef.current?.stop();
+                      setLevelComplete(null);
+                      setTesting(false);
+                      setTimeout(() => startTest(), 50);
+                    }}
+                    className="flex-1 py-2 rounded-lg bg-blue-600 text-white font-bold text-sm hover:bg-blue-500"
+                  >
+                    👻 Race Ghost
+                  </button>
+                )}
+              </div>
               <div className="flex gap-3">
                 <button
                   onClick={() => {
@@ -3140,6 +3344,81 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           >
             ✋ Hand
           </button>
+
+          {/* Paint tool */}
+          <div className="flex flex-col items-start gap-1">
+            <button
+              onClick={() => {
+                if (tool === "paint") setTool("none");
+                else setTool("paint");
+              }}
+              className={`px-3 py-2 rounded-lg font-bold text-sm transition-all ${
+                tool === "paint"
+                  ? "bg-game-accent text-game-bg scale-105"
+                  : "bg-game-card text-game-title border border-game-card-border hover:border-game-accent"
+              }`}
+              title="Paint background tiles"
+            >
+              <span className="inline-block w-3 h-3 rounded-sm mr-1 align-middle border border-white/30" style={{ background: paintColor }} />
+              Paint
+            </button>
+            {tool === "paint" && (
+              <div className="bg-game-card border border-game-card-border rounded-lg p-2 shadow-lg min-w-[200px]">
+                <div className="grid grid-cols-6 gap-1 mb-2">
+                  {BG_PALETTE.map((c) => (
+                    <button
+                      key={c}
+                      onClick={() => setPaintColor(c)}
+                      className={`w-6 h-6 rounded-sm border-2 ${paintColor === c ? 'border-white scale-110' : 'border-transparent'}`}
+                      style={{ background: c }}
+                    />
+                  ))}
+                </div>
+                <div className="flex items-center gap-2 mb-1">
+                  <label className="text-game-subtitle text-xs">Custom:</label>
+                  <input
+                    type="color"
+                    value={paintColor}
+                    onChange={(e) => setPaintColor(e.target.value)}
+                    className="w-6 h-6 cursor-pointer border-0 p-0 bg-transparent"
+                  />
+                </div>
+                <div className="flex items-center gap-2 mb-1">
+                  <button
+                    onClick={() => setPaintOutline(!paintOutline)}
+                    className={`px-2 py-1 rounded text-xs font-bold ${
+                      paintOutline ? 'bg-green-700 text-white' : 'bg-gray-700 text-gray-300'
+                    }`}
+                  >
+                    {paintOutline ? 'Outline: On' : 'Outline: Off'}
+                  </button>
+                  {paintOutline && (
+                    <input
+                      type="color"
+                      value={paintOutlineColor}
+                      onChange={(e) => setPaintOutlineColor(e.target.value)}
+                      className="w-6 h-6 cursor-pointer border-0 p-0 bg-transparent"
+                      title="Outline color"
+                    />
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-game-subtitle text-xs">Size:</label>
+                  {[1, 2, 3, 5].map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setPaintSize(s)}
+                      className={`w-6 h-6 rounded text-xs font-bold ${
+                        paintSize === s ? 'bg-game-accent text-game-bg' : 'bg-gray-700 text-gray-300'
+                      }`}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Right: Action buttons */}
@@ -3167,17 +3446,15 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
           </button>
 
           <button
-            onClick={() => setSkyOnly(!skyOnly)}
-            className={`px-3 py-2 rounded-lg font-bold text-sm transition-all ${
-              skyOnly
-                ? "bg-game-accent text-game-bg"
-                : "bg-game-card text-game-title border border-game-card-border hover:border-game-accent"
-            }`}
-            title={
-              skyOnly ? "Background: Sky only" : "Background: Full scenery"
-            }
+            onClick={() => {
+              const keys = Object.keys(SKY_THEMES) as SkyThemeId[];
+              const idx = keys.indexOf(skyTheme);
+              setSkyTheme(keys[(idx + 1) % keys.length]);
+            }}
+            className="px-3 py-2 rounded-lg font-bold text-sm transition-all bg-game-accent text-game-bg"
+            title={`Sky: ${SKY_THEMES[skyTheme].name}`}
           >
-            {skyOnly ? "☁️ Sky Only" : "🏔️ Scenery"}
+            {SKY_THEMES[skyTheme].name}
           </button>
           <button
             onClick={() => setAutoconnect((a) => !a)}
@@ -3434,6 +3711,8 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
                               endMarker: endMarker ?? undefined,
                               createdAt: Date.now(),
                               musicFile: currentMusicFile || undefined,
+                              skyTheme: skyTheme !== 'day' ? skyTheme : undefined,
+                              bgTiles: Object.keys(bgTiles).length > 0 ? bgTiles : undefined,
                               obstacleParams:
                                 Object.keys(obstacleParams).length > 0
                                   ? obstacleParams

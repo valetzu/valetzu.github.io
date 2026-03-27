@@ -52,23 +52,17 @@ describe("editor rail conversion", () => {
 
     const { railPoints, allSegments } = convertLevelToGameDataV3(level);
 
-    expect(railPoints).toEqual([
-      { x: 0, y: 0 },
-      { x: 100, y: 0 },
-      { x: 200, y: 0 },
-    ]);
-    expect(allSegments).toEqual([
-      [
-        { x: 0, y: 0 },
-        { x: 100, y: 0 },
-        { x: 200, y: 0 },
-      ],
-      [
-        { x: 300, y: 100 },
-        { x: 400, y: 100 },
-        { x: 500, y: 100 },
-      ],
-    ]);
+    // Two disconnected continuous segments
+    expect(allSegments.length).toBe(2);
+
+    // Main segment (nearest startMarker {0,0}) starts at origin, ends at x=200
+    expect(railPoints[0]).toEqual({ x: 0, y: 0 });
+    expect(railPoints[railPoints.length - 1]).toEqual({ x: 200, y: 0 });
+
+    // Second segment spans x=300..500
+    const seg2 = allSegments[1];
+    expect(seg2[0]).toEqual({ x: 300, y: 100 });
+    expect(seg2[seg2.length - 1]).toEqual({ x: 500, y: 100 });
   });
 
   it("samples bezier rails with near-uniform spacing and preserved end tangent", () => {

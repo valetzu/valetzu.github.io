@@ -4,15 +4,19 @@ import { musicManager } from '@/game/musicManager';
 import GameCanvas from '@/components/GameCanvas';
 import GameMenu from '@/components/GameMenu';
 import LevelEditor from '@/components/LevelEditor';
+import CustomLevelPlayer from '@/components/CustomLevelPlayer';
 import SettingsMenu from '@/components/SettingsMenu';
+import type { EditorLevel } from '@/game/editorTypes';
 
-type Phase = 'menu' | 'playing' | 'editor';
+type Phase = 'menu' | 'playing' | 'editor' | 'customPlay';
 
 const Index = () => {
   const [phase, setPhase] = useState<Phase>('menu');
   const [save, setSave] = useState<SaveData>(loadSave);
   const [world, setWorld] = useState<WorldType>('overworld');
   const [showSettings, setShowSettings] = useState(false);
+  const [customLevel, setCustomLevel] = useState<EditorLevel | null>(null);
+  const [raceGhost, setRaceGhost] = useState(false);
 
   const startGame = useCallback((w: WorldType) => {
     setWorld(w);
@@ -59,6 +63,16 @@ const Index = () => {
     return <LevelEditor onBack={backToMenu} />;
   }
 
+  if (phase === 'customPlay' && customLevel) {
+    return (
+      <CustomLevelPlayer
+        level={customLevel}
+        raceGhost={raceGhost}
+        onBack={backToMenu}
+      />
+    );
+  }
+
   return (
     <>
       <GameMenu
@@ -67,6 +81,11 @@ const Index = () => {
         onUpdateSave={setSave}
         onOpenEditor={() => setPhase('editor')}
         onOpenSettings={() => setShowSettings(true)}
+        onPlayCustomLevel={(level, ghost) => {
+          setCustomLevel(level);
+          setRaceGhost(ghost);
+          setPhase('customPlay');
+        }}
       />
       {showSettings && <SettingsMenu onClose={() => setShowSettings(false)} />}
     </>
