@@ -1,6 +1,6 @@
 # Sky Lift Dash - Game Design Document for Godot Reimplementation
 
-This document covers everything needed to reimplement Sky Lift Dash (Cable Riders) in Godot Engine. The game is a 2D gondola/cable-car physics game where the player rides a gondola along rails, controlling speed and tilt. The focus is on preserving the exact gameplay feel, mechanics, and physics.
+This document covers everything needed to reimplement Sky Lift Dash (Gondola) in Godot Engine. The game is a 2D gondola/cable-car physics game where the player rides a gondola along rails, controlling speed and tilt. The focus is on preserving the exact gameplay feel, mechanics, and physics.
 
 ---
 
