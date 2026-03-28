@@ -19,13 +19,14 @@ export interface ReplayData {
   version: 1;
   levelId: string;
   levelHash: string;
-  name: string; // "Personal Best" or user-chosen
+  name: string; // user-chosen or auto-generated formatted time
   time: number; // completion time (seconds)
   starsCollected: number;
   date: number; // Date.now()
   sampleRate: number; // snapshots per second (default 15)
   frameSize: number; // bytes per frame (14 for v1)
   frames: string; // base64-encoded binary
+  auto?: boolean; // true for automatically saved replays (PB auto-save, Race Ghost)
 }
 
 // --- Constants -------------------------------------------------------------
@@ -255,6 +256,30 @@ export function saveReplay(replay: ReplayData): void {
   }
 
   store[replay.levelId] = list;
+  persistStore(store);
+}
+
+/**
+ * Save an automatically generated replay (PB auto-save or Race Ghost).
+ * Always adds as a new entry — never overwrites existing replays.
+ * Keeps only the 5 fastest auto-saved entries; user-named replays are untouched.
+ */
+export function saveAutoReplay(replay: ReplayData): void {
+  const store = loadReplayStore();
+  const list = store[replay.levelId] || [];
+
+  const entry: ReplayData = { ...replay, auto: true };
+
+  // Split into auto-saved and user-saved
+  const autoList = list.filter((r) => r.auto);
+  const manualList = list.filter((r) => !r.auto);
+
+  autoList.push(entry);
+  // Keep only the 5 fastest auto-saved replays
+  autoList.sort((a, b) => a.time - b.time);
+  const kept = autoList.slice(0, 5);
+
+  store[replay.levelId] = [...manualList, ...kept];
   persistStore(store);
 }
 
