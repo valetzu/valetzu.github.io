@@ -203,7 +203,7 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
     label: 'Spinner',
     emoji: '🌀',
     tileColor: 'rgba(255,107,53,0.3)',
-    defaultParams: { obstacleType: 'spinner', armLength: 120, rotSpeed: 0.5, radius: 12, rotation: 0 } as SpinnerParams,
+    defaultParams: { obstacleType: 'spinner', armLength: 150, rotSpeed: 0.5, radius: 12, rotation: 0 } as SpinnerParams,
     paramMeta: {
       armLength:  { label: 'Arm Length',      min: 20,  max: 300, step: 5  },
       rotSpeed:   { label: 'Rotation Speed',  min: 0.1, max: 5,   step: 0.1 },
@@ -235,7 +235,7 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
     label: 'Bouncer',
     emoji: '🔴',
     tileColor: 'rgba(229,57,53,0.3)',
-    defaultParams: { obstacleType: 'bouncer', amplitude: 80, bounceSpeed: 0.7, radius: 18, rotation: 0 } as BouncerParams,
+    defaultParams: { obstacleType: 'bouncer', amplitude: 100, bounceSpeed: 0.7, radius: 18, rotation: 0 } as BouncerParams,
     paramMeta: {
       amplitude:   { label: 'Bounce Height', min: 10, max: 300, step: 5   },
       bounceSpeed: { label: 'Bounce Speed',  min: 0.1, max: 5,  step: 0.1 },
@@ -268,10 +268,10 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
     label: 'Pendulum',
     emoji: '⏱️',
     tileColor: 'rgba(100,180,255,0.3)',
-    defaultParams: { obstacleType: 'pendulum', cableLength: 220, swingAngle: 1.2, bobRadius: 18, swingSpeed: 1.2, rotation: 0 } as PendulumParams,
+    defaultParams: { obstacleType: 'pendulum', cableLength: 220, swingAngle: 1.5, bobRadius: 18, swingSpeed: 1.2, rotation: 0 } as PendulumParams,
     paramMeta: {
       cableLength: { label: 'Cable Length',  min: 30,  max: 400,  step: 10   },
-      swingAngle:  { label: 'Swing Angle',   min: 0.1, max: 1.55, step: 0.05 },
+      swingAngle:  { label: 'Swing Angle',   min: 0.1, max: 2.32, step: 0.05 },
       bobRadius:   { label: 'Bob Radius',    min: 4,   max: 50,   step: 1    },
       swingSpeed:  { label: 'Swing Speed',   min: 0.1, max: 5,    step: 0.1  },
       rotation:    { label: 'Initial Rotation (°)', min: 0, max: 360, step: 1 },
@@ -320,7 +320,7 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
     label: 'Laser',
     emoji: '🔦',
     tileColor: 'rgba(255,50,50,0.3)',
-    defaultParams: { obstacleType: 'laser', beamLength: 200, direction: 'right', cycleSpeed: 1.5, warningTime: 2.0, rotation: 0 } as LaserParams,
+    defaultParams: { obstacleType: 'laser', beamLength: 200, direction: 'right', cycleSpeed: 1.5, warningTime: 2.0, rotation: 90 } as LaserParams,
     paramMeta: {
       beamLength:   { label: 'Beam Length',        min: 20,  max: 600, step: 10  },
       direction:    { label: 'Direction',           type: 'select', options: ['left', 'right'] },
@@ -372,7 +372,7 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
     label: 'Orbiter',
     emoji: '🪐',
     tileColor: 'rgba(180,80,255,0.3)',
-    defaultParams: { obstacleType: 'orbiter', orbitRadius: 80, orbRadius: 14, orbitSpeed: 1.2, rotation: 0 } as OrbiterParams,
+    defaultParams: { obstacleType: 'orbiter', orbitRadius: 100, orbRadius: 14, orbitSpeed: 1.2, rotation: 0 } as OrbiterParams,
     paramMeta: {
       orbitRadius: { label: 'Orbit Radius', min: 10, max: 300, step: 5  },
       orbRadius:   { label: 'Ball Radius',  min: 4,  max: 50,  step: 1  },
@@ -396,7 +396,7 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
     label: 'Boulder',
     emoji: '🪨',
     tileColor: 'rgba(140,120,80,0.3)',
-    defaultParams: { obstacleType: 'boulder', radius: 30, triggerRadius: 120, dropDelay: 0.5, fallTimeout: 4, rotation: 0 } as BoulderParams,
+    defaultParams: { obstacleType: 'boulder', radius: 30, triggerRadius: 150, dropDelay: 0.5, fallTimeout: 4, rotation: 0 } as BoulderParams,
     paramMeta: {
       radius:        { label: 'Boulder Radius',    min: 8,   max: 120, step: 2   },
       triggerRadius: { label: 'Trigger Radius',    min: 20,  max: 400, step: 5   },
@@ -436,7 +436,7 @@ export const OBSTACLE_DEFINITIONS: ObstacleDefinition[] = [
     label: 'Mine',
     emoji: '💣',
     tileColor: 'rgba(255,220,0,0.3)',
-    defaultParams: { obstacleType: 'mine', triggerRadius: 40, explosionRadius: 80, triggerDelay: 1.5, rotation: 0 } as MineParams,
+    defaultParams: { obstacleType: 'mine', triggerRadius: 80, explosionRadius: 80, triggerDelay: 1.5, rotation: 0 } as MineParams,
     paramMeta: {
       triggerRadius:   { label: 'Trigger Radius',    min: 5,   max: 200, step: 5   },
       explosionRadius: { label: 'Explosion Radius',  min: 10,  max: 300, step: 5   },
