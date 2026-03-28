@@ -128,6 +128,12 @@ export default function CustomLevelPlayer({
       engine.pos = 0;
       engine.initDirection();
 
+      // Personal best time
+      const records = getRecords(levelId);
+      if (records.length > 0) {
+        engine.personalBestTime = records[0].time;
+      }
+
       // Ghost recording
       const recorder = new GhostRecorder();
       engine.ghostRecorder = recorder;
@@ -138,6 +144,7 @@ export default function CustomLevelPlayer({
         const replay = getReplay(levelId);
         if (replay) {
           engine.ghostPlayer = new GhostPlayer(replay);
+          engine.ghostTime = replay.time;
         }
       }
 
@@ -232,18 +239,20 @@ export default function CustomLevelPlayer({
         style={{ cursor: "none" }}
       />
 
-      {/* Level name HUD */}
-      <div className="fixed top-4 left-4 z-10">
-        <span className="text-white/60 text-sm font-bold bg-black/30 px-3 py-1 rounded-lg">
-          {level.name}
-        </span>
-      </div>
-
       {paused && (
         <PauseMenu
+          levelName={level.name}
           onResume={() => {
             setPaused(false);
             engineRef.current?.resume();
+          }}
+          onRestart={() => {
+            engineRef.current?.stop();
+            setPaused(false);
+            setLevelComplete(null);
+            gameOverRef.current = false;
+            const canvas = canvasRef.current;
+            if (canvas) startEngine(canvas, raceGhost);
           }}
           onQuit={() => {
             engineRef.current?.stop();

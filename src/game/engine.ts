@@ -1,4 +1,4 @@
-import { WorldType, Upgrades, Point, Obstacle, WORLD_CONFIG } from './types';
+import { WorldType, Upgrades, Point, Obstacle, WORLD_CONFIG, formatTime } from './types';
 import { spriteManager } from './spriteManager';
 import { OBSTACLE_BEHAVIORS, GameUpdateContext } from './obstacleBehaviors';
 import { createRng } from './rng';
@@ -119,6 +119,12 @@ export class GameEngine {
 
   ghostRecorder: GhostRecorder | null = null;
   ghostPlayer: GhostPlayer | null = null;
+  debugHitbox = false;
+
+  /** Personal best time for the current level (seconds), or null if none */
+  personalBestTime: number | null = null;
+  /** Ghost's completion time (seconds), or null if not racing a ghost */
+  ghostTime: number | null = null;
 
   onUpdate?: (dist: number, passengers: number, speed: number) => void;
   onGameOver?: (dist: number, cash: number) => void;
@@ -259,6 +265,10 @@ export class GameEngine {
     if (e.code === 'ShiftLeft' && this.shieldTimer <= 0 && this.shieldCharges > 0) {
       this.shieldTimer = SHIELD_DURATION;
       this.shieldCharges--;
+      e.preventDefault();
+    }
+    if (e.code === 'F9') {
+      this.debugHitbox = !this.debugHitbox;
       e.preventDefault();
     }
   };
@@ -503,7 +513,18 @@ export class GameEngine {
       if (this.shieldTimer > 0) this.shieldTimer -= dt;
       if (this.flashTimer > 0) this.flashTimer -= dt;
 
-      // No rail generation or obstacle collisions while off-track
+      // Obstacle collisions and star collection while airborne
+      this.checkCollisions();
+      this.checkStarCollection();
+
+      // Update obstacle state machines and animations
+      const octx = this.getGameUpdateContext();
+      for (const obs of this.obstacles) {
+        if (obs.hit) continue;
+        const behavior = OBSTACLE_BEHAVIORS[obs.type];
+        if (behavior) behavior.update(obs, dt, octx);
+      }
+
       this.onUpdate?.(this.distance, this.passengers, Math.abs(this.speed) * 0.1);
       return;
     }
@@ -761,8 +782,9 @@ export class GameEngine {
   /** Actual world-space cabin center, accounting for pendulum swing or airborne rotation. */
   getCabinCenter(): Point {
     const gp = this.getGondolaPos();
+    // Canvas rotate(θ) maps local (0, HANG) to world (-sin(θ)*HANG, cos(θ)*HANG)
     return {
-      x: gp.x + Math.sin(this.pendulumAngle) * GONDOLA_HANG,
+      x: gp.x - Math.sin(this.pendulumAngle) * GONDOLA_HANG,
       y: gp.y + Math.cos(this.pendulumAngle) * GONDOLA_HANG,
     };
   }
@@ -898,11 +920,9 @@ export class GameEngine {
     const wheel = this.getGondolaPos();
     const cabin = this.getCabinCenter();
 
-    // Cable direction (wheel → cabin) and cabin's horizontal axis
-    const cableX = Math.sin(this.pendulumAngle);
-    const cableY = Math.cos(this.pendulumAngle);
-    const ax = cableY;   // cabin horizontal axis (perpendicular to cable)
-    const ay = -cableX;
+    // Cabin's local X-axis in world space (matches canvas rotate(θ) transform)
+    const ax = Math.cos(this.pendulumAngle);
+    const ay = Math.sin(this.pendulumAngle);
 
     // Probes along the full gondola shape:
     // - Cabin: center + left/right edges (half cabin width)
@@ -931,15 +951,27 @@ export class GameEngine {
   }
 
   checkStarCollection() {
+    const wheel = this.getGondolaPos();
     const cabin = this.getCabinCenter();
-    const cx = cabin.x;
-    const cy = cabin.y;
+    const ax = Math.cos(this.pendulumAngle);
+    const ay = Math.sin(this.pendulumAngle);
+    const halfW = CABIN_W / 2;
+    const cabinR = CABIN_H / 2;
+    const cableR = 4;
+    const probes = [
+      { x: cabin.x, y: cabin.y, r: cabinR },
+      { x: cabin.x + ax * halfW, y: cabin.y + ay * halfW, r: cabinR },
+      { x: cabin.x - ax * halfW, y: cabin.y - ay * halfW, r: cabinR },
+      { x: (wheel.x + cabin.x) / 2, y: (wheel.y + cabin.y) / 2, r: cableR },
+    ];
     for (const star of this.collectibleStars) {
       if (star.collected) continue;
-      const dist = Math.hypot(cx - star.x, cy - star.y);
-      if (dist < 30) {
-        star.collected = true;
-        this.starsCollected++;
+      for (const p of probes) {
+        if (Math.hypot(p.x - star.x, p.y - star.y) < p.r + 18) {
+          star.collected = true;
+          this.starsCollected++;
+          break;
+        }
       }
     }
   }
@@ -1344,6 +1376,11 @@ export class GameEngine {
     // Flash effect when hit
     if (this.invulnTimer > 0 && Math.floor(this.invulnTimer * 8) % 2 === 0) return;
 
+    if (this.debugHitbox) {
+      this.renderGondolaDebug(cx, cy, sx, sy);
+      return;
+    }
+
     // Wheel on rail — rotating with spokes
     ctx.fillStyle = '#555';
     ctx.beginPath();
@@ -1464,6 +1501,67 @@ export class GameEngine {
     ctx.restore(); // cabin rotation
   }
 
+  renderGondolaDebug(cx: number, cy: number, sx: number, sy: number) {
+    const { ctx } = this;
+    const cabin = this.getCabinCenter();
+    const cabSX = cabin.x - cx;
+    const cabSY = cabin.y - cy;
+
+    const ax = Math.cos(this.pendulumAngle);
+    const ay = Math.sin(this.pendulumAngle);
+    const halfW = CABIN_W / 2;
+    const cabinR = CABIN_H / 2;
+    const cableR = 4;
+
+    const probes = [
+      { x: cabSX, y: cabSY, r: cabinR, color: 'rgba(0, 255, 0, 0.4)', label: 'center' },
+      { x: cabSX + ax * halfW, y: cabSY + ay * halfW, r: cabinR, color: 'rgba(255, 255, 0, 0.4)', label: 'left' },
+      { x: cabSX - ax * halfW, y: cabSY - ay * halfW, r: cabinR, color: 'rgba(255, 165, 0, 0.4)', label: 'right' },
+      { x: (sx + cabSX) / 2, y: (sy + cabSY) / 2, r: cableR, color: 'rgba(0, 200, 255, 0.5)', label: 'cable' },
+    ];
+
+    // Draw cable line
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(cabSX, cabSY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Draw wheel point
+    ctx.fillStyle = 'rgba(255, 0, 255, 0.6)';
+    ctx.beginPath();
+    ctx.arc(sx, sy, WHEEL_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#FF00FF';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Draw each probe
+    for (const p of probes) {
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = p.color.replace('0.4', '1').replace('0.5', '1');
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+
+    // Draw cabin rect outline to show orientation
+    ctx.save();
+    ctx.translate(cabSX, cabSY);
+    ctx.rotate(this.pendulumAngle);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.strokeRect(-CABIN_W / 2, -CABIN_H / 2, CABIN_W, CABIN_H);
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
   roundRect(x: number, y: number, w: number, h: number, r: number) {
     const { ctx } = this;
     ctx.beginPath();
@@ -1482,14 +1580,52 @@ export class GameEngine {
   renderHUD(w: number, h: number) {
     const { ctx } = this;
 
-    // Distance
+    // Distance + PB/Ghost times
+    const distText = `📏 ${Math.floor(this.distance)}m`;
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    const distTextW = ctx.measureText(distText).width + 20; // 10px padding each side
+
+    let timeBadges: { label: string; color: string }[] = [];
+    if (this.personalBestTime != null) {
+      timeBadges.push({ label: `🏆 ${formatTime(this.personalBestTime)}`, color: '#FFD54F' });
+    }
+    if (this.ghostTime != null) {
+      timeBadges.push({ label: `👻 ${formatTime(this.ghostTime)}`, color: '#90CAF9' });
+    }
+
+    // Measure badge widths
+    ctx.font = 'bold 14px system-ui, sans-serif';
+    const badgeMetrics = timeBadges.map(b => ({
+      ...b,
+      w: ctx.measureText(b.label).width + 16, // 8px padding each side
+    }));
+    const badgeTotalW = badgeMetrics.reduce((s, b) => s + b.w + 6, 0); // 6px gap
+
+    const panelW = Math.max(180, distTextW + badgeTotalW + 10);
+    const hasBadges = badgeMetrics.length > 0;
+    const panelH = hasBadges ? 54 : 36;
+
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    this.roundRect(10, 10, 180, 36, 6);
+    this.roundRect(10, 10, panelW, panelH, 6);
     ctx.fill();
+
     ctx.fillStyle = '#FFF';
     ctx.font = 'bold 18px system-ui, sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText(`📏 ${Math.floor(this.distance)}m`, 20, 34);
+    ctx.fillText(distText, 20, 34);
+
+    // PB and ghost time badges to the right of distance
+    let badgeX = 20 + distTextW + 4;
+    for (const badge of badgeMetrics) {
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      this.roundRect(badgeX, 16, badge.w, 24, 4);
+      ctx.fill();
+      ctx.fillStyle = badge.color;
+      ctx.font = 'bold 14px system-ui, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(badge.label, badgeX + 8, 33);
+      badgeX += badge.w + 6;
+    }
 
     // Speed + timer panel (top-right)
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
@@ -1509,11 +1645,12 @@ export class GameEngine {
     ctx.fillText(`⏱ ${timeLabel}`, w - 20, 50);
 
     // Passengers
+    const passengersY = 10 + panelH + 16;
     ctx.textAlign = 'left';
     for (let p = 0; p < 3 + this.upgrades.health; p++) {
       ctx.fillStyle = p < this.passengers ? '#E53935' : 'rgba(255,255,255,0.2)';
       ctx.font = '22px system-ui';
-      ctx.fillText('❤️', 15 + p * 28, 72);
+      ctx.fillText('❤️', 15 + p * 28, passengersY);
     }
 
     // Throttle/Brake bar
