@@ -13,6 +13,7 @@ import {
   LevelRecord,
 } from "@/game/types";
 import { musicManager } from "@/game/musicManager";
+import { soundManager } from "@/game/soundManager";
 import { obstacleDefMap } from "@/game/obstacleDefinitions";
 import {
   GhostRecorder,
@@ -72,6 +73,11 @@ export default function CustomLevelPlayer({
           },
           onLevelComplete: (time: number, starsCollected: number) => {
             const result = recordTime(levelId, time, starsCollected);
+            if (result.isNewBest) {
+              soundManager.playNewBest();
+            } else {
+              soundManager.playLevelComplete();
+            }
             setLevelComplete({
               time,
               records: result.records,

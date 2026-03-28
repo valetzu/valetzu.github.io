@@ -1,8 +1,9 @@
 import { WorldType, Upgrades, Point, Obstacle, WORLD_CONFIG, formatTime } from './types';
 import { spriteManager } from './spriteManager';
-import { OBSTACLE_BEHAVIORS, GameUpdateContext } from './obstacleBehaviors';
+import { OBSTACLE_BEHAVIORS, GameUpdateContext, checkRectVsObstacle, rectVsCircle } from './obstacleBehaviors';
 import { createRng } from './rng';
 import { GhostRecorder, GhostPlayer } from './replay';
+import { soundManager } from './soundManager';
 import type { BgTile } from './editorTypes';
 
 const RAIL_SPACING = 100;
@@ -55,7 +56,7 @@ export class GameEngine {
   hasFinitePath = false;
   isLoop = false;
   /** Trigger radius for end tile proximity check (world pixels) */
-  static END_TRIGGER_RADIUS = 60;
+  static END_TRIGGER_RADIUS = 30;
   onRail = true;
 
   // Optional world positions for explicit start/end tiles in finite/editor levels
@@ -888,12 +889,16 @@ export class GameEngine {
     return bestT !== null ? { t: bestT } : null;
   }
 
-  /** True if the gondola is within the end tile trigger area (world-space proximity). */
+  /** True if the gondola cabin rect or cable probe overlaps the end tile trigger zone. */
   touchedEndTile(): boolean {
     if (!this.endTilePos) return false;
-    const gp = this.onRail ? this.getGondolaPos() : { x: this.airX, y: this.airY };
-    const d = Math.hypot(gp.x - this.endTilePos.x, gp.y - this.endTilePos.y);
-    return d < GameEngine.END_TRIGGER_RADIUS;
+    const ex = this.endTilePos.x, ey = this.endTilePos.y;
+    const R = GameEngine.END_TRIGGER_RADIUS;
+    const wheel = this.getGondolaPos();
+    const cabin = this.getCabinCenter();
+    if (rectVsCircle(cabin.x, cabin.y, CABIN_W / 2, CABIN_H / 2, this.pendulumAngle, ex, ey, R)) return true;
+    const cableMidX = (wheel.x + cabin.x) / 2, cableMidY = (wheel.y + cabin.y) / 2;
+    return Math.hypot(cableMidX - ex, cableMidY - ey) < 4 + R;
   }
 
   getGameUpdateContext(): GameUpdateContext {
@@ -903,6 +908,12 @@ export class GameEngine {
       gondolaHang: GONDOLA_HANG,
       hitRadius: HIT_RADIUS,
       dealDamage: (obs: Obstacle) => this.hitPassenger(obs),
+      gondolaOverlapsCircle: (cx, cy, r) => {
+        const cabin = this.getCabinCenter();
+        if (rectVsCircle(cabin.x, cabin.y, CABIN_W / 2, CABIN_H / 2, this.pendulumAngle, cx, cy, r)) return true;
+        const wheel = this.getGondolaPos();
+        return Math.hypot((wheel.x + cabin.x) / 2 - cx, (wheel.y + cabin.y) / 2 - cy) < 4 + r;
+      },
     };
   }
 
@@ -919,65 +930,45 @@ export class GameEngine {
     if (this.invulnTimer > 0 || this.shieldTimer > 0) return;
     const wheel = this.getGondolaPos();
     const cabin = this.getCabinCenter();
-
-    // Cabin's local X-axis in world space (matches canvas rotate(θ) transform)
-    const ax = Math.cos(this.pendulumAngle);
-    const ay = Math.sin(this.pendulumAngle);
-
-    // Probes along the full gondola shape:
-    // - Cabin: center + left/right edges (half cabin width)
-    // - Cable: midpoint between wheel and cabin
-    const halfW = CABIN_W / 2;
-    const cabinR = CABIN_H / 2;
-    const cableR = 4;
-    const probes: { x: number; y: number; r: number }[] = [
-      { x: cabin.x, y: cabin.y, r: cabinR },
-      { x: cabin.x + ax * halfW, y: cabin.y + ay * halfW, r: cabinR },
-      { x: cabin.x - ax * halfW, y: cabin.y - ay * halfW, r: cabinR },
-      { x: (wheel.x + cabin.x) / 2, y: (wheel.y + cabin.y) / 2, r: cableR },
-    ];
+    const cableMidX = (wheel.x + cabin.x) / 2;
+    const cableMidY = (wheel.y + cabin.y) / 2;
 
     for (const obs of this.obstacles) {
       if (obs.hit) continue;
       const behavior = OBSTACLE_BEHAVIORS[obs.type];
       if (!behavior) continue;
-      for (const p of probes) {
-        if (behavior.checkCollision(obs, p.x, p.y, p.r)) {
-          this.hitPassenger(obs);
-          return;
-        }
+      if (
+        checkRectVsObstacle(obs, cabin.x, cabin.y, CABIN_W / 2, CABIN_H / 2, this.pendulumAngle) ||
+        behavior.checkCollision(obs, cableMidX, cableMidY, 4)
+      ) {
+        this.hitPassenger(obs);
+        return;
       }
     }
   }
 
   checkStarCollection() {
+    const STAR_RADIUS = 18;
     const wheel = this.getGondolaPos();
     const cabin = this.getCabinCenter();
-    const ax = Math.cos(this.pendulumAngle);
-    const ay = Math.sin(this.pendulumAngle);
-    const halfW = CABIN_W / 2;
-    const cabinR = CABIN_H / 2;
-    const cableR = 4;
-    const probes = [
-      { x: cabin.x, y: cabin.y, r: cabinR },
-      { x: cabin.x + ax * halfW, y: cabin.y + ay * halfW, r: cabinR },
-      { x: cabin.x - ax * halfW, y: cabin.y - ay * halfW, r: cabinR },
-      { x: (wheel.x + cabin.x) / 2, y: (wheel.y + cabin.y) / 2, r: cableR },
-    ];
+    const cableMidX = (wheel.x + cabin.x) / 2;
+    const cableMidY = (wheel.y + cabin.y) / 2;
     for (const star of this.collectibleStars) {
       if (star.collected) continue;
-      for (const p of probes) {
-        if (Math.hypot(p.x - star.x, p.y - star.y) < p.r + 18) {
-          star.collected = true;
-          this.starsCollected++;
-          break;
-        }
+      if (
+        rectVsCircle(cabin.x, cabin.y, CABIN_W / 2, CABIN_H / 2, this.pendulumAngle, star.x, star.y, STAR_RADIUS) ||
+        Math.hypot(cableMidX - star.x, cableMidY - star.y) < 4 + STAR_RADIUS
+      ) {
+        star.collected = true;
+        this.starsCollected++;
+        soundManager.playStarCollect();
       }
     }
   }
 
   hitPassenger(_obs: Obstacle) {
     this.passengers--;
+    soundManager.playHit();
     this.invulnTimer = INVULN_TIME;
     this.flashTimer = 0.3;
     if (this.passengers <= 0) {
@@ -1122,6 +1113,8 @@ export class GameEngine {
     // Gondola
     this.renderGhost(cx, cy);
     this.renderGondola(cx, cy);
+
+    if (this.debugHitbox) this.renderDebugHitboxes(cx, cy);
 
     // HUD
     this.renderHUD(w, h);
@@ -1501,26 +1494,168 @@ export class GameEngine {
     ctx.restore(); // cabin rotation
   }
 
+  renderDebugHitboxes(cx: number, cy: number) {
+    const { ctx } = this;
+
+    const obsStroke = 'rgba(255, 80, 80, 0.9)';
+    const obsFill   = 'rgba(255, 50, 50, 0.2)';
+
+    ctx.save();
+    ctx.lineWidth = 1.5;
+
+    for (const obs of this.obstacles) {
+      if (obs.hit) continue;
+      const sx = obs.x - cx;
+      if (sx < -300 || sx > this.canvas.width + 300) continue;
+      const sy = obs.y - cy;
+
+      ctx.strokeStyle = obsStroke;
+      ctx.fillStyle   = obsFill;
+      ctx.setLineDash([]);
+
+      switch (obs.type) {
+        case 'spinner': {
+          const spinRot = obs.rotation ?? 0;
+          // Center hub
+          ctx.beginPath(); ctx.arc(sx, sy, obs.radius, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          // 4 arms as thick lines (ARM_HALF = 9 → lineWidth 18)
+          ctx.save();
+          ctx.strokeStyle = obsStroke;
+          ctx.lineCap = 'round';
+          ctx.lineWidth = 18;
+          ctx.globalAlpha = 0.25;
+          for (let a = 0; a < 4; a++) {
+            const armAngle = obs.angle + spinRot + (a * Math.PI) / 2;
+            ctx.beginPath();
+            ctx.moveTo(sx, sy);
+            ctx.lineTo(sx + Math.cos(armAngle) * obs.armLength, sy + Math.sin(armAngle) * obs.armLength);
+            ctx.stroke();
+          }
+          // Pole (POLE_HALF = 5 → lineWidth 10)
+          ctx.lineWidth = 10;
+          ctx.beginPath();
+          ctx.moveTo(sx, sy);
+          ctx.lineTo(sx - 60 * Math.sin(spinRot), sy + 60 * Math.cos(spinRot));
+          ctx.stroke();
+          ctx.restore();
+          break;
+        }
+        case 'bouncer': {
+          const baseScreenY = obs.baseY - cy;
+          const localOffset = Math.sin(obs.angle) * obs.amplitude;
+          ctx.save();
+          ctx.translate(sx, baseScreenY);
+          ctx.rotate(obs.rotation ?? 0);
+          ctx.beginPath(); ctx.arc(0, localOffset, obs.radius, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          ctx.restore();
+          break;
+        }
+        case 'pendulum': {
+          const currentSwing = (obs.swingAngle ?? 0.8) * Math.sin(obs.angle);
+          const cableLen = obs.cableLength ?? 120;
+          const bobR = obs.bobRadius ?? obs.radius;
+          ctx.save();
+          ctx.translate(sx, sy);
+          ctx.rotate(obs.rotation ?? 0);
+          const localBobX = Math.sin(currentSwing) * cableLen;
+          const localBobY = Math.cos(currentSwing) * cableLen;
+          ctx.beginPath(); ctx.arc(localBobX, localBobY, bobR, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          ctx.restore();
+          break;
+        }
+        case 'laser': {
+          const warnRad = obs.bounceSpeed * (obs.warningTime ?? 2.0);
+          const phase = (obs.angle ?? 0) % (warnRad + Math.PI);
+          const isActive = phase >= warnRad;
+          const beamAngle = (obs.beamDirection === 'left' ? Math.PI : 0) + (obs.rotation ?? 0);
+          const beamLen = obs.beamLength ?? obs.armLength;
+          const beamEndX = sx + Math.cos(beamAngle) * beamLen;
+          const beamEndY = sy + Math.sin(beamAngle) * beamLen;
+          ctx.save();
+          ctx.strokeStyle = isActive ? 'rgba(255, 50, 50, 0.9)' : 'rgba(255, 150, 50, 0.45)';
+          ctx.lineWidth = 10; // BEAM_HALF * 2
+          ctx.lineCap = 'round';
+          ctx.globalAlpha = isActive ? 0.4 : 0.2;
+          ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(beamEndX, beamEndY); ctx.stroke();
+          ctx.restore();
+          break;
+        }
+        case 'swoop': {
+          const pw = obs.patrolWidth ?? 160;
+          const birdSX = obs.x + Math.sin(obs.angle) * pw / 2 - cx;
+          const birdSY = obs.baseY + obs.amplitude - cy;
+          ctx.beginPath(); ctx.arc(birdSX, birdSY, obs.radius, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          break;
+        }
+        case 'orbiter': {
+          const ballSX = sx + Math.cos(obs.angle + (obs.rotation ?? 0)) * obs.armLength;
+          const ballSY = sy + Math.sin(obs.angle + (obs.rotation ?? 0)) * obs.armLength;
+          ctx.beginPath(); ctx.arc(ballSX, ballSY, obs.radius, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          break;
+        }
+        case 'boulder': {
+          if (obs.armLength === 2) {
+            ctx.beginPath(); ctx.arc(sx, sy, obs.radius, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          }
+          break;
+        }
+        case 'mine': {
+          if (obs.armLength === 0) {
+            // Idle: show trigger radius as dashed
+            ctx.strokeStyle = 'rgba(255, 160, 50, 0.7)';
+            ctx.fillStyle   = 'rgba(255, 160, 50, 0.08)';
+            ctx.setLineDash([5, 4]);
+            ctx.beginPath(); ctx.arc(sx, sy, obs.triggerRadius ?? 40, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+            ctx.setLineDash([]);
+          } else if (obs.armLength === 1) {
+            // Armed: show explosion radius
+            ctx.strokeStyle = 'rgba(255, 50, 50, 0.85)';
+            ctx.fillStyle   = 'rgba(255, 50, 50, 0.12)';
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(sx, sy, obs.explosionRadius ?? 80, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          }
+          break;
+        }
+        case 'crusher':
+        case 'stalactite': {
+          ctx.beginPath(); ctx.arc(sx, sy, obs.radius, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          break;
+        }
+      }
+    }
+
+    // Stars — collision radius is 18px
+    ctx.strokeStyle = 'rgba(255, 220, 0, 0.9)';
+    ctx.fillStyle   = 'rgba(255, 220, 0, 0.18)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([]);
+    for (const star of this.collectibleStars) {
+      if (star.collected) continue;
+      ctx.beginPath(); ctx.arc(star.x - cx, star.y - cy, 18, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    }
+
+    // End tile trigger zone
+    if (this.endTilePos) {
+      ctx.strokeStyle = 'rgba(0, 255, 80, 0.85)';
+      ctx.fillStyle   = 'rgba(0, 255, 80, 0.1)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.arc(this.endTilePos.x - cx, this.endTilePos.y - cy, GameEngine.END_TRIGGER_RADIUS, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    ctx.restore();
+  }
+
   renderGondolaDebug(cx: number, cy: number, sx: number, sy: number) {
     const { ctx } = this;
     const cabin = this.getCabinCenter();
     const cabSX = cabin.x - cx;
     const cabSY = cabin.y - cy;
 
-    const ax = Math.cos(this.pendulumAngle);
-    const ay = Math.sin(this.pendulumAngle);
-    const halfW = CABIN_W / 2;
-    const cabinR = CABIN_H / 2;
-    const cableR = 4;
-
-    const probes = [
-      { x: cabSX, y: cabSY, r: cabinR, color: 'rgba(0, 255, 0, 0.4)', label: 'center' },
-      { x: cabSX + ax * halfW, y: cabSY + ay * halfW, r: cabinR, color: 'rgba(255, 255, 0, 0.4)', label: 'left' },
-      { x: cabSX - ax * halfW, y: cabSY - ay * halfW, r: cabinR, color: 'rgba(255, 165, 0, 0.4)', label: 'right' },
-      { x: (sx + cabSX) / 2, y: (sy + cabSY) / 2, r: cableR, color: 'rgba(0, 200, 255, 0.5)', label: 'cable' },
-    ];
-
-    // Draw cable line
+    // Cable line
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
     ctx.lineWidth = 2;
     ctx.setLineDash([4, 4]);
@@ -1530,7 +1665,7 @@ export class GameEngine {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Draw wheel point
+    // Wheel point
     ctx.fillStyle = 'rgba(255, 0, 255, 0.6)';
     ctx.beginPath();
     ctx.arc(sx, sy, WHEEL_RADIUS, 0, Math.PI * 2);
@@ -1539,27 +1674,27 @@ export class GameEngine {
     ctx.lineWidth = 1.5;
     ctx.stroke();
 
-    // Draw each probe
-    for (const p of probes) {
-      ctx.fillStyle = p.color;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = p.color.replace('0.4', '1').replace('0.5', '1');
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-    }
-
-    // Draw cabin rect outline to show orientation
+    // Cabin collision rect
     ctx.save();
     ctx.translate(cabSX, cabSY);
     ctx.rotate(this.pendulumAngle);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([3, 3]);
+    ctx.fillStyle = 'rgba(0, 255, 0, 0.2)';
+    ctx.strokeStyle = 'rgba(0, 255, 0, 0.9)';
+    ctx.lineWidth = 1.5;
+    ctx.fillRect(-CABIN_W / 2, -CABIN_H / 2, CABIN_W, CABIN_H);
     ctx.strokeRect(-CABIN_W / 2, -CABIN_H / 2, CABIN_W, CABIN_H);
-    ctx.setLineDash([]);
     ctx.restore();
+
+    // Cable midpoint probe
+    const cableMidSX = (sx + cabSX) / 2;
+    const cableMidSY = (sy + cabSY) / 2;
+    ctx.fillStyle = 'rgba(0, 200, 255, 0.5)';
+    ctx.beginPath();
+    ctx.arc(cableMidSX, cableMidSY, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0, 200, 255, 1)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
   }
 
   roundRect(x: number, y: number, w: number, h: number, r: number) {

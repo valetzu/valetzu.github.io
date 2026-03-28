@@ -10,6 +10,7 @@ export interface GameUpdateContext {
   gondolaHang: number;
   hitRadius: number;
   dealDamage: (obs: Obstacle) => void;
+  gondolaOverlapsCircle: (cx: number, cy: number, r: number) => boolean;
 }
 
 export interface ObstacleBehavior {
@@ -652,10 +653,7 @@ export const mineBehavior: ObstacleBehavior = {
     const EXPLOSION_DURATION = 0.55;
     if (obs.armLength === 0) {
       obs.angle += 0.4 * dt;
-      const cab1 = gameCtx.getCabinCenter();
-      const dx = cab1.x - obs.x;
-      const dy = cab1.y - obs.y;
-      if (Math.sqrt(dx * dx + dy * dy) < (obs.triggerRadius ?? 40)) {
+      if (gameCtx.gondolaOverlapsCircle(obs.x, obs.y, obs.triggerRadius ?? 40)) {
         obs.armLength = 1;
       }
     } else if (obs.armLength === 1) {
@@ -816,6 +814,135 @@ export const crusherBehavior: ObstacleBehavior = {
     ctx.stroke();
   }
 };
+
+// ---------------------------------------------------------------------------
+// Rect vs obstacle collision helpers
+// ---------------------------------------------------------------------------
+
+/** Oriented rectangle vs circle overlap. rectAngle rotates the rect, not the circle. */
+export function rectVsCircle(
+  rectCx: number, rectCy: number, hw: number, hh: number, rectAngle: number,
+  circleCx: number, circleCy: number, circleR: number
+): boolean {
+  const cos = Math.cos(-rectAngle), sin = Math.sin(-rectAngle);
+  const dx = circleCx - rectCx, dy = circleCy - rectCy;
+  const lx = dx * cos - dy * sin;
+  const ly = dx * sin + dy * cos;
+  const nearX = Math.max(-hw, Math.min(hw, lx));
+  const nearY = Math.max(-hh, Math.min(hh, ly));
+  return (lx - nearX) ** 2 + (ly - nearY) ** 2 < circleR ** 2;
+}
+
+/** Oriented rectangle vs segment capsule (thickened segment) overlap. */
+function rectVsSegmentCapsule(
+  rectCx: number, rectCy: number, hw: number, hh: number, rectAngle: number,
+  worldAx: number, worldAy: number, worldBx: number, worldBy: number,
+  capsuleR: number
+): boolean {
+  const cos = Math.cos(-rectAngle), sin = Math.sin(-rectAngle);
+  const toLocal = (wx: number, wy: number): [number, number] => {
+    const dx = wx - rectCx, dy = wy - rectCy;
+    return [dx * cos - dy * sin, dx * sin + dy * cos];
+  };
+  const [ax, ay] = toLocal(worldAx, worldAy);
+  const [bx, by] = toLocal(worldBx, worldBy);
+
+  // Distance from a point to the rect (in rect local space)
+  const ptRectDistSq = (px: number, py: number): number => {
+    const ex = Math.max(0, Math.abs(px) - hw);
+    const ey = Math.max(0, Math.abs(py) - hh);
+    return ex * ex + ey * ey;
+  };
+  const rSq = capsuleR * capsuleR;
+
+  // Segment endpoints close to rect
+  if (ptRectDistSq(ax, ay) < rSq) return true;
+  if (ptRectDistSq(bx, by) < rSq) return true;
+
+  // Rect corners close to segment
+  for (const [cx, cy] of [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]] as [number, number][]) {
+    if (ptSegDistSq(cx, cy, ax, ay, bx, by) < rSq) return true;
+  }
+
+  // Segment passes through rect interior
+  const sdx = bx - ax, sdy = by - ay;
+  const lenSq = sdx * sdx + sdy * sdy;
+  if (lenSq > 0) {
+    const t = Math.max(0, Math.min(1, (-ax * sdx - ay * sdy) / lenSq));
+    const cx = ax + t * sdx, cy = ay + t * sdy;
+    if (Math.abs(cx) <= hw && Math.abs(cy) <= hh) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Check whether an obstacle's collision shape overlaps with the gondola cabin rectangle.
+ * cabinCx/cabinCy is the world-space cabin center; hw/hh are half-extents; angle is pendulumAngle.
+ */
+export function checkRectVsObstacle(
+  obs: Obstacle,
+  cabinCx: number, cabinCy: number,
+  hw: number, hh: number,
+  angle: number
+): boolean {
+  const rv  = (ocx: number, ocy: number, or_: number) =>
+    rectVsCircle(cabinCx, cabinCy, hw, hh, angle, ocx, ocy, or_);
+  const rs  = (ax: number, ay: number, bx: number, by: number, r: number) =>
+    rectVsSegmentCapsule(cabinCx, cabinCy, hw, hh, angle, ax, ay, bx, by, r);
+
+  switch (obs.type) {
+    case 'spinner': {
+      const spinRot = obs.rotation ?? 0;
+      if (rv(obs.x, obs.y, obs.radius)) return true;
+      for (let a = 0; a < 4; a++) {
+        const armAngle = obs.angle + spinRot + (a * Math.PI) / 2;
+        if (rs(obs.x, obs.y, obs.x + Math.cos(armAngle) * obs.armLength, obs.y + Math.sin(armAngle) * obs.armLength, 9)) return true;
+      }
+      return rs(obs.x, obs.y, obs.x - 60 * Math.sin(spinRot), obs.y + 60 * Math.cos(spinRot), 5);
+    }
+    case 'bouncer': {
+      const bRot = obs.rotation ?? 0;
+      const lo = Math.sin(obs.angle) * obs.amplitude;
+      return rv(obs.x - lo * Math.sin(bRot), obs.baseY + lo * Math.cos(bRot), obs.radius);
+    }
+    case 'pendulum': {
+      const pRot = obs.rotation ?? 0;
+      const swing = (obs.swingAngle ?? 0.8) * Math.sin(obs.angle);
+      const cableLen = obs.cableLength ?? 120;
+      const lbx = Math.sin(swing) * cableLen, lby = Math.cos(swing) * cableLen;
+      return rv(
+        obs.x + lbx * Math.cos(pRot) - lby * Math.sin(pRot),
+        obs.y + lbx * Math.sin(pRot) + lby * Math.cos(pRot),
+        obs.bobRadius ?? obs.radius
+      );
+    }
+    case 'laser': {
+      const warnRad = obs.bounceSpeed * (obs.warningTime ?? 2.0);
+      if ((obs.angle ?? 0) % (warnRad + Math.PI) < warnRad) return false;
+      const beamAngle = (obs.beamDirection === 'left' ? Math.PI : 0) + (obs.rotation ?? 0);
+      const beamLen = obs.beamLength ?? obs.armLength;
+      return rs(obs.x, obs.y, obs.x + Math.cos(beamAngle) * beamLen, obs.y + Math.sin(beamAngle) * beamLen, 5);
+    }
+    case 'swoop': {
+      const pw = obs.patrolWidth ?? 160;
+      return rv(obs.x + Math.sin(obs.angle) * pw / 2, obs.baseY + obs.amplitude, obs.radius);
+    }
+    case 'orbiter': {
+      const a = obs.angle + (obs.rotation ?? 0);
+      return rv(obs.x + Math.cos(a) * obs.armLength, obs.y + Math.sin(a) * obs.armLength, obs.radius);
+    }
+    case 'boulder':
+      return obs.armLength === 2 && rv(obs.x, obs.y, obs.radius);
+    case 'mine':
+      return false; // damage handled in update()
+    case 'crusher':
+    case 'stalactite':
+      return rv(obs.x, obs.y, obs.radius);
+    default:
+      return false;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Behavior registry — map obstacle type string to behavior
