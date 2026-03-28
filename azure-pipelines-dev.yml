@@ -12,7 +12,16 @@ pool:
 steps:
 - task: NodeTool@0
   inputs:
-    versionSpec: '24.x'
+    versionSpec: '22.x'
+- task: AzureRmWebAppDeployment@5
+  inputs:
+    ConnectionType: 'AzureRM'
+    azureSubscription: 'doggorail-prod'
+    appType: 'webAppLinux'
+    WebAppName: 'doggorail-prod'
+    packageForLinux: '$(System.DefaultWorkingDirectory)/**/*.zip'
+    RuntimeStack: 'NODE|22-lts'
+    DeploymentTypeLinux: 'oneDeploy'
   displayName: 'Install Node.js'
 
 - script: |
