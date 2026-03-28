@@ -1466,29 +1466,60 @@ export class GameEngine {
     ctx.lineWidth = 1;
     ctx.strokeRect(cabX + 4, cabY + 4, CABIN_W - 8, CABIN_H * 0.45);
 
-    // Passengers (brown blobs in window)
+    // Passengers (dogs in window)
     const passengerSpace = CABIN_W - 16;
     const pSize = Math.min(8, passengerSpace / (this.passengers + this.upgrades.health));
     for (let p = 0; p < this.passengers; p++) {
       const maxP = 3 + this.upgrades.health;
       const px = cabX + 8 + (p / maxP) * (passengerSpace - pSize) + pSize / 2;
       const py = cabY + 10;
+      const r = pSize * 0.72;
+
+      // Fat body
+      ctx.fillStyle = '#C8A050';
+      ctx.beginPath();
+      ctx.ellipse(px, py + r * 0.9, r * 0.9, r * 0.65, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Floppy ears (drawn before head so head overlaps their tops)
+      ctx.fillStyle = '#A07030';
+      ctx.beginPath();
+      ctx.ellipse(px - r * 0.75, py + r * 0.15, r * 0.32, r * 0.55, -0.25, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(px + r * 0.75, py + r * 0.15, r * 0.32, r * 0.55, 0.25, 0, Math.PI * 2);
+      ctx.fill();
 
       // Head
-      ctx.fillStyle = '#8B6914';
+      ctx.fillStyle = '#C8A050';
       ctx.beginPath();
-      ctx.arc(px, py, pSize * 0.7, 0, Math.PI * 2);
+      ctx.arc(px, py, r, 0, Math.PI * 2);
       ctx.fill();
+
+      // Snout
+      ctx.fillStyle = '#DDB870';
+      ctx.beginPath();
+      ctx.ellipse(px, py + r * 0.25, r * 0.42, r * 0.3, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Nose
+      ctx.fillStyle = '#4A2A10';
+      ctx.beginPath();
+      ctx.ellipse(px, py + r * 0.1, r * 0.18, r * 0.12, 0, 0, Math.PI * 2);
+      ctx.fill();
+
       // Eyes
+      ctx.fillStyle = '#1A0A00';
+      ctx.beginPath();
+      ctx.arc(px - r * 0.38, py - r * 0.18, r * 0.17, 0, Math.PI * 2);
+      ctx.arc(px + r * 0.38, py - r * 0.18, r * 0.17, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Eye shine
       ctx.fillStyle = '#FFF';
       ctx.beginPath();
-      ctx.arc(px - 2, py - 1, 1.5, 0, Math.PI * 2);
-      ctx.arc(px + 2, py - 1, 1.5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#000';
-      ctx.beginPath();
-      ctx.arc(px - 1.5, py - 1, 0.8, 0, Math.PI * 2);
-      ctx.arc(px + 2.5, py - 1, 0.8, 0, Math.PI * 2);
+      ctx.arc(px - r * 0.32, py - r * 0.24, r * 0.07, 0, Math.PI * 2);
+      ctx.arc(px + r * 0.44, py - r * 0.24, r * 0.07, 0, Math.PI * 2);
       ctx.fill();
     }
 

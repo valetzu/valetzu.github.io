@@ -431,7 +431,7 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
   return (
     <div className="fixed inset-0 flex flex-col items-center justify-center bg-game-bg">
       <h1 className="text-6xl font-black text-game-title mb-2 tracking-tight drop-shadow-lg">
-        🚡 Gondola
+        🚡 Doggorail
       </h1>
      {/*  <p className="text-game-subtitle text-lg mb-8">
         What the dog doin'
