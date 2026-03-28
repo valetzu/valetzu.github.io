@@ -526,6 +526,7 @@ export class GameEngine {
         if (behavior) behavior.update(obs, dt, octx);
       }
 
+      this.ghostRecorder?.onTick(this);
       this.onUpdate?.(this.distance, this.passengers, Math.abs(this.speed) * 0.1);
       return;
     }

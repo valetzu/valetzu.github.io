@@ -51,6 +51,13 @@ function base64ToUint8(b64: string): Uint8Array {
   return arr;
 }
 
+// Wrap angle to [-π, π] so it always fits in int16 with 10000 precision (max ±3.2767 rad).
+// Purely visual: rotation repeats every 2π, so no information is lost.
+function wrapToPi(a: number): number {
+  const TWO_PI = Math.PI * 2;
+  return ((a % TWO_PI) + TWO_PI + Math.PI) % TWO_PI - Math.PI;
+}
+
 export function encodeFrames(frames: GhostFrame[]): string {
   const buf = new ArrayBuffer(frames.length * FRAME_SIZE);
   const view = new DataView(buf);
@@ -58,7 +65,8 @@ export function encodeFrames(frames: GhostFrame[]): string {
     const off = i * FRAME_SIZE;
     view.setFloat32(off, frames[i].x, true);
     view.setFloat32(off + 4, frames[i].y, true);
-    view.setInt16(off + 8, Math.round(frames[i].pa * 10000), true);
+    // Wrap pa to [-π, π] before encoding — prevents int16 overflow when gondola spins freely airborne
+    view.setInt16(off + 8, Math.round(wrapToPi(frames[i].pa) * 10000), true);
     view.setInt16(off + 10, Math.round(((frames[i].wa % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) * 1000), true);
     view.setUint8(off + 12, frames[i].p);
     view.setUint8(off + 13, frames[i].flags);
@@ -191,10 +199,15 @@ export class GhostPlayer {
     const frac = idx - i;
     const a = this.frames[i];
     const b = this.frames[i + 1];
+    // Shortest-path lerp for pa: prevents the ghost cabin from swinging the long way
+    // around when pa crosses the ±π boundary between two recorded frames
+    let dpa = b.pa - a.pa;
+    if (dpa > Math.PI) dpa -= Math.PI * 2;
+    if (dpa < -Math.PI) dpa += Math.PI * 2;
     const frame: GhostFrame = {
       x: a.x + (b.x - a.x) * frac,
       y: a.y + (b.y - a.y) * frac,
-      pa: a.pa + (b.pa - a.pa) * frac,
+      pa: a.pa + dpa * frac,
       wa: a.wa + (b.wa - a.wa) * frac,
       p: a.p,
       flags: a.flags,

@@ -22,18 +22,19 @@ import {
   saveReplay,
   getReplay,
   getReplaysForLevel,
+  type ReplayData,
 } from "@/game/replay";
 import PauseMenu from "./PauseMenu";
 
 interface CustomLevelPlayerProps {
   level: EditorLevel;
-  raceGhost: boolean;
+  ghostReplay: ReplayData | null;
   onBack: () => void;
 }
 
 export default function CustomLevelPlayer({
   level,
-  raceGhost,
+  ghostReplay,
   onBack,
 }: CustomLevelPlayerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -51,7 +52,7 @@ export default function CustomLevelPlayer({
   const levelId = level.id || level.name;
 
   const startEngine = useCallback(
-    (canvas: HTMLCanvasElement, withGhost: boolean) => {
+    (canvas: HTMLCanvasElement, replay: ReplayData | null) => {
       const {
         railPoints,
         allSegments,
@@ -146,12 +147,9 @@ export default function CustomLevelPlayer({
       ghostRecorderRef.current = recorder;
 
       // Ghost playback
-      if (withGhost) {
-        const replay = getReplay(levelId);
-        if (replay) {
-          engine.ghostPlayer = new GhostPlayer(replay);
-          engine.ghostTime = replay.time;
-        }
+      if (replay) {
+        engine.ghostPlayer = new GhostPlayer(replay);
+        engine.ghostTime = replay.time;
       }
 
       engineRef.current = engine;
@@ -176,7 +174,7 @@ export default function CustomLevelPlayer({
     resize();
     window.addEventListener("resize", resize);
 
-    startEngine(canvas, raceGhost);
+    startEngine(canvas, ghostReplay);
 
     const handleKey = (e: KeyboardEvent) => {
       if (e.code === "Enter" && gameOverRef.current) {
@@ -211,7 +209,7 @@ export default function CustomLevelPlayer({
       window.removeEventListener("resize", resize);
       window.removeEventListener("keydown", handleKey);
     };
-  }, [raceGhost, startEngine, onBack]);
+  }, [ghostReplay, startEngine, onBack]);
 
   const handleReplay = (withGhost: boolean) => {
     engineRef.current?.stop();
@@ -219,7 +217,7 @@ export default function CustomLevelPlayer({
     gameOverRef.current = false;
     const canvas = canvasRef.current;
     if (canvas) {
-      startEngine(canvas, withGhost);
+      startEngine(canvas, withGhost ? getReplay(levelId) : null);
     }
   };
 
@@ -258,7 +256,7 @@ export default function CustomLevelPlayer({
             setLevelComplete(null);
             gameOverRef.current = false;
             const canvas = canvasRef.current;
-            if (canvas) startEngine(canvas, raceGhost);
+            if (canvas) startEngine(canvas, ghostReplay);
           }}
           onQuit={() => {
             engineRef.current?.stop();

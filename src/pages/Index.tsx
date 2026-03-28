@@ -7,6 +7,7 @@ import LevelEditor from '@/components/LevelEditor';
 import CustomLevelPlayer from '@/components/CustomLevelPlayer';
 import SettingsMenu from '@/components/SettingsMenu';
 import type { EditorLevel } from '@/game/editorTypes';
+import type { ReplayData } from '@/game/replay';
 
 type Phase = 'menu' | 'playing' | 'editor' | 'customPlay';
 
@@ -17,7 +18,7 @@ const Index = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [customLevel, setCustomLevel] = useState<EditorLevel | null>(null);
   const [editLevel, setEditLevel] = useState<EditorLevel | null>(null);
-  const [raceGhost, setRaceGhost] = useState(false);
+  const [raceGhost, setRaceGhost] = useState<ReplayData | null>(null);
 
   const startGame = useCallback((w: WorldType) => {
     setWorld(w);
@@ -68,7 +69,7 @@ const Index = () => {
     return (
       <CustomLevelPlayer
         level={customLevel}
-        raceGhost={raceGhost}
+        ghostReplay={raceGhost}
         onBack={backToMenu}
       />
     );
@@ -82,9 +83,9 @@ const Index = () => {
         onUpdateSave={setSave}
         onOpenEditor={(level) => { setEditLevel(level ?? null); setPhase('editor'); }}
         onOpenSettings={() => setShowSettings(true)}
-        onPlayCustomLevel={(level, ghost) => {
+        onPlayCustomLevel={(level, ghostReplay) => {
           setCustomLevel(level);
-          setRaceGhost(ghost);
+          setRaceGhost(ghostReplay);
           setPhase('customPlay');
         }}
       />
