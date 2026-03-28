@@ -4,8 +4,8 @@ import {
   UPGRADE_COSTS, UPGRADE_MAX, UPGRADE_LABELS, UPGRADE_DESC,
   saveSave, getRecords, formatTime,
 } from '@/game/types';
-import { loadCustomLevels, type EditorLevel } from '@/game/editorTypes';
-import { getReplaysForLevel, getReplay, type ReplayData } from '@/game/replay';
+import { loadCustomLevels, deleteCustomLevel, type EditorLevel } from '@/game/editorTypes';
+import { getReplaysForLevel, getReplay, deleteReplay, type ReplayData } from '@/game/replay';
 
 interface GameMenuProps {
   save: SaveData;
@@ -22,6 +22,20 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
   const [view, setView] = useState<MenuView>('main');
   const [leaderboardLevelId, setLeaderboardLevelId] = useState<string | null>(null);
   const [ghostListLevelId, setGhostListLevelId] = useState<string | null>(null);
+  const [ghostSortKey, setGhostSortKey] = useState<'time' | 'date'>('time');
+  const [ghostSortDir, setGhostSortDir] = useState<'asc' | 'desc'>('asc');
+  const [replayVersion, setReplayVersion] = useState(0);
+  const [levelListVersion, setLevelListVersion] = useState(0);
+
+  const handleGhostSort = (key: 'time' | 'date') => {
+    if (ghostSortKey === key) setGhostSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setGhostSortKey(key); setGhostSortDir('asc'); }
+  };
+
+  const fmtDate = (ts: number) => {
+    const d = new Date(ts);
+    return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  };
 
   const buyUpgrade = (key: keyof Upgrades) => {
     const level = save.upgrades[key];
@@ -139,6 +153,18 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
                           </div>
                         )}
                       </div>
+                      <button
+                        onClick={() => {
+                          if (window.confirm(`Delete level "${level.name}"?`)) {
+                            deleteCustomLevel(level.name);
+                            setLevelListVersion(v => v + 1);
+                          }
+                        }}
+                        className="text-xs px-1.5 py-0.5 rounded-md bg-red-900 text-white hover:bg-red-600 active:scale-95 transition-all"
+                        title="Delete level"
+                      >
+                        ✕
+                      </button>
                     </div>
                     <div className="flex gap-2">
                       <button
@@ -207,28 +233,59 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
                         })}
                       </div>
                     )}
-                    {ghostListLevelId === levelId && replays.length > 0 && (
-                      <div className="mt-3 bg-game-bg rounded-xl p-3">
-                        <p className="text-game-subtitle text-xs mb-2 text-center font-bold">
-                          Ghost Replays
-                        </p>
-                        {replays.map((r, i) => (
-                          <div
-                            key={i}
-                            className="flex items-center justify-between text-sm py-1 text-game-subtitle gap-2"
-                          >
-                            <span className="flex-1 truncate">{r.name}</span>
-                            <span className="shrink-0">{formatTime(r.time)}</span>
-                            <button
-                              onClick={() => onPlayCustomLevel?.(level, r)}
-                              className="shrink-0 text-xs px-2 py-0.5 rounded-md bg-blue-700 text-white hover:bg-blue-500 active:scale-95 transition-all"
-                            >
-                              👻 Race
+                    {ghostListLevelId === levelId && replays.length > 0 && (() => {
+                      const dir = ghostSortDir === 'asc' ? 1 : -1;
+                      const sorted = [...replays].sort((a, b) =>
+                        ghostSortKey === 'time' ? (a.time - b.time) * dir : (a.date - b.date) * dir
+                      );
+                      const sortArrow = (key: 'time' | 'date') =>
+                        ghostSortKey === key ? (ghostSortDir === 'asc' ? ' ↑' : ' ↓') : '';
+                      return (
+                        <div className="mt-3 bg-game-bg rounded-xl p-3">
+                          <p className="text-game-subtitle text-xs mb-2 text-center font-bold">
+                            Ghost Replays
+                          </p>
+                          <div className="flex items-center gap-2 text-xs text-game-subtitle mb-1">
+                            <span className="flex-1">Name</span>
+                            <button onClick={() => handleGhostSort('time')} className={`shrink-0 w-14 text-right hover:text-game-title transition-colors${ghostSortKey === 'time' ? ' text-game-accent font-bold' : ''}`}>
+                              Time{sortArrow('time')}
                             </button>
+                            <button onClick={() => handleGhostSort('date')} className={`shrink-0 w-20 text-right hover:text-game-title transition-colors${ghostSortKey === 'date' ? ' text-game-accent font-bold' : ''}`}>
+                              Saved{sortArrow('date')}
+                            </button>
+                            <span className="shrink-0 w-[70px]" />
                           </div>
-                        ))}
-                      </div>
-                    )}
+                          {sorted.map((r, i) => (
+                            <div
+                              key={`${replayVersion}-${i}`}
+                              className="flex items-center justify-between text-sm py-1 text-game-subtitle gap-2"
+                            >
+                              <span className="flex-1 truncate">{r.name}</span>
+                              <span className="shrink-0 w-14 text-right">{formatTime(r.time)}</span>
+                              <span className="shrink-0 w-20 text-right text-xs">{fmtDate(r.date)}</span>
+                              <button
+                                onClick={() => onPlayCustomLevel?.(level, r)}
+                                className="shrink-0 text-xs px-2 py-0.5 rounded-md bg-blue-700 text-white hover:bg-blue-500 active:scale-95 transition-all"
+                              >
+                                👻 Race
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (window.confirm(`Delete replay "${r.name}"?`)) {
+                                    deleteReplay(levelId, r.name);
+                                    setReplayVersion(v => v + 1);
+                                  }
+                                }}
+                                className="shrink-0 text-xs px-1.5 py-0.5 rounded-md bg-red-900 text-white hover:bg-red-600 active:scale-95 transition-all"
+                                title="Delete replay"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })}
@@ -333,16 +390,29 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
           {levels.length > 0 && (
             <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1 mb-4">
               {levels.map((level) => (
-                <button
-                  key={level.id}
-                  onClick={() => onOpenEditor(level)}
-                  className="w-full text-left px-4 py-3 rounded-xl bg-game-card border-2 border-game-card-border hover:border-game-accent active:scale-[0.99] transition-all"
-                >
-                  <div className="font-bold text-game-title">{level.name}</div>
-                  <div className="text-xs text-game-subtitle mt-0.5">
-                    {new Date(level.updatedAt ?? level.createdAt).toLocaleString()}
-                  </div>
-                </button>
+                <div key={`${levelListVersion}-${level.id}`} className="flex items-center gap-2">
+                  <button
+                    onClick={() => onOpenEditor(level)}
+                    className="flex-1 text-left px-4 py-3 rounded-xl bg-game-card border-2 border-game-card-border hover:border-game-accent active:scale-[0.99] transition-all"
+                  >
+                    <div className="font-bold text-game-title">{level.name}</div>
+                    <div className="text-xs text-game-subtitle mt-0.5">
+                      {new Date(level.updatedAt ?? level.createdAt).toLocaleString()}
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (window.confirm(`Delete level "${level.name}"?`)) {
+                        deleteCustomLevel(level.name);
+                        setLevelListVersion(v => v + 1);
+                      }
+                    }}
+                    className="shrink-0 text-xs px-1.5 py-0.5 rounded-md bg-red-900 text-white hover:bg-red-600 active:scale-95 transition-all"
+                    title="Delete level"
+                  >
+                    ✕
+                  </button>
+                </div>
               ))}
             </div>
           )}

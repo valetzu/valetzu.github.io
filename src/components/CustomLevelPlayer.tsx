@@ -23,6 +23,7 @@ import {
   saveAutoReplay,
   getReplay,
   getReplaysForLevel,
+  deleteReplay,
   type ReplayData,
 } from "@/game/replay";
 import PauseMenu from "./PauseMenu";
@@ -44,6 +45,19 @@ export default function CustomLevelPlayer({
   const gameOverRef = useRef(false);
   const [paused, setPaused] = useState(false);
   const [showGhostList, setShowGhostList] = useState(false);
+  const [ghostSortKey, setGhostSortKey] = useState<'time' | 'date'>('time');
+  const [ghostSortDir, setGhostSortDir] = useState<'asc' | 'desc'>('asc');
+  const [replayVersion, setReplayVersion] = useState(0);
+
+  const handleGhostSort = (key: 'time' | 'date') => {
+    if (ghostSortKey === key) setGhostSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setGhostSortKey(key); setGhostSortDir('asc'); }
+  };
+
+  const fmtDate = (ts: number) => {
+    const d = new Date(ts);
+    return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  };
   const [levelComplete, setLevelComplete] = useState<{
     time: number;
     records: LevelRecord[];
@@ -325,28 +339,69 @@ export default function CustomLevelPlayer({
                       {showGhostList ? "Ghost Replays" : "Top Times"}
                     </p>
                     {replays.length > 0 && (
-                      <button
-                        onClick={() => setShowGhostList((v) => !v)}
-                        className="text-xs px-2 py-0.5 rounded-md bg-game-bar-bg text-game-title border border-game-card-border hover:border-game-accent active:scale-95 transition-all"
-                      >
-                        👻
-                      </button>
-                    )}
-                  </div>
-                  {showGhostList ? (
-                    replays.map((r, i) => (
-                      <div key={i} className="flex items-center gap-2 text-sm py-1 text-game-subtitle">
-                        <span className="flex-1 truncate">{r.name}</span>
-                        <span className="shrink-0">{formatTime(r.time)}</span>
+                      <div className="flex rounded-md overflow-hidden border border-game-card-border text-xs font-bold">
                         <button
-                          onClick={() => handleReplay(r)}
-                          className="shrink-0 text-xs px-2 py-0.5 rounded-md bg-blue-700 text-white hover:bg-blue-500 active:scale-95 transition-all"
+                          onClick={() => setShowGhostList(false)}
+                          className={`px-2 py-0.5 transition-all ${!showGhostList ? "bg-game-accent text-game-bg" : "bg-game-bar-bg text-game-subtitle hover:text-game-title"}`}
                         >
-                          👻 Race
+                          Best
+                        </button>
+                        <button
+                          onClick={() => setShowGhostList(true)}
+                          className={`px-2 py-0.5 transition-all ${showGhostList ? "bg-game-accent text-game-bg" : "bg-game-bar-bg text-game-subtitle hover:text-game-title"}`}
+                        >
+                          All 👻
                         </button>
                       </div>
-                    ))
-                  ) : (
+                    )}
+                  </div>
+                  {showGhostList ? (() => {
+                    const dir = ghostSortDir === 'asc' ? 1 : -1;
+                    const sorted = [...replays].sort((a, b) =>
+                      ghostSortKey === 'time' ? (a.time - b.time) * dir : (a.date - b.date) * dir
+                    );
+                    const sortArrow = (key: 'time' | 'date') =>
+                      ghostSortKey === key ? (ghostSortDir === 'asc' ? ' ↑' : ' ↓') : '';
+                    return (
+                      <>
+                        <div className="flex items-center gap-2 text-xs text-game-subtitle mb-1">
+                          <span className="flex-1">Name</span>
+                          <button onClick={() => handleGhostSort('time')} className={`shrink-0 w-14 text-right hover:text-game-title transition-colors${ghostSortKey === 'time' ? ' text-game-accent font-bold' : ''}`}>
+                            Time{sortArrow('time')}
+                          </button>
+                          <button onClick={() => handleGhostSort('date')} className={`shrink-0 w-20 text-right hover:text-game-title transition-colors${ghostSortKey === 'date' ? ' text-game-accent font-bold' : ''}`}>
+                            Saved{sortArrow('date')}
+                          </button>
+                          <span className="shrink-0 w-[70px]" />
+                        </div>
+                        {sorted.map((r, i) => (
+                          <div key={`${replayVersion}-${i}`} className="flex items-center gap-2 text-sm py-1 text-game-subtitle">
+                            <span className="flex-1 truncate">{r.name}</span>
+                            <span className="shrink-0 w-14 text-right">{formatTime(r.time)}</span>
+                            <span className="shrink-0 w-20 text-right text-xs">{fmtDate(r.date)}</span>
+                            <button
+                              onClick={() => handleReplay(r)}
+                              className="shrink-0 text-xs px-2 py-0.5 rounded-md bg-blue-700 text-white hover:bg-blue-500 active:scale-95 transition-all"
+                            >
+                              👻 Race
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (window.confirm(`Delete replay "${r.name}"?`)) {
+                                  deleteReplay(levelId, r.name);
+                                  setReplayVersion(v => v + 1);
+                                }
+                              }}
+                              className="shrink-0 text-xs px-1.5 py-0.5 rounded-md bg-red-900 text-white hover:bg-red-600 active:scale-95 transition-all"
+                              title="Delete replay"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </>
+                    );
+                  })() : (
                     levelComplete.records.map((r, i) => {
                       const isCurrentRun =
                         r.time === levelComplete.time &&

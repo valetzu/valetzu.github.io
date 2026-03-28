@@ -293,9 +293,7 @@ export function getReplay(levelId: string, name?: string): ReplayData | null {
   if (list.length === 0) return null;
   if (name) return list.find((r) => r.name === name) || null;
   // Default: return Personal Best, or the fastest
-  const pb = list.find((r) => r.name === "Personal Best");
-  if (pb) return pb;
-  return list.sort((a, b) => a.time - b.time)[0];
+  return [...list].sort((a, b) => a.time - b.time)[0];
 }
 
 export function deleteReplay(levelId: string, name: string): void {
