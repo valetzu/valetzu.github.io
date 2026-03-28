@@ -1,5 +1,9 @@
-import { WorldType, Upgrades, Point, Obstacle, WORLD_CONFIG } from './types';
+import { WorldType, Upgrades, Point, Obstacle, WORLD_CONFIG, formatTime } from './types';
 import { spriteManager } from './spriteManager';
+import { OBSTACLE_BEHAVIORS, GameUpdateContext } from './obstacleBehaviors';
+import { createRng } from './rng';
+import { GhostRecorder, GhostPlayer } from './replay';
+import type { BgTile } from './editorTypes';
 
 const RAIL_SPACING = 100;
 const THROTTLE_BASE = 350;
@@ -8,11 +12,17 @@ const GONDOLA_HANG = 38;
 const CABIN_W = 56;
 const CABIN_H = 36;
 const HIT_RADIUS = 26;
+const WHEEL_RADIUS = 7;
 const INVULN_TIME = 2;
 const ROCKET_DURATION = 3;
 const SHIELD_DURATION = 2.5;
 const OBSTACLE_MIN_GAP = 280;
 const OBSTACLE_MAX_GAP = 500;
+const ROLLING_INERTIA_FACTOR = 1.5; // effective mass multiplier (solid disk: 1 + I/mr² = 1.5)
+const PENDULUM_DAMPING = 4.5;        // angular velocity damping (~0.5× critical, settles naturally)
+const PENDULUM_PLAYER_TORQUE = 15;   // rad/s² strong torque matching airborne rotation control
+const AIRBORNE_PLAYER_TORQUE = 25;   // rad/s² strong torque for full rotation in air
+const PENDULUM_MASS_RATIO = 0.15;    // cabin reaction force ratio on wheel
 
 interface Cloud { x: number; y: number; w: number; h: number }
 interface Star { x: number; y: number; s: number }
@@ -27,27 +37,50 @@ export class GameEngine {
   rail: Point[] = [];
   /** All rail segments for finite levels (for rendering + snap). Index 0 = start segment. */
   allRailSegments: Point[][] = [];
+  /** Precomputed AABBs for each rail segment (built once at level load) */
+  segmentBounds: { seg: Point[]; minX: number; minY: number; maxX: number; maxY: number }[] = [];
   ground: number[] = []; // groundY for each rail point
   pos: number = 0;
   speed: number = 0;
+  direction: 1 | -1 = 1;
+  directionFlipped: boolean = false;
   passengers: number = 3;
   distance: number = 0;
   obstacles: Obstacle[] = [];
   keys = { up: false, down: false, left: false, right: false, space: false, shift: false };
   noBackground = false;
+  skyOverride: { skyTop: string; skyBottom: string } | null = null;
+  bgTiles: Record<string, BgTile> = {};
+  bgTileSize = 50;
   hasFinitePath = false;
-  // For editor-defined finite levels: which segment + point is the end tile (complete when touching it)
-  endSegmentIndex: number | null = null;
-  endPointIndex: number | null = null;
+  isLoop = false;
+  /** Trigger radius for end tile proximity check (world pixels) */
+  static END_TRIGGER_RADIUS = 60;
   onRail = true;
+
+  // Optional world positions for explicit start/end tiles in finite/editor levels
+  startTilePos: Point | null = null;
+  endTilePos: Point | null = null;
 
   // Airborne state (when the player leaves the rail)
   airX = 0;
   airY = 0;
   airVX = 0;
   airVY = 0;
-  airRotation = 0;
-  airRotVel = 0;
+  airborneTime = 0; // time spent airborne — cooldown for snap-back to exited rail
+  airborneFromSeg: Point[] | null = null; // the rail segment the player launched from
+
+  wheelAngle = 0; // cumulative rotation for visual spin
+
+  // Pendulum state — cabin swings from wheel joint
+  pendulumAngle = 0;   // angle from vertical (radians, positive = right)
+  pendulumVel = 0;     // angular velocity (rad/s)
+  prevWheelVX = 0;     // previous frame wheel world velocity X
+  prevWheelVY = 0;     // previous frame wheel world velocity Y
+
+  // Tracked rail normal for continuity (prevents flipping on loops)
+  prevNormalX = 0;
+  prevNormalY = -1;    // default: upward
 
   elapsedTime = 0;
   levelCompleted = false;
@@ -60,19 +93,42 @@ export class GameEngine {
   shieldCharges = 0;
 
   lastTime = 0;
+  lastDt = 0.016;
   animFrame = 0;
   running = false;
+  paused = false;
   gameOver = false;
   flashTimer = 0;
+
+  // Fixed timestep for deterministic physics
+  readonly FIXED_DT = 1 / 60;
+  accumulator = 0;
+  interpolationAlpha = 0;
+  prevGondolaX = 0;
+  prevGondolaY = 0;
+  frameDt = 0;
 
   clouds: Cloud[] = [];
   stars: Star[] = [];
   mountains: Mountain[] = [];
   nextObstacleX = 600;
+  rng: () => number;
+
+  collectibleStars: { x: number; y: number; collected: boolean }[] = [];
+  starsCollected = 0;
+
+  ghostRecorder: GhostRecorder | null = null;
+  ghostPlayer: GhostPlayer | null = null;
+  debugHitbox = false;
+
+  /** Personal best time for the current level (seconds), or null if none */
+  personalBestTime: number | null = null;
+  /** Ghost's completion time (seconds), or null if not racing a ghost */
+  ghostTime: number | null = null;
 
   onUpdate?: (dist: number, passengers: number, speed: number) => void;
   onGameOver?: (dist: number, cash: number) => void;
-  onLevelComplete?: (time: number) => void;
+  onLevelComplete?: (time: number, starsCollected: number) => void;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -81,7 +137,7 @@ export class GameEngine {
     callbacks: {
       onUpdate?: (d: number, p: number, s: number) => void;
       onGameOver?: (d: number, c: number) => void;
-      onLevelComplete?: (time: number) => void;
+      onLevelComplete?: (time: number, starsCollected: number) => void;
     }
   ) {
     this.canvas = canvas;
@@ -91,6 +147,7 @@ export class GameEngine {
     this.onUpdate = callbacks.onUpdate;
     this.onGameOver = callbacks.onGameOver;
     this.onLevelComplete = callbacks.onLevelComplete;
+    this.rng = createRng(Date.now());
     this.passengers = 3 + upgrades.health;
     this.rocketCharges = upgrades.rocket > 0 ? 1 + upgrades.rocket : 0;
     this.shieldCharges = upgrades.shield > 0 ? 1 + upgrades.shield : 0;
@@ -110,13 +167,13 @@ export class GameEngine {
       // Smooth random walk for rail height
       const difficulty = Math.min(1, (idx * RAIL_SPACING) / 30000);
       const maxSlope = 25 + difficulty * 35;
-      const dy = (Math.random() - 0.48) * maxSlope;
+      const dy = (this.rng() - 0.48) * maxSlope;
       lastY = Math.max(120, Math.min(520, lastY + dy));
       this.rail.push({ x, y: lastY });
 
       // Ground follows below rail with variation
-      const isChasm = Math.random() < 0.04 + difficulty * 0.03;
-      const targetOffset = isChasm ? 400 + Math.random() * 200 : 100 + Math.random() * 120;
+      const isChasm = this.rng() < 0.04 + difficulty * 0.03;
+      const targetOffset = isChasm ? 400 + this.rng() * 200 : 100 + this.rng() * 120;
       lastGroundOffset += (targetOffset - lastGroundOffset) * 0.15;
       this.ground.push(lastY + lastGroundOffset);
     }
@@ -132,38 +189,38 @@ export class GameEngine {
 
       const railY = this.rail[i].y;
       const difficulty = Math.min(1, x / 30000);
-      const r = Math.random();
+      const r = this.rng();
 
       let obs: Obstacle;
       if (r < 0.5) {
         // Spinner
-        const armLen = (50 + Math.random() * 40) * 3;
+        const armLen = (50 + this.rng() * 40) * 3;
         obs = {
-          id: `obs_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          id: `obs_${Date.now()}_${this.rng().toString(36).slice(2, 7)}`,
           typeId: 'obstacle.spinner',
           type: 'spinner',
-          x, y: railY - 10 - Math.random() * 40,
-          radius: 12, angle: Math.random() * Math.PI * 2,
-          rotSpeed: -(0.3 + Math.random() * 0.4 + difficulty * 0.4),
+          x, y: railY - 10 - this.rng() * 40,
+          radius: 12, angle: this.rng() * Math.PI * 2,
+          rotSpeed: -(0.3 + this.rng() * 0.4 + difficulty * 0.4),
           baseY: 0, amplitude: 0, bounceSpeed: 0,
-          armLength: armLen, hit: false,
+          armLength: armLen, hit: false, hp: 1,
         };
       } else {
         // Bouncer
         obs = {
-          id: `obs_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          id: `obs_${Date.now()}_${this.rng().toString(36).slice(2, 7)}`,
           typeId: 'obstacle.bouncer',
           type: 'bouncer',
           x, y: railY,
-          radius: 18, angle: Math.random() * Math.PI * 2,
+          radius: 18, angle: this.rng() * Math.PI * 2,
           rotSpeed: 0,
-          baseY: railY - 20, amplitude: 100 + Math.random() * 80,
-          bounceSpeed: 0.6 + Math.random() * 0.8,
-          armLength: 0, hit: false,
+          baseY: railY - 20, amplitude: 100 + this.rng() * 80,
+          bounceSpeed: 0.6 + this.rng() * 0.8,
+          armLength: 0, hit: false, hp: 1,
         };
       }
       this.obstacles.push(obs);
-      this.nextObstacleX = x + OBSTACLE_MIN_GAP + Math.random() * (OBSTACLE_MAX_GAP - OBSTACLE_MIN_GAP) * (1 - difficulty * 0.3);
+      this.nextObstacleX = x + OBSTACLE_MIN_GAP + this.rng() * (OBSTACLE_MAX_GAP - OBSTACLE_MIN_GAP) * (1 - difficulty * 0.3);
     }
   }
 
@@ -171,21 +228,21 @@ export class GameEngine {
     // Clouds or stars
     if (this.world === 'moon') {
       for (let i = 0; i < 200; i++) {
-        this.stars.push({ x: Math.random() * 10000, y: Math.random() * 400, s: 1 + Math.random() * 2 });
+        this.stars.push({ x: this.rng() * 10000, y: this.rng() * 400, s: 1 + this.rng() * 2 });
       }
     } else {
       for (let i = 0; i < 15; i++) {
         this.clouds.push({
-          x: Math.random() * 5000, y: 30 + Math.random() * 150,
-          w: 80 + Math.random() * 120, h: 30 + Math.random() * 40,
+          x: this.rng() * 5000, y: 30 + this.rng() * 150,
+          w: 80 + this.rng() * 120, h: 30 + this.rng() * 40,
         });
       }
     }
     // Mountains
     for (let i = 0; i < 20; i++) {
       this.mountains.push({
-        x: i * 500 + Math.random() * 200,
-        y: 0, w: 200 + Math.random() * 300, h: 150 + Math.random() * 200,
+        x: i * 500 + this.rng() * 200,
+        y: 0, w: 200 + this.rng() * 300, h: 150 + this.rng() * 200,
       });
     }
   }
@@ -196,7 +253,11 @@ export class GameEngine {
     if (e.code === 'ArrowDown') { this.keys.down = true; e.preventDefault(); }
     if (e.code === 'ArrowLeft') { this.keys.left = true; e.preventDefault(); }
     if (e.code === 'ArrowRight') { this.keys.right = true; e.preventDefault(); }
-    if (e.code === 'Space' && this.rocketTimer <= 0 && this.rocketCharges > 0) {
+    if (e.code === 'Space') {
+      this.directionFlipped = !this.directionFlipped;
+      e.preventDefault();
+    }
+    if (e.code === 'KeyX' && this.rocketTimer <= 0 && this.rocketCharges > 0) {
       this.rocketTimer = ROCKET_DURATION;
       this.rocketCharges--;
       e.preventDefault();
@@ -204,6 +265,10 @@ export class GameEngine {
     if (e.code === 'ShiftLeft' && this.shieldTimer <= 0 && this.shieldCharges > 0) {
       this.shieldTimer = SHIELD_DURATION;
       this.shieldCharges--;
+      e.preventDefault();
+    }
+    if (e.code === 'F9') {
+      this.debugHitbox = !this.debugHitbox;
       e.preventDefault();
     }
   };
@@ -231,15 +296,43 @@ export class GameEngine {
     if (this.animFrame) cancelAnimationFrame(this.animFrame);
   }
 
+  pause() {
+    this.paused = true;
+  }
+
+  resume() {
+    this.paused = false;
+    this.lastTime = performance.now(); // prevent dt spike after pause
+    this.accumulator = 0; // reset accumulator to prevent catch-up steps after pause
+  }
+
   loop = () => {
     if (!this.running) return;
     const now = performance.now();
-    const dt = Math.min((now - this.lastTime) / 1000, 0.05);
+    const frameDt = Math.min((now - this.lastTime) / 1000, 0.1);
     this.lastTime = now;
 
-    if (!this.gameOver && !this.levelCompleted) {
-      this.update(dt);
+    this.frameDt = frameDt;
+
+    if (!this.paused && !this.gameOver && !this.levelCompleted) {
+      this.accumulator += frameDt;
+      // Cap accumulator to prevent spiral of death (max 12 steps at 60Hz)
+      this.accumulator = Math.min(this.accumulator, 0.2);
+
+      while (this.accumulator >= this.FIXED_DT) {
+        // Save previous gondola position for render interpolation
+        const prevPos = this.getGondolaPos();
+        this.prevGondolaX = prevPos.x;
+        this.prevGondolaY = prevPos.y;
+
+        this.lastDt = this.FIXED_DT;
+        this.update(this.FIXED_DT);
+        this.accumulator -= this.FIXED_DT;
+      }
+
+      this.interpolationAlpha = this.accumulator / this.FIXED_DT;
     }
+
     this.render();
     this.animFrame = requestAnimationFrame(this.loop);
   };
@@ -265,47 +358,63 @@ export class GameEngine {
         this.airVY -= dragY * dt;
       }
 
-      // Mid-air rotation via left/right keys
-      const rotAccel = 4;
-      if (this.keys.left) this.airRotVel -= rotAccel * dt;
-      if (this.keys.right) this.airRotVel += rotAccel * dt;
+      // Pendulum physics — gravity restores cabin, strong torque for full rotation control
+      const gEff = cfg.gravity * 0.9;
+      let pendAlpha = -(gEff / GONDOLA_HANG) * Math.sin(this.pendulumAngle);
+      if (this.keys.left) pendAlpha -= AIRBORNE_PLAYER_TORQUE;
+      if (this.keys.right) pendAlpha += AIRBORNE_PLAYER_TORQUE;
+      pendAlpha -= PENDULUM_DAMPING * this.pendulumVel;
+      this.pendulumVel += pendAlpha * dt;
+      this.pendulumAngle += this.pendulumVel * dt;
+      // No angle clamp — full 360° rotation allowed
 
-      // Rotation damping
-      this.airRotVel *= Math.exp(-2 * dt);
-      this.airRotation += this.airRotVel * dt;
+      // Swept circle collision + position integration
+      const moveX = this.airVX * dt;
+      const moveY = this.airVY * dt;
 
-      // Integrate position
-      this.airX += this.airVX * dt;
-      this.airY += this.airVY * dt;
+      let earliestT = 1.0;
+      let hitSeg: Point[] | null = null;
+      let hitSegIdx = -1;
 
-      // Update distance for HUD (approximate)
-      this.distance += vMag * dt * 0.1;
-      this.elapsedTime += dt;
+      // Movement AABB expanded by wheel radius for broad-phase
+      const movMinX = Math.min(this.airX, this.airX + moveX) - WHEEL_RADIUS;
+      const movMinY = Math.min(this.airY, this.airY + moveY) - WHEEL_RADIUS;
+      const movMaxX = Math.max(this.airX, this.airX + moveX) + WHEEL_RADIUS;
+      const movMaxY = Math.max(this.airY, this.airY + moveY) + WHEEL_RADIUS;
 
-      // Try to snap back to any rail segment if we pass near it
-      const snapRadius = 40;
-      const segmentsToSearch = this.allRailSegments.length > 0 ? this.allRailSegments : [this.rail];
-      let bestSeg: Point[] | null = null;
-      let bestIdx = -1;
-      let bestDist = snapRadius;
-      for (const seg of segmentsToSearch) {
-        if (seg.length < 2) continue;
-        for (let i = 0; i < seg.length; i++) {
-          const p = seg[i];
-          const dx = p.x - this.airX;
-          const dy = p.y - this.airY;
-          const d = Math.sqrt(dx * dx + dy * dy);
-          if (d < bestDist) {
-            bestDist = d;
-            bestSeg = seg;
-            bestIdx = i;
+      for (const bound of this.segmentBounds) {
+        // AABB overlap test (broad-phase)
+        if (bound.maxX < movMinX || bound.minX > movMaxX ||
+            bound.maxY < movMinY || bound.minY > movMaxY) continue;
+        // Skip the exited segment during cooldown
+        if (bound.seg === this.airborneFromSeg && this.airborneTime <= 0.3) continue;
+
+        for (let i = 0; i < bound.seg.length - 1; i++) {
+          const result = this.sweepCircleVsSegment(
+            this.airX, this.airY, moveX, moveY,
+            WHEEL_RADIUS, bound.seg[i], bound.seg[i + 1]
+          );
+          if (result && result.t < earliestT) {
+            earliestT = result.t;
+            hitSeg = bound.seg;
+            hitSegIdx = i;
           }
         }
       }
 
-      if (bestSeg != null && bestIdx >= 0 && bestIdx < bestSeg.length - 1) {
-        const p0 = bestSeg[bestIdx];
-        const p1 = bestSeg[bestIdx + 1];
+      // Apply movement (full or partial up to collision)
+      this.airX += moveX * earliestT;
+      this.airY += moveY * earliestT;
+
+      // Update distance for HUD (approximate)
+      this.distance += vMag * dt * 0.1;
+      this.elapsedTime += dt;
+      this.airborneTime += dt;
+
+      if (hitSeg != null) {
+        // Snap to rail at collision point
+        const p0 = hitSeg[hitSegIdx];
+        const p1 = hitSeg[hitSegIdx + 1];
         const segDx = p1.x - p0.x;
         const segDy = p1.y - p0.y;
         const segLen = Math.sqrt(segDx * segDx + segDy * segDy) || 1;
@@ -313,25 +422,90 @@ export class GameEngine {
         const ty = segDy / segLen;
         const tangentialSpeed = this.airVX * tx + this.airVY * ty;
 
-        this.onRail = true;
-        this.rail = bestSeg;
-        this.pos = bestIdx;
-        this.speed = tangentialSpeed;
-        this.airVX = this.airVY = 0;
+        const relX = this.airX - p0.x;
+        const relY = this.airY - p0.y;
+        const proj = Math.max(0, Math.min(1, (relX * tx + relY * ty) / segLen));
 
-        // Level complete when we snapped onto the end tile (any segment)
+        this.onRail = true;
+        this.rail = hitSeg;
+        this.pos = hitSegIdx + proj;
+        this.directionFlipped = false;
+        this.initDirection(this.pos);
+        this.speed = tangentialSpeed * this.direction;
+        this.airVX = this.airVY = 0;
+        // Seed normal direction from approach side (wheel was above/below rail)
+        this.seedNormalFromApproach(hitSegIdx + proj, this.airX, this.airY);
+        // Pendulum keeps running — just init prevWheel to avoid acceleration spike
+        this.prevWheelVX = this.direction * this.speed * tx;
+        this.prevWheelVY = this.direction * this.speed * ty;
+
         if (this.touchedEndTile() && !this.levelCompleted) {
-          this.pos = this.endPointIndex!;
           this.speed = 0;
           this.levelCompleted = true;
-          this.onLevelComplete?.(this.elapsedTime);
+          this.onLevelComplete?.(this.elapsedTime, this.starsCollected);
+        }
+      } else {
+        // No swept collision — fallback proximity snap for slow approaches
+        const snapRadius = 20;
+        const snapMinX = this.airX - snapRadius;
+        const snapMinY = this.airY - snapRadius;
+        const snapMaxX = this.airX + snapRadius;
+        const snapMaxY = this.airY + snapRadius;
+
+        let bestSeg: Point[] | null = null;
+        let bestIdx = -1;
+        let bestDist = snapRadius;
+        for (const bound of this.segmentBounds) {
+          if (bound.maxX < snapMinX || bound.minX > snapMaxX ||
+              bound.maxY < snapMinY || bound.minY > snapMaxY) continue;
+          if (bound.seg === this.airborneFromSeg && this.airborneTime <= 0.3) continue;
+          for (let i = 0; i < bound.seg.length; i++) {
+            const p = bound.seg[i];
+            const pdx = p.x - this.airX;
+            const pdy = p.y - this.airY;
+            const d = Math.sqrt(pdx * pdx + pdy * pdy);
+            if (d < bestDist) {
+              bestDist = d;
+              bestSeg = bound.seg;
+              bestIdx = i;
+            }
+          }
+        }
+
+        if (bestSeg != null && bestIdx >= 0 && bestIdx < bestSeg.length - 1) {
+          const p0 = bestSeg[bestIdx];
+          const p1 = bestSeg[bestIdx + 1];
+          const segDx = p1.x - p0.x;
+          const segDy = p1.y - p0.y;
+          const segLen = Math.sqrt(segDx * segDx + segDy * segDy) || 1;
+          const tx = segDx / segLen;
+          const ty = segDy / segLen;
+          const tangentialSpeed = this.airVX * tx + this.airVY * ty;
+
+          const relX = this.airX - p0.x;
+          const relY = this.airY - p0.y;
+          const proj = Math.max(0, Math.min(1, (relX * tx + relY * ty) / segLen));
+
+          this.onRail = true;
+          this.rail = bestSeg;
+          this.pos = bestIdx + proj;
+          this.directionFlipped = false;
+          this.initDirection(this.pos);
+          this.speed = tangentialSpeed * this.direction;
+          this.airVX = this.airVY = 0;
+          // Seed normal direction from approach side (wheel was above/below rail)
+          this.seedNormalFromApproach(bestIdx + proj, this.airX, this.airY);
+          // Pendulum keeps running — just init prevWheel to avoid acceleration spike
+          this.prevWheelVX = this.direction * this.speed * tx;
+          this.prevWheelVY = this.direction * this.speed * ty;
+
+          if (this.touchedEndTile() && !this.levelCompleted) {
+            this.speed = 0;
+            this.levelCompleted = true;
+            this.onLevelComplete?.(this.elapsedTime, this.starsCollected);
+          }
         }
       }
-
-      // Camera follows airborne gondola
-      const gondolaWorld = this.getGondolaPos();
-      this.camera.x += (gondolaWorld.x - this.canvas.width * 0.35 - this.camera.x) * 0.08;
-      this.camera.y += (gondolaWorld.y - this.canvas.height * 0.45 - this.camera.y) * 0.06;
 
       // Timers
       if (this.invulnTimer > 0) this.invulnTimer -= dt;
@@ -339,42 +513,63 @@ export class GameEngine {
       if (this.shieldTimer > 0) this.shieldTimer -= dt;
       if (this.flashTimer > 0) this.flashTimer -= dt;
 
-      // No rail generation or obstacle collisions while off-track
+      // Obstacle collisions and star collection while airborne
+      this.checkCollisions();
+      this.checkStarCollection();
+
+      // Update obstacle state machines and animations
+      const octx = this.getGameUpdateContext();
+      for (const obs of this.obstacles) {
+        if (obs.hit) continue;
+        const behavior = OBSTACLE_BEHAVIORS[obs.type];
+        if (behavior) behavior.update(obs, dt, octx);
+      }
+
       this.onUpdate?.(this.distance, this.passengers, Math.abs(this.speed) * 0.1);
       return;
     }
 
+    // Loop wrapping: last point === first point, so cycle length is rail.length - 1
+    if (this.isLoop && this.rail.length > 2) {
+      const cycleLen = this.rail.length - 1;
+      while (this.pos >= cycleLen) this.pos -= cycleLen;
+      while (this.pos < 0) this.pos += cycleLen;
+    }
+
     const i = Math.floor(this.pos);
-    if (i < 0) return;
-    if (i >= this.rail.length - 1) {
-      // Reached or passed the end of this segment. Complete if we touched the end tile (on any segment).
-      if (this.hasFinitePath && this.touchedEndTile() && !this.levelCompleted) {
-        this.pos = this.endPointIndex!;
+    if (i < 0 || i >= this.rail.length - 1) {
+      // Reached or passed the end of this segment. Complete if we touched the end tile.
+      if (i >= this.rail.length - 1 && this.hasFinitePath && this.touchedEndTile() && !this.levelCompleted) {
         this.speed = 0;
         this.levelCompleted = true;
-        this.onLevelComplete?.(this.elapsedTime);
+        this.onLevelComplete?.(this.elapsedTime, this.starsCollected);
         return;
       }
-      // Otherwise ran off the end: launch into airborne mode.
+      // Launch into airborne mode from whichever end was crossed
       if (this.hasFinitePath && this.onRail && !this.levelCompleted && this.rail.length >= 2) {
-        const lastIdx = this.rail.length - 2;
-        const p0 = this.rail[lastIdx];
-        const p1 = this.rail[lastIdx + 1];
+        const atEnd = i >= this.rail.length - 1;
+        const segIdx = atEnd ? this.rail.length - 2 : 0;
+        const p0 = this.rail[segIdx];
+        const p1 = this.rail[segIdx + 1];
         const dx = p1.x - p0.x;
         const dy = p1.y - p0.y;
         const segLen = Math.sqrt(dx * dx + dy * dy) || 1;
-        const dir = this.speed >= 0 ? 1 : -1;
-        const tx = (dx / segLen) * dir;
-        const ty = (dy / segLen) * dir;
+        // Effective speed in index-space (positive = toward end, negative = toward start)
+        const effSpeed = this.direction * this.speed;
+        const launchPoint = atEnd ? p1 : p0;
+
+        // Offset launch point by rail normal so wheel center is continuous
+        const endPos = atEnd ? this.rail.length - 1.001 : 0.001;
+        const { nx: lnx, ny: lny } = this.getRailNormal(endPos);
 
         this.onRail = false;
-        const launchPoint = dir >= 0 ? p1 : p0;
-        this.airX = launchPoint.x;
-        this.airY = launchPoint.y;
-        this.airVX = tx * Math.abs(this.speed);
-        this.airVY = ty * Math.abs(this.speed);
-        this.airRotation = Math.atan2(dy, dx);
-        this.airRotVel = 0;
+        this.airborneTime = 0;
+        this.airborneFromSeg = this.rail;
+        this.airX = launchPoint.x + lnx * WHEEL_RADIUS;
+        this.airY = launchPoint.y + lny * WHEEL_RADIUS;
+        this.airVX = (dx / segLen) * effSpeed;
+        this.airVY = (dy / segLen) * effSpeed;
+        // Pendulum continues running in airborne — no transfer needed
       }
       return;
     }
@@ -392,30 +587,64 @@ export class GameEngine {
     const maxSpeed = (MAX_SPEED_BASE + this.upgrades.motor * 80) * (this.rocketTimer > 0 ? 1.8 : 1);
 
     let throttle = 0;
-    if (this.keys.up) throttle = THROTTLE_BASE * motorMult;
-    if (this.keys.down) throttle = -THROTTLE_BASE * motorMult * 0.7;
+    const goForward = this.directionFlipped ? this.keys.down : this.keys.up;
+    const goBackward = this.directionFlipped ? this.keys.up : this.keys.down;
+    if (goForward) throttle = THROTTLE_BASE * motorMult;
+    if (goBackward) throttle = -THROTTLE_BASE * motorMult;
     if (this.rocketTimer > 0) throttle += THROTTLE_BASE * 1.5;
 
-    const gravity = cfg.gravity * Math.sin(angle) * 0.15;
+    const gravity = this.direction * cfg.gravity * Math.sin(angle) * 0.15;
     const friction = -this.speed * cfg.friction * gripMult;
     const drag = -this.speed * Math.abs(this.speed) * 0.0003;
 
-    this.speed += (throttle + gravity + friction + drag) * dt;
-    this.speed = Math.max(-maxSpeed * 0.4, Math.min(maxSpeed, this.speed));
+    this.speed += (throttle + gravity + friction + drag) * dt / ROLLING_INERTIA_FACTOR;
+    this.speed = Math.max(-maxSpeed, Math.min(maxSpeed, this.speed));
 
-    const dPos = (this.speed * dt) / segLen;
+    const dPos = (this.direction * this.speed * dt) / segLen;
     this.pos += dPos;
-    this.pos = Math.max(0, this.pos);
+    this.wheelAngle += (this.direction * this.speed * dt) / WHEEL_RADIUS;
+    if (this.isLoop && this.rail.length > 2) {
+      const cycleLen = this.rail.length - 1;
+      while (this.pos >= cycleLen) this.pos -= cycleLen;
+      while (this.pos < 0) this.pos += cycleLen;
+    }
+
+    // --- Pendulum physics ---
+    const { tx: rTx, ty: rTy } = this.getRailNormal(this.pos);
+    const wheelVX = this.direction * this.speed * rTx;
+    const wheelVY = this.direction * this.speed * rTy;
+    const wheelAX = (wheelVX - this.prevWheelVX) / dt;
+    const wheelAY = (wheelVY - this.prevWheelVY) / dt;
+
+    // Pendulum equation: θ̈ = -(1/L)*((g - aY)*sin(θ) - aX*cos(θ)) + input - damping
+    const gEff = cfg.gravity * 0.9;
+    let pendAlpha = -(1 / GONDOLA_HANG) * ((gEff - wheelAY) * Math.sin(this.pendulumAngle) - wheelAX * Math.cos(this.pendulumAngle));
+
+    // Player tilt input (on-rail only)
+    if (this.keys.left) pendAlpha -= PENDULUM_PLAYER_TORQUE;
+    if (this.keys.right) pendAlpha += PENDULUM_PLAYER_TORQUE;
+
+    pendAlpha -= PENDULUM_DAMPING * this.pendulumVel;
+
+    this.pendulumVel += pendAlpha * dt;
+    this.pendulumAngle += this.pendulumVel * dt;
+    // No angle clamp — full 360° rotation allowed
+
+    // Reaction force: cabin weight component along rail tangent
+    const pendForceX = PENDULUM_MASS_RATIO * gEff * Math.sin(this.pendulumAngle);
+    this.speed += pendForceX * rTx * dt / ROLLING_INERTIA_FACTOR;
+
+    this.prevWheelVX = wheelVX;
+    this.prevWheelVY = wheelVY;
 
     this.distance += Math.abs(this.speed * dt) * 0.1; // px to meters
     this.elapsedTime += dt;
 
     // Check level completion: touched the end tile (on any segment)
     if (this.hasFinitePath && this.touchedEndTile() && !this.levelCompleted) {
-      this.pos = this.endPointIndex!;
       this.speed = 0;
       this.levelCompleted = true;
-      this.onLevelComplete?.(this.elapsedTime);
+      this.onLevelComplete?.(this.elapsedTime, this.starsCollected);
       return;
     }
 
@@ -432,13 +661,13 @@ export class GameEngine {
 
     // Collision
     this.checkCollisions();
+    this.checkStarCollection();
 
-    // Camera
-    const gondolaWorld = this.getGondolaPos();
-    this.camera.x += (gondolaWorld.x - this.canvas.width * 0.35 - this.camera.x) * 0.08;
-    this.camera.y += (gondolaWorld.y - this.canvas.height * 0.45 - this.camera.y) * 0.06;
+    // Update obstacle state machines and animations
+    this.updateObstacles(dt);
 
     // Callbacks
+    this.ghostRecorder?.onTick(this);
     this.onUpdate?.(this.distance, this.passengers, Math.abs(this.speed) * 0.1);
   }
 
@@ -449,58 +678,271 @@ export class GameEngine {
 
     const i = Math.floor(this.pos);
     const f = this.pos - i;
-    if (i < 0 || i >= this.rail.length - 1) return { x: 0, y: 300 };
+    if (i < 0) return this.rail.length > 0 ? this.rail[0] : { x: 0, y: 300 };
+    if (i >= this.rail.length - 1) return this.rail.length > 0 ? this.rail[this.rail.length - 1] : { x: 0, y: 300 };
     const p0 = this.rail[i];
     const p1 = this.rail[i + 1];
-    return { x: p0.x + (p1.x - p0.x) * f, y: p0.y + (p1.y - p0.y) * f };
+    const rx = p0.x + (p1.x - p0.x) * f;
+    const ry = p0.y + (p1.y - p0.y) * f;
+    // Offset wheel center perpendicular to rail (wheel sits on top of rail)
+    const { nx, ny } = this.getRailNormal(this.pos);
+    return { x: rx + nx * WHEEL_RADIUS, y: ry + ny * WHEEL_RADIUS };
   }
 
-  /** True if the player is on the segment that has the end tile and has reached that point (any segment). */
+  /**
+   * Smoothed upward-pointing normal and tangent at any fractional pos along this.rail.
+   * Uses Phong-style averaging at polyline joints to prevent jitter.
+   */
+  getRailNormal(pos: number): { nx: number; ny: number; tx: number; ty: number } {
+    const rail = this.rail;
+    const len = rail.length;
+    if (len < 2) return { nx: 0, ny: -1, tx: 1, ty: 0 };
+
+    let i = Math.floor(pos);
+    let f = pos - i;
+    if (i < 0) { i = 0; f = 0; }
+    if (i >= len - 1) { i = len - 2; f = 1; }
+
+    // Segment tangent helper (normalized)
+    const segTan = (a: number) => {
+      const dx = rail[a + 1].x - rail[a].x;
+      const dy = rail[a + 1].y - rail[a].y;
+      const l = Math.sqrt(dx * dx + dy * dy) || 1;
+      return { tx: dx / l, ty: dy / l };
+    };
+
+    // Smoothed tangent at a rail point by averaging adjacent segment tangents
+    const smoothTanAt = (idx: number) => {
+      if (idx <= 0) return segTan(0);
+      if (idx >= len - 1) return segTan(len - 2);
+      const prev = segTan(idx - 1);
+      const curr = segTan(idx);
+      const ax = prev.tx + curr.tx;
+      const ay = prev.ty + curr.ty;
+      const al = Math.sqrt(ax * ax + ay * ay) || 1;
+      return { tx: ax / al, ty: ay / al };
+    };
+
+    // Lerp smoothed tangents at endpoints of current segment
+    const t0 = smoothTanAt(i);
+    const t1 = smoothTanAt(i + 1);
+    let tx = t0.tx + (t1.tx - t0.tx) * f;
+    let ty = t0.ty + (t1.ty - t0.ty) * f;
+    const tl = Math.sqrt(tx * tx + ty * ty) || 1;
+    tx /= tl;
+    ty /= tl;
+
+    // Perpendicular — two candidates
+    let nx = -ty;
+    let ny = tx;
+
+    // Use continuity with previous normal to prevent flipping on loops.
+    // If we have a meaningful previous normal, pick the candidate that agrees with it.
+    const dot = nx * this.prevNormalX + ny * this.prevNormalY;
+    if (dot < 0) {
+      // The other perpendicular is closer to previous normal
+      nx = ty;
+      ny = -tx;
+    } else if (dot === 0) {
+      // Ambiguous (perpendicular to previous) — fall back to upward heuristic
+      if (ny > 0) { nx = ty; ny = -tx; }
+    }
+
+    // Update tracked normal
+    this.prevNormalX = nx;
+    this.prevNormalY = ny;
+
+    return { nx, ny, tx, ty };
+  }
+
+  /**
+   * Seed prevNormal based on which side the wheel is approaching from.
+   * This ensures getRailNormal picks the correct side after landing.
+   */
+  seedNormalFromApproach(pos: number, fromX: number, fromY: number) {
+    const rail = this.rail;
+    const len = rail.length;
+    if (len < 2) { this.prevNormalX = 0; this.prevNormalY = -1; return; }
+    let i = Math.floor(pos);
+    let f = pos - i;
+    if (i < 0) { i = 0; f = 0; }
+    if (i >= len - 1) { i = len - 2; f = 1; }
+    const p0 = rail[i];
+    const p1 = rail[i + 1];
+    const rx = p0.x + (p1.x - p0.x) * f;
+    const ry = p0.y + (p1.y - p0.y) * f;
+    // Direction from rail point toward where the wheel came from
+    let dx = fromX - rx;
+    let dy = fromY - ry;
+    const dl = Math.sqrt(dx * dx + dy * dy) || 1;
+    this.prevNormalX = dx / dl;
+    this.prevNormalY = dy / dl;
+  }
+
+  /** Actual world-space cabin center, accounting for pendulum swing or airborne rotation. */
+  getCabinCenter(): Point {
+    const gp = this.getGondolaPos();
+    // Canvas rotate(θ) maps local (0, HANG) to world (-sin(θ)*HANG, cos(θ)*HANG)
+    return {
+      x: gp.x - Math.sin(this.pendulumAngle) * GONDOLA_HANG,
+      y: gp.y + Math.cos(this.pendulumAngle) * GONDOLA_HANG,
+    };
+  }
+
+  /**
+   * Set direction so positive speed moves rightward (increasing X).
+   * Exception: purely vertical rails — positive speed moves upward.
+   */
+  initDirection(_entryPos?: number) {
+    if (this.rail.length < 2) return;
+    const first = this.rail[0];
+    const last = this.rail[this.rail.length - 1];
+
+    // Purely vertical: positive speed moves upward (screen y inverted)
+    if (first.x === last.x) {
+      this.direction = last.y <= first.y ? 1 : -1;
+      return;
+    }
+
+    // Positive speed moves rightward (increasing X)
+    this.direction = last.x > first.x ? 1 : -1;
+  }
+
+  /** Build AABBs for all rail segments (call once after allRailSegments is set). */
+  buildSegmentBounds() {
+    this.segmentBounds = this.allRailSegments.map(seg => {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const p of seg) {
+        if (p.x < minX) minX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y > maxY) maxY = p.y;
+      }
+      return { seg, minX, minY, maxX, maxY };
+    });
+  }
+
+  /**
+   * Swept circle vs line segment collision.
+   * Returns earliest t ∈ [0,1] where a circle of `radius` moving from (cx,cy) by (dx,dy)
+   * first touches the segment A→B, or null if no collision.
+   */
+  sweepCircleVsSegment(
+    cx: number, cy: number,
+    dx: number, dy: number,
+    radius: number,
+    a: Point, b: Point
+  ): { t: number } | null {
+    let bestT: number | null = null;
+    const accept = (t: number) => {
+      if (t >= 0 && t <= 1 && (bestT === null || t < bestT)) bestT = t;
+    };
+
+    const ex = b.x - a.x;
+    const ey = b.y - a.y;
+    const eLenSq = ex * ex + ey * ey;
+    const eLen = Math.sqrt(eLenSq);
+    if (eLen < 0.001) {
+      // Degenerate segment — treat as endpoint circle only
+    } else {
+      // Sub-check 1: ray vs infinite line at distance = radius (linear in t)
+      const fx = cx - a.x;
+      const fy = cy - a.y;
+      const crossFE = fx * ey - fy * ex;
+      const crossDE = dx * ey - dy * ex;
+
+      if (Math.abs(crossDE) > 0.0001) {
+        // Two solutions: cross = +radius*eLen and cross = -radius*eLen
+        const t1 = (radius * eLen - crossFE) / crossDE;
+        const t2 = (-radius * eLen - crossFE) / crossDE;
+        for (const t of [t1, t2]) {
+          if (t >= 0 && t <= 1) {
+            // Check projection s ∈ [0,1]
+            const px = cx + t * dx - a.x;
+            const py = cy + t * dy - a.y;
+            const s = (px * ex + py * ey) / eLenSq;
+            if (s >= 0 && s <= 1) accept(t);
+          }
+        }
+      }
+    }
+
+    // Sub-check 2 & 3: ray vs endpoint circles (quadratic)
+    const endpoints = [a, b];
+    for (const ep of endpoints) {
+      const gx = cx - ep.x;
+      const gy = cy - ep.y;
+      const A = dx * dx + dy * dy;
+      const B = 2 * (gx * dx + gy * dy);
+      const C = gx * gx + gy * gy - radius * radius;
+      const disc = B * B - 4 * A * C;
+      if (disc >= 0 && A > 0) {
+        const sqrtDisc = Math.sqrt(disc);
+        const t1 = (-B - sqrtDisc) / (2 * A);
+        const t2 = (-B + sqrtDisc) / (2 * A);
+        accept(t1);
+        accept(t2);
+      }
+    }
+
+    return bestT !== null ? { t: bestT } : null;
+  }
+
+  /** True if the gondola is within the end tile trigger area (world-space proximity). */
   touchedEndTile(): boolean {
-    if (this.endSegmentIndex == null || this.endPointIndex == null || this.allRailSegments.length === 0) return false;
-    const endSeg = this.allRailSegments[this.endSegmentIndex];
-    if (!endSeg || this.rail !== endSeg) return false;
-    return this.pos >= this.endPointIndex - 0.01;
+    if (!this.endTilePos) return false;
+    const gp = this.onRail ? this.getGondolaPos() : { x: this.airX, y: this.airY };
+    const d = Math.hypot(gp.x - this.endTilePos.x, gp.y - this.endTilePos.y);
+    return d < GameEngine.END_TRIGGER_RADIUS;
+  }
+
+  getGameUpdateContext(): GameUpdateContext {
+    return {
+      getGondolaPos: () => this.getGondolaPos(),
+      getCabinCenter: () => this.getCabinCenter(),
+      gondolaHang: GONDOLA_HANG,
+      hitRadius: HIT_RADIUS,
+      dealDamage: (obs: Obstacle) => this.hitPassenger(obs),
+    };
+  }
+
+  updateObstacles(dt: number) {
+    const ctx = this.getGameUpdateContext();
+    for (const obs of this.obstacles) {
+      if (obs.hit) continue;
+      const behavior = OBSTACLE_BEHAVIORS[obs.type];
+      if (behavior) behavior.update(obs, dt, ctx);
+    }
   }
 
   checkCollisions() {
     if (this.invulnTimer > 0 || this.shieldTimer > 0) return;
-    const gp = this.getGondolaPos();
-    const cx = gp.x;
-    const cy = gp.y + GONDOLA_HANG;
+    const wheel = this.getGondolaPos();
+    const cabin = this.getCabinCenter();
+
+    // Cabin's local X-axis in world space (matches canvas rotate(θ) transform)
+    const ax = Math.cos(this.pendulumAngle);
+    const ay = Math.sin(this.pendulumAngle);
+
+    // Probes along the full gondola shape:
+    // - Cabin: center + left/right edges (half cabin width)
+    // - Cable: midpoint between wheel and cabin
+    const halfW = CABIN_W / 2;
+    const cabinR = CABIN_H / 2;
+    const cableR = 4;
+    const probes: { x: number; y: number; r: number }[] = [
+      { x: cabin.x, y: cabin.y, r: cabinR },
+      { x: cabin.x + ax * halfW, y: cabin.y + ay * halfW, r: cabinR },
+      { x: cabin.x - ax * halfW, y: cabin.y - ay * halfW, r: cabinR },
+      { x: (wheel.x + cabin.x) / 2, y: (wheel.y + cabin.y) / 2, r: cableR },
+    ];
 
     for (const obs of this.obstacles) {
       if (obs.hit) continue;
-      let hitDist: number;
-
-      if (obs.type === 'spinner') {
-        // Check each arm tip
-        for (let a = 0; a < 4; a++) {
-          const armAngle = obs.angle + (a * Math.PI) / 2;
-          const tipX = obs.x + Math.cos(armAngle) * obs.armLength;
-          const tipY = obs.y + Math.sin(armAngle) * obs.armLength;
-          const d = Math.sqrt((cx - tipX) ** 2 + (cy - tipY) ** 2);
-          if (d < HIT_RADIUS + 12) {
-            this.hitPassenger(obs);
-            return;
-          }
-        }
-        // Check center
-        hitDist = Math.sqrt((cx - obs.x) ** 2 + (cy - obs.y) ** 2);
-        if (hitDist < HIT_RADIUS + obs.radius) {
-          this.hitPassenger(obs);
-          return;
-        }
-      } else if (obs.type === 'bouncer') {
-        const by = obs.baseY + Math.sin(obs.angle) * obs.amplitude;
-        hitDist = Math.sqrt((cx - obs.x) ** 2 + (cy - by) ** 2);
-        if (hitDist < HIT_RADIUS + obs.radius) {
-          this.hitPassenger(obs);
-          return;
-        }
-      } else {
-        hitDist = Math.sqrt((cx - obs.x) ** 2 + (cy - obs.y) ** 2);
-        if (hitDist < HIT_RADIUS + obs.radius) {
+      const behavior = OBSTACLE_BEHAVIORS[obs.type];
+      if (!behavior) continue;
+      for (const p of probes) {
+        if (behavior.checkCollision(obs, p.x, p.y, p.r)) {
           this.hitPassenger(obs);
           return;
         }
@@ -508,8 +950,33 @@ export class GameEngine {
     }
   }
 
-  hitPassenger(obs: Obstacle) {
-    obs.hit = true;
+  checkStarCollection() {
+    const wheel = this.getGondolaPos();
+    const cabin = this.getCabinCenter();
+    const ax = Math.cos(this.pendulumAngle);
+    const ay = Math.sin(this.pendulumAngle);
+    const halfW = CABIN_W / 2;
+    const cabinR = CABIN_H / 2;
+    const cableR = 4;
+    const probes = [
+      { x: cabin.x, y: cabin.y, r: cabinR },
+      { x: cabin.x + ax * halfW, y: cabin.y + ay * halfW, r: cabinR },
+      { x: cabin.x - ax * halfW, y: cabin.y - ay * halfW, r: cabinR },
+      { x: (wheel.x + cabin.x) / 2, y: (wheel.y + cabin.y) / 2, r: cableR },
+    ];
+    for (const star of this.collectibleStars) {
+      if (star.collected) continue;
+      for (const p of probes) {
+        if (Math.hypot(p.x - star.x, p.y - star.y) < p.r + 18) {
+          star.collected = true;
+          this.starsCollected++;
+          break;
+        }
+      }
+    }
+  }
+
+  hitPassenger(_obs: Obstacle) {
     this.passengers--;
     this.invulnTimer = INVULN_TIME;
     this.flashTimer = 0.3;
@@ -526,13 +993,20 @@ export class GameEngine {
     const w = canvas.width;
     const h = canvas.height;
     const cfg = WORLD_CONFIG[this.world];
+
+    // Camera tracks interpolated gondola position (per-frame, not per-tick)
+    const gondolaWorld = this.getInterpolatedGondolaPos();
+    const dt = this.frameDt;
+    this.camera.x += (gondolaWorld.x - canvas.width * 0.35 - this.camera.x) * (1 - Math.exp(-5.0 * dt));
+    this.camera.y += (gondolaWorld.y - canvas.height * 0.45 - this.camera.y) * (1 - Math.exp(-3.7 * dt));
+
     const cx = this.camera.x;
     const cy = this.camera.y;
 
     // Sky
     const skyGrad = ctx.createLinearGradient(0, 0, 0, h);
-    skyGrad.addColorStop(0, cfg.skyTop);
-    skyGrad.addColorStop(1, cfg.skyBottom);
+    skyGrad.addColorStop(0, this.skyOverride?.skyTop ?? cfg.skyTop);
+    skyGrad.addColorStop(1, this.skyOverride?.skyBottom ?? cfg.skyBottom);
     ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, w, h);
 
@@ -596,13 +1070,57 @@ export class GameEngine {
       this.renderGround(cx, cy, w, h, cfg);
     }
 
+    // Background decoration tiles
+    const bgKeys = Object.keys(this.bgTiles);
+    if (bgKeys.length > 0) {
+      const gs = this.bgTileSize;
+      for (const key of bgKeys) {
+        const ci = key.indexOf(',');
+        const bgx = +key.slice(0, ci) * gs - cx;
+        const bgy = +key.slice(ci + 1) * gs - cy;
+        if (bgx + gs < 0 || bgx > w || bgy + gs < 0 || bgy > h) continue;
+        const bg = this.bgTiles[key];
+        ctx.fillStyle = bg.color;
+        ctx.fillRect(bgx, bgy, gs, gs);
+        if (bg.outline) {
+          ctx.strokeStyle = bg.outlineColor ?? '#000000';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(bgx + 1, bgy + 1, gs - 2, gs - 2);
+        }
+      }
+    }
+
     // Rail cable
     this.renderRail(cx, cy, w);
 
+    // Explicit start/end tiles for finite/editor levels, if configured
+    if (this.hasFinitePath) {
+      if (this.startTilePos) {
+        spriteManager.drawSpriteOrFallback(
+          ctx,
+          'rail.startTile',
+          this.startTilePos.x - cx,
+          this.startTilePos.y - cy,
+          { hitboxRadius: 20 }
+        );
+      }
+      if (this.endTilePos) {
+        spriteManager.drawSpriteOrFallback(
+          ctx,
+          'rail.endTile',
+          this.endTilePos.x - cx,
+          this.endTilePos.y - cy,
+          { hitboxRadius: 20 }
+        );
+      }
+    }
+
     // Obstacles
     this.renderObstacles(cx, cy);
+    this.renderCollectibleStars(cx, cy);
 
     // Gondola
+    this.renderGhost(cx, cy);
     this.renderGondola(cx, cy);
 
     // HUD
@@ -662,15 +1180,17 @@ export class GameEngine {
     ctx.strokeStyle = '#333';
     ctx.lineWidth = 4;
 
+    // Always render all rail segments, without relying on x-mono visibility
+    // assumptions. This ensures that any rail geometry that lands on screen
+    // is drawn, even for loops or tracks that double back.
     const segmentsToDraw = this.allRailSegments.length > 0 ? this.allRailSegments : [this.rail];
     for (const seg of segmentsToDraw) {
       if (seg.length < 2) continue;
-      const [startIdx, endIdx] = this.findVisibleRangeForRail(seg, cx, w);
       ctx.beginPath();
-      for (let i = startIdx; i <= endIdx; i++) {
+      for (let i = 0; i < seg.length; i++) {
         const sx = seg[i].x - cx;
         const sy = seg[i].y - cy;
-        if (i === startIdx) ctx.moveTo(sx, sy);
+        if (i === 0) ctx.moveTo(sx, sy);
         else ctx.lineTo(sx, sy);
       }
       ctx.stroke();
@@ -713,156 +1233,199 @@ export class GameEngine {
       );
 
       if (usedSprite) {
-        // Sprite handled; continue to next obstacle.
-        if (obs.type === 'spinner') {
-          // Still update angle for next frame even if sprite-drawn.
-          obs.angle += obs.rotSpeed * 0.016;
-        } else if (obs.type === 'bouncer') {
-          obs.angle += obs.bounceSpeed * 0.016;
-        }
         continue;
       }
 
-      if (obs.type === 'spinner') {
-        // Update angle
-        obs.angle += obs.rotSpeed * 0.016;
-        const sx = screenX;
-        const sy = obs.y - cy;
+      const behavior = OBSTACLE_BEHAVIORS[obs.type];
+      if (behavior) {
+        behavior.render(obs, ctx, screenX, obs.y - cy, now);
+      }
+    }
+  }
 
-        // Pole
-        ctx.strokeStyle = '#666';
-        ctx.lineWidth = 4;
-        const groundY = obs.y + 60 - cy;
+  renderCollectibleStars(cx: number, cy: number) {
+    const { ctx } = this;
+    const now = performance.now() / 1000;
+    for (const star of this.collectibleStars) {
+      if (star.collected) continue;
+      const sx = star.x - cx;
+      if (sx < -60 || sx > this.canvas.width + 60) continue;
+      const sy = star.y - cy;
+
+      // Gentle pulse
+      const pulse = 1 + Math.sin(now * 3) * 0.08;
+      const r = 18 * pulse;
+
+      // Draw 5-pointed star
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate(Math.sin(now * 0.7) * 0.15);
+      ctx.beginPath();
+      for (let i = 0; i < 5; i++) {
+        const angle = -Math.PI / 2 + (i * 2 * Math.PI) / 5;
+        const innerAngle = angle + Math.PI / 5;
+        ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
+        ctx.lineTo(Math.cos(innerAngle) * r * 0.4, Math.sin(innerAngle) * r * 0.4);
+      }
+      ctx.closePath();
+      ctx.fillStyle = '#FFD700';
+      ctx.fill();
+      ctx.strokeStyle = '#DAA520';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Glow
+      ctx.shadowColor = '#FFD700';
+      ctx.shadowBlur = 12 * pulse;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.restore();
+    }
+  }
+
+
+  getInterpolatedGondolaPos(): Point {
+    const current = this.getGondolaPos();
+    const alpha = this.interpolationAlpha;
+    return {
+      x: this.prevGondolaX + (current.x - this.prevGondolaX) * alpha,
+      y: this.prevGondolaY + (current.y - this.prevGondolaY) * alpha,
+    };
+  }
+
+  renderGhost(cx: number, cy: number) {
+    const gp = this.ghostPlayer;
+    if (!gp) return;
+
+    const frame = gp.getFrame(this.elapsedTime);
+    const { ctx } = this;
+
+    if (frame) {
+      const sx = frame.x - cx;
+      const sy = frame.y - cy;
+
+      ctx.save();
+      ctx.globalAlpha = 0.35;
+
+      // Wheel
+      ctx.fillStyle = '#888';
+      ctx.beginPath();
+      ctx.arc(sx, sy, WHEEL_RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Spokes
+      ctx.strokeStyle = '#aaa';
+      ctx.lineWidth = 1.5;
+      for (let s = 0; s < 3; s++) {
+        const a = frame.wa + (s * Math.PI * 2) / 3;
         ctx.beginPath();
         ctx.moveTo(sx, sy);
-        ctx.lineTo(sx, groundY);
-        ctx.stroke();
-
-        // Arms (yellow-black striped)
-        for (let a = 0; a < 4; a++) {
-          const armAngle = obs.angle + (a * Math.PI) / 2;
-          const tipX = sx + Math.cos(armAngle) * obs.armLength;
-          const tipY = sy + Math.sin(armAngle) * obs.armLength;
-
-          ctx.strokeStyle = a % 2 === 0 ? '#FFD700' : '#333';
-          ctx.lineWidth = 8;
-          ctx.lineCap = 'round';
-          ctx.beginPath();
-          ctx.moveTo(sx, sy);
-          ctx.lineTo(tipX, tipY);
-          ctx.stroke();
-
-          // Tip ball
-          ctx.fillStyle = a % 2 === 0 ? '#333' : '#FFD700';
-          ctx.beginPath();
-          ctx.arc(tipX, tipY, 6, 0, Math.PI * 2);
-          ctx.fill();
-        }
-
-        // Center
-        ctx.fillStyle = '#888';
-        ctx.beginPath();
-        ctx.arc(sx, sy, obs.radius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#555';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-      } else if (obs.type === 'bouncer') {
-        obs.angle += obs.bounceSpeed * 0.016;
-        const by = obs.baseY + Math.sin(obs.angle) * obs.amplitude;
-        const sx = screenX;
-        const sy = by - cy;
-
-        // Spring below
-        ctx.strokeStyle = '#FFD700';
-        ctx.lineWidth = 3;
-        const springBottom = obs.baseY + obs.amplitude + 30 - cy;
-        for (let s = 0; s < 6; s++) {
-          const t = s / 6;
-          const zy = sy + (springBottom - sy) * t;
-          const zx = sx + Math.sin(t * Math.PI * 4) * 10;
-          if (s === 0) { ctx.beginPath(); ctx.moveTo(sx, sy + obs.radius); }
-          ctx.lineTo(zx, zy);
-        }
-        ctx.stroke();
-
-        // Ball
-        ctx.fillStyle = '#E53935';
-        ctx.beginPath();
-        ctx.arc(sx, sy, obs.radius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#B71C1C';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        // Spikes
-        for (let s = 0; s < 8; s++) {
-          const sa = (s / 8) * Math.PI * 2;
-          ctx.fillStyle = '#B71C1C';
-          ctx.beginPath();
-          ctx.moveTo(
-            sx + Math.cos(sa) * obs.radius,
-            sy + Math.sin(sa) * obs.radius
-          );
-          ctx.lineTo(
-            sx + Math.cos(sa + 0.15) * (obs.radius + 8),
-            sy + Math.sin(sa + 0.15) * (obs.radius + 8)
-          );
-          ctx.lineTo(
-            sx + Math.cos(sa - 0.15) * (obs.radius + 8),
-            sy + Math.sin(sa - 0.15) * (obs.radius + 8)
-          );
-          ctx.closePath();
-          ctx.fill();
-        }
-
-      } else {
-        // Static - rock
-        const sx = screenX;
-        const sy = obs.y - cy;
-        ctx.fillStyle = '#777';
-        ctx.beginPath();
-        ctx.arc(sx, sy, obs.radius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#666';
-        ctx.beginPath();
-        ctx.arc(sx - 3, sy - 3, obs.radius * 0.7, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#555';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(sx, sy, obs.radius, 0, Math.PI * 2);
+        ctx.lineTo(sx + Math.cos(a) * (WHEEL_RADIUS - 1), sy + Math.sin(a) * (WHEEL_RADIUS - 1));
         ctx.stroke();
       }
+
+      // Cable + cabin in rotated frame
+      ctx.translate(sx, sy);
+      ctx.rotate(frame.pa);
+
+      ctx.strokeStyle = '#888';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, WHEEL_RADIUS);
+      ctx.lineTo(0, GONDOLA_HANG - CABIN_H / 2);
+      ctx.stroke();
+
+      ctx.translate(0, GONDOLA_HANG);
+      ctx.fillStyle = '#888';
+      ctx.fillRect(-CABIN_W / 2, -CABIN_H / 2, CABIN_W, CABIN_H);
+
+      // Shield indicator
+      if (frame.flags & 1) {
+        ctx.strokeStyle = 'rgba(100, 200, 255, 0.5)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(0, 0, CABIN_W / 2 + 6, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    } else if (gp.lastFrame && gp.finishedAge < 2) {
+      // Ghost finished — show checkered flag indicator for 2s
+      gp.finishedAge += this.FIXED_DT;
+      const lf = gp.lastFrame;
+      const sx = lf.x - cx;
+      const sy = lf.y - cy;
+      const alpha = Math.max(0, 0.6 * (1 - gp.finishedAge / 2));
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.font = 'bold 14px monospace';
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.fillText('🏁 Ghost finished!', sx, sy - 30);
+      ctx.restore();
     }
   }
 
   renderGondola(cx: number, cy: number) {
     const { ctx } = this;
-    const gp = this.getGondolaPos();
+    const gp = this.getInterpolatedGondolaPos();
     const sx = gp.x - cx;
     const sy = gp.y - cy;
 
     // Flash effect when hit
     if (this.invulnTimer > 0 && Math.floor(this.invulnTimer * 8) % 2 === 0) return;
 
-    // Apply rotation around gondola center when airborne
-    ctx.save();
-    const pivotX = sx;
-    const pivotY = sy + GONDOLA_HANG;
-    if (this.hasFinitePath && !this.onRail) {
-      ctx.translate(pivotX, pivotY);
-      ctx.rotate(this.airRotation);
-      ctx.translate(-pivotX, -pivotY);
+    if (this.debugHitbox) {
+      this.renderGondolaDebug(cx, cy, sx, sy);
+      return;
     }
+
+    // Wheel on rail — rotating with spokes
+    ctx.fillStyle = '#555';
+    ctx.beginPath();
+    ctx.arc(sx, sy, WHEEL_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+    // 3 spokes at 120° intervals
+    ctx.strokeStyle = '#888';
+    ctx.lineWidth = 1.5;
+    for (let s = 0; s < 3; s++) {
+      const a = this.wheelAngle + (s * Math.PI * 2) / 3;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(sx + Math.cos(a) * (WHEEL_RADIUS - 1), sy + Math.sin(a) * (WHEEL_RADIUS - 1));
+      ctx.stroke();
+    }
+    // Hub
+    ctx.fillStyle = '#AAA';
+    ctx.beginPath();
+    ctx.arc(sx, sy, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    const swing = this.pendulumAngle;
+
+    // Rotate everything (cable + cabin) around the wheel pivot
+    ctx.save();
+    ctx.translate(sx, sy);
+    ctx.rotate(swing);
+
+    // Cable from wheel to cabin (straight down in rotated frame)
+    ctx.strokeStyle = '#444';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, WHEEL_RADIUS);
+    ctx.lineTo(0, GONDOLA_HANG - CABIN_H / 2);
+    ctx.stroke();
+
+    // Cabin center is straight down from wheel in the rotated frame
+    ctx.translate(0, GONDOLA_HANG);
 
     // Shield glow
     if (this.shieldTimer > 0) {
       ctx.strokeStyle = 'rgba(100, 200, 255, 0.6)';
       ctx.lineWidth = 4;
       ctx.beginPath();
-      ctx.arc(sx, sy + GONDOLA_HANG, HIT_RADIUS + 15, 0, Math.PI * 2);
+      ctx.arc(0, 0, HIT_RADIUS + 15, 0, Math.PI * 2);
       ctx.stroke();
     }
 
@@ -871,41 +1434,23 @@ export class GameEngine {
       ctx.fillStyle = '#FF6600';
       ctx.beginPath();
       const flameLen = 15 + Math.random() * 15;
-      ctx.moveTo(sx - CABIN_W / 2, sy + GONDOLA_HANG);
-      ctx.lineTo(sx - CABIN_W / 2 - flameLen, sy + GONDOLA_HANG + 5);
-      ctx.lineTo(sx - CABIN_W / 2, sy + GONDOLA_HANG + 10);
+      ctx.moveTo(-CABIN_W / 2, 0);
+      ctx.lineTo(-CABIN_W / 2 - flameLen, 5);
+      ctx.lineTo(-CABIN_W / 2, 10);
       ctx.closePath();
       ctx.fill();
       ctx.fillStyle = '#FFCC00';
       ctx.beginPath();
-      ctx.moveTo(sx - CABIN_W / 2, sy + GONDOLA_HANG + 2);
-      ctx.lineTo(sx - CABIN_W / 2 - flameLen * 0.6, sy + GONDOLA_HANG + 5);
-      ctx.lineTo(sx - CABIN_W / 2, sy + GONDOLA_HANG + 8);
+      ctx.moveTo(-CABIN_W / 2, 2);
+      ctx.lineTo(-CABIN_W / 2 - flameLen * 0.6, 5);
+      ctx.lineTo(-CABIN_W / 2, 8);
       ctx.closePath();
       ctx.fill();
     }
 
-    // Wheel on rail
-    ctx.fillStyle = '#555';
-    ctx.beginPath();
-    ctx.arc(sx, sy, 7, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#888';
-    ctx.beginPath();
-    ctx.arc(sx, sy, 4, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Cable to cabin
-    ctx.strokeStyle = '#444';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(sx, sy + 7);
-    ctx.lineTo(sx, sy + GONDOLA_HANG - CABIN_H / 2);
-    ctx.stroke();
-
-    // Cabin body
-    const cabX = sx - CABIN_W / 2;
-    const cabY = sy + GONDOLA_HANG - CABIN_H / 2;
+    // Cabin body (drawn centered at 0,0 = cabin center)
+    const cabX = -CABIN_W / 2;
+    const cabY = -CABIN_H / 2;
 
     // Main body
     ctx.fillStyle = '#E53935';
@@ -952,6 +1497,68 @@ export class GameEngine {
       ctx.arc(px + 2.5, py - 1, 0.8, 0, Math.PI * 2);
       ctx.fill();
     }
+
+    ctx.restore(); // cabin rotation
+  }
+
+  renderGondolaDebug(cx: number, cy: number, sx: number, sy: number) {
+    const { ctx } = this;
+    const cabin = this.getCabinCenter();
+    const cabSX = cabin.x - cx;
+    const cabSY = cabin.y - cy;
+
+    const ax = Math.cos(this.pendulumAngle);
+    const ay = Math.sin(this.pendulumAngle);
+    const halfW = CABIN_W / 2;
+    const cabinR = CABIN_H / 2;
+    const cableR = 4;
+
+    const probes = [
+      { x: cabSX, y: cabSY, r: cabinR, color: 'rgba(0, 255, 0, 0.4)', label: 'center' },
+      { x: cabSX + ax * halfW, y: cabSY + ay * halfW, r: cabinR, color: 'rgba(255, 255, 0, 0.4)', label: 'left' },
+      { x: cabSX - ax * halfW, y: cabSY - ay * halfW, r: cabinR, color: 'rgba(255, 165, 0, 0.4)', label: 'right' },
+      { x: (sx + cabSX) / 2, y: (sy + cabSY) / 2, r: cableR, color: 'rgba(0, 200, 255, 0.5)', label: 'cable' },
+    ];
+
+    // Draw cable line
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(cabSX, cabSY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Draw wheel point
+    ctx.fillStyle = 'rgba(255, 0, 255, 0.6)';
+    ctx.beginPath();
+    ctx.arc(sx, sy, WHEEL_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#FF00FF';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Draw each probe
+    for (const p of probes) {
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = p.color.replace('0.4', '1').replace('0.5', '1');
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+
+    // Draw cabin rect outline to show orientation
+    ctx.save();
+    ctx.translate(cabSX, cabSY);
+    ctx.rotate(this.pendulumAngle);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.strokeRect(-CABIN_W / 2, -CABIN_H / 2, CABIN_W, CABIN_H);
+    ctx.setLineDash([]);
     ctx.restore();
   }
 
@@ -973,14 +1580,52 @@ export class GameEngine {
   renderHUD(w: number, h: number) {
     const { ctx } = this;
 
-    // Distance
+    // Distance + PB/Ghost times
+    const distText = `📏 ${Math.floor(this.distance)}m`;
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    const distTextW = ctx.measureText(distText).width + 20; // 10px padding each side
+
+    let timeBadges: { label: string; color: string }[] = [];
+    if (this.personalBestTime != null) {
+      timeBadges.push({ label: `🏆 ${formatTime(this.personalBestTime)}`, color: '#FFD54F' });
+    }
+    if (this.ghostTime != null) {
+      timeBadges.push({ label: `👻 ${formatTime(this.ghostTime)}`, color: '#90CAF9' });
+    }
+
+    // Measure badge widths
+    ctx.font = 'bold 14px system-ui, sans-serif';
+    const badgeMetrics = timeBadges.map(b => ({
+      ...b,
+      w: ctx.measureText(b.label).width + 16, // 8px padding each side
+    }));
+    const badgeTotalW = badgeMetrics.reduce((s, b) => s + b.w + 6, 0); // 6px gap
+
+    const panelW = Math.max(180, distTextW + badgeTotalW + 10);
+    const hasBadges = badgeMetrics.length > 0;
+    const panelH = hasBadges ? 54 : 36;
+
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    this.roundRect(10, 10, 180, 36, 6);
+    this.roundRect(10, 10, panelW, panelH, 6);
     ctx.fill();
+
     ctx.fillStyle = '#FFF';
     ctx.font = 'bold 18px system-ui, sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText(`📏 ${Math.floor(this.distance)}m`, 20, 34);
+    ctx.fillText(distText, 20, 34);
+
+    // PB and ghost time badges to the right of distance
+    let badgeX = 20 + distTextW + 4;
+    for (const badge of badgeMetrics) {
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      this.roundRect(badgeX, 16, badge.w, 24, 4);
+      ctx.fill();
+      ctx.fillStyle = badge.color;
+      ctx.font = 'bold 14px system-ui, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(badge.label, badgeX + 8, 33);
+      badgeX += badge.w + 6;
+    }
 
     // Speed + timer panel (top-right)
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
@@ -1000,11 +1645,12 @@ export class GameEngine {
     ctx.fillText(`⏱ ${timeLabel}`, w - 20, 50);
 
     // Passengers
+    const passengersY = 10 + panelH + 16;
     ctx.textAlign = 'left';
     for (let p = 0; p < 3 + this.upgrades.health; p++) {
       ctx.fillStyle = p < this.passengers ? '#E53935' : 'rgba(255,255,255,0.2)';
       ctx.font = '22px system-ui';
-      ctx.fillText('❤️', 15 + p * 28, 72);
+      ctx.fillText('❤️', 15 + p * 28, passengersY);
     }
 
     // Throttle/Brake bar
@@ -1016,19 +1662,6 @@ export class GameEngine {
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
     this.roundRect(barX - 80, barY - 2, barW + 160, barH + 4, 8);
     ctx.fill();
-
-    // Labels (highlight when key is actively pressed)
-    const throttleActive = this.keys.up;
-    const brakeActive = this.keys.down;
-
-    ctx.font = 'bold 13px system-ui';
-    ctx.textAlign = 'right';
-    ctx.fillStyle = throttleActive ? '#A5D6A7' : '#4CAF50';
-    ctx.fillText('THROTTLE ▶', barX - 8, barY + 20);
-
-    ctx.textAlign = 'left';
-    ctx.fillStyle = brakeActive ? '#FFCDD2' : '#E53935';
-    ctx.fillText('◀ BRAKE', barX + barW + 8, barY + 20);
 
     // Bar background
     ctx.fillStyle = '#333';

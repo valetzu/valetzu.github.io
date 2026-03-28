@@ -126,3 +126,22 @@ All colors MUST be HSL.
 .border-game-card-border { border-color: var(--game-card-border); }
 .border-game-accent { border-color: var(--game-accent); }
 .bg-game-bar-bg { background-color: var(--game-bar-bg); }
+
+/* Range input thumb styling for settings sliders */
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--game-accent);
+  cursor: pointer;
+  border: 2px solid var(--game-bg);
+}
+input[type='range']::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--game-accent);
+  cursor: pointer;
+  border: 2px solid var(--game-bg);
+}

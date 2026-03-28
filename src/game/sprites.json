@@ -22,7 +22,7 @@
       "sprite": "obstacles/bouncer.png",
       "anchor": { "x": 0.5, "y": 0.5 },
       "hitboxScale": 0.95,
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "obstacle.staticRock",
@@ -37,6 +37,20 @@
       "sprite": "rail/segment.png",
       "anchor": { "x": 0.5, "y": 0.5 },
       "enabled": false
+    },
+    {
+      "id": "rail.startTile",
+      "category": "rail",
+      "sprite": "rail/startTile.png",
+      "anchor": { "x": 0.5, "y": 0.5 },
+      "enabled": true
+    },
+    {
+      "id": "rail.endTile",
+      "category": "rail",
+      "sprite": "rail/endTile.jpg",
+      "anchor": { "x": 0.5, "y": 0.5 },
+      "enabled": true
     },
     {
       "id": "background.mountain",
@@ -54,4 +68,3 @@
     }
   ]
 }
-

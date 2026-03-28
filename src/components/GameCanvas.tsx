@@ -1,6 +1,8 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { GameEngine } from '@/game/engine';
 import { WorldType, Upgrades } from '@/game/types';
+import { musicManager } from '@/game/musicManager';
+import PauseMenu from './PauseMenu';
 
 interface GameCanvasProps {
   world: WorldType;
@@ -13,11 +15,23 @@ export default function GameCanvas({ world, upgrades, onGameOver, onBack }: Game
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
   const gameOverRef = useRef(false);
+  const [paused, setPaused] = useState(false);
 
   const handleGameOver = useCallback((distance: number, cash: number) => {
     gameOverRef.current = true;
     onGameOver(distance, cash);
   }, [onGameOver]);
+
+  const handleResume = useCallback(() => {
+    setPaused(false);
+    engineRef.current?.resume();
+  }, []);
+
+  const handleQuit = useCallback(() => {
+    engineRef.current?.stop();
+    musicManager.stop();
+    onBack();
+  }, [onBack]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -30,34 +44,53 @@ export default function GameCanvas({ world, upgrades, onGameOver, onBack }: Game
     resize();
     window.addEventListener('resize', resize);
 
+    musicManager.playForWorld(world);
+
     const engine = new GameEngine(canvas, world, upgrades, {
       onGameOver: handleGameOver,
     });
     engineRef.current = engine;
     engine.start();
 
-    const handleEnter = (e: KeyboardEvent) => {
+    const handleKey = (e: KeyboardEvent) => {
       if (e.code === 'Enter' && gameOverRef.current) {
         onBack();
+        return;
       }
       if (e.code === 'Escape') {
-        onBack();
+        if (gameOverRef.current) {
+          onBack();
+          return;
+        }
+        setPaused(prev => {
+          const next = !prev;
+          if (next) {
+            engineRef.current?.pause();
+          } else {
+            engineRef.current?.resume();
+          }
+          return next;
+        });
       }
     };
-    window.addEventListener('keydown', handleEnter);
+    window.addEventListener('keydown', handleKey);
 
     return () => {
       engine.stop();
+      musicManager.stop();
       window.removeEventListener('resize', resize);
-      window.removeEventListener('keydown', handleEnter);
+      window.removeEventListener('keydown', handleKey);
     };
   }, [world, upgrades, handleGameOver, onBack]);
 
   return (
-    <canvas
-      ref={canvasRef}
-      className="fixed inset-0 w-full h-full"
-      style={{ cursor: 'none' }}
-    />
+    <>
+      <canvas
+        ref={canvasRef}
+        className="fixed inset-0 w-full h-full"
+        style={{ cursor: 'none' }}
+      />
+      {paused && <PauseMenu onResume={handleResume} onQuit={handleQuit} />}
+    </>
   );
 }

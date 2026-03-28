@@ -2,20 +2,25 @@ import { useState } from 'react';
 import {
   WorldType, SaveData, Upgrades, WORLD_CONFIG,
   UPGRADE_COSTS, UPGRADE_MAX, UPGRADE_LABELS, UPGRADE_DESC,
-  saveSave,
+  saveSave, getRecords, formatTime,
 } from '@/game/types';
+import { loadCustomLevels, type EditorLevel } from '@/game/editorTypes';
+import { getReplaysForLevel } from '@/game/replay';
 
 interface GameMenuProps {
   save: SaveData;
   onStartGame: (world: WorldType) => void;
   onUpdateSave: (save: SaveData) => void;
   onOpenEditor: () => void;
+  onOpenSettings: () => void;
+  onPlayCustomLevel?: (level: EditorLevel, raceGhost: boolean) => void;
 }
 
-type MenuView = 'main' | 'shop';
+type MenuView = 'main' | 'shop' | 'play';
 
-export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor }: GameMenuProps) {
+export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor, onOpenSettings, onPlayCustomLevel }: GameMenuProps) {
   const [view, setView] = useState<MenuView>('main');
+  const [leaderboardLevelId, setLeaderboardLevelId] = useState<string | null>(null);
 
   const buyUpgrade = (key: keyof Upgrades) => {
     const level = save.upgrades[key];
@@ -96,6 +101,103 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
     );
   }
 
+  if (view === 'play') {
+    const levels = loadCustomLevels();
+
+    return (
+      <div className="fixed inset-0 flex items-center justify-center bg-game-bg">
+        <div className="w-full max-w-lg p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-3xl font-black text-game-title">CUSTOM LEVELS</h2>
+          </div>
+
+          {levels.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-game-subtitle text-lg mb-2">No custom levels yet</p>
+              <p className="text-game-subtitle text-sm">Create levels in the Editor!</p>
+            </div>
+          ) : (
+            <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+              {levels.map((level) => {
+                const levelId = level.id || level.name;
+                const records = getRecords(levelId);
+                const replays = getReplaysForLevel(levelId);
+                const bestTime = records.length > 0 ? records[0].time : null;
+
+                return (
+                  <div
+                    key={levelId}
+                    className="p-4 rounded-xl bg-game-card border-2 border-game-card-border"
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <div className="font-bold text-game-title text-lg">{level.name}</div>
+                        {bestTime !== null && (
+                          <div className="text-sm text-game-cash">
+                            🏆 Best: {formatTime(bestTime)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => onPlayCustomLevel?.(level, false)}
+                        className="flex-1 py-2 rounded-lg bg-green-600 text-white font-bold text-sm hover:bg-green-500 active:scale-95 transition-all"
+                      >
+                        ▶ Play
+                      </button>
+                      {replays.length > 0 && (
+                        <button
+                          onClick={() => onPlayCustomLevel?.(level, true)}
+                          className="flex-1 py-2 rounded-lg bg-blue-600 text-white font-bold text-sm hover:bg-blue-500 active:scale-95 transition-all"
+                        >
+                          👻 Race Ghost
+                        </button>
+                      )}
+                      {records.length > 0 && (
+                        <button
+                          onClick={() => setLeaderboardLevelId(
+                            leaderboardLevelId === levelId ? null : levelId
+                          )}
+                          className="py-2 px-3 rounded-lg bg-game-bar-bg text-game-title font-bold text-sm border-2 border-game-card-border hover:border-game-accent active:scale-95 transition-all"
+                        >
+                          📊
+                        </button>
+                      )}
+                    </div>
+                    {leaderboardLevelId === levelId && records.length > 0 && (
+                      <div className="mt-3 bg-game-bg rounded-xl p-3">
+                        <p className="text-game-subtitle text-xs mb-2 text-center font-bold">
+                          Top Times
+                        </p>
+                        {records.map((r, i) => (
+                          <div
+                            key={i}
+                            className="flex justify-between text-sm py-0.5 text-game-subtitle"
+                          >
+                            <span>#{i + 1}</span>
+                            <span>{formatTime(r.time)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <button
+            onClick={() => { setView('main'); setLeaderboardLevelId(null); }}
+            className="mt-6 w-full py-3 rounded-xl bg-game-card border-2 border-game-card-border text-game-title font-bold text-lg hover:brightness-110 active:scale-[0.98] transition-all"
+          >
+            ← Back
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 flex flex-col items-center justify-center bg-game-bg">
       <h1 className="text-6xl font-black text-game-title mb-2 tracking-tight drop-shadow-lg">
@@ -127,6 +229,15 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
         })}
       </div>
 
+      <div className="flex gap-3 w-full max-w-md mb-3">
+        <button
+          onClick={() => setView('play')}
+          className="flex-1 py-4 rounded-xl bg-green-600 text-white font-bold text-xl hover:bg-green-500 active:scale-[0.98] transition-all"
+        >
+          ▶ Play
+        </button>
+      </div>
+
       <div className="flex gap-3 w-full max-w-md">
         <button
           onClick={() => setView('shop')}
@@ -139,6 +250,13 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
           className="flex-1 py-4 rounded-xl bg-game-bar-bg text-game-title font-bold text-xl border-2 border-game-card-border hover:border-game-accent active:scale-[0.98] transition-all"
         >
           🗺️ Editor
+        </button>
+        <button
+          onClick={onOpenSettings}
+          className="py-4 px-5 rounded-xl bg-game-bar-bg text-game-title font-bold text-xl border-2 border-game-card-border hover:border-game-accent active:scale-[0.98] transition-all"
+          title="Settings"
+        >
+          ⚙
         </button>
       </div>
 

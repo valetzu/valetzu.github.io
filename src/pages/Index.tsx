@@ -1,15 +1,22 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { WorldType, SaveData, loadSave, saveSave } from '@/game/types';
+import { musicManager } from '@/game/musicManager';
 import GameCanvas from '@/components/GameCanvas';
 import GameMenu from '@/components/GameMenu';
 import LevelEditor from '@/components/LevelEditor';
+import CustomLevelPlayer from '@/components/CustomLevelPlayer';
+import SettingsMenu from '@/components/SettingsMenu';
+import type { EditorLevel } from '@/game/editorTypes';
 
-type Phase = 'menu' | 'playing' | 'editor';
+type Phase = 'menu' | 'playing' | 'editor' | 'customPlay';
 
 const Index = () => {
   const [phase, setPhase] = useState<Phase>('menu');
   const [save, setSave] = useState<SaveData>(loadSave);
   const [world, setWorld] = useState<WorldType>('overworld');
+  const [showSettings, setShowSettings] = useState(false);
+  const [customLevel, setCustomLevel] = useState<EditorLevel | null>(null);
+  const [raceGhost, setRaceGhost] = useState(false);
 
   const startGame = useCallback((w: WorldType) => {
     setWorld(w);
@@ -35,6 +42,12 @@ const Index = () => {
     setPhase('menu');
   }, []);
 
+  useEffect(() => {
+    if (phase === 'menu') {
+      musicManager.playForMenu();
+    }
+  }, [phase]);
+
   if (phase === 'playing') {
     return (
       <GameCanvas
@@ -50,7 +63,33 @@ const Index = () => {
     return <LevelEditor onBack={backToMenu} />;
   }
 
-  return <GameMenu save={save} onStartGame={startGame} onUpdateSave={setSave} onOpenEditor={() => setPhase('editor')} />;
+  if (phase === 'customPlay' && customLevel) {
+    return (
+      <CustomLevelPlayer
+        level={customLevel}
+        raceGhost={raceGhost}
+        onBack={backToMenu}
+      />
+    );
+  }
+
+  return (
+    <>
+      <GameMenu
+        save={save}
+        onStartGame={startGame}
+        onUpdateSave={setSave}
+        onOpenEditor={() => setPhase('editor')}
+        onOpenSettings={() => setShowSettings(true)}
+        onPlayCustomLevel={(level, ghost) => {
+          setCustomLevel(level);
+          setRaceGhost(ghost);
+          setPhase('customPlay');
+        }}
+      />
+      {showSettings && <SettingsMenu onClose={() => setShowSettings(false)} />}
+    </>
+  );
 };
 
 export default Index;
