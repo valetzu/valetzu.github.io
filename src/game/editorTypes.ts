@@ -169,6 +169,7 @@ export interface EditorLevel {
   /** Level data version — 2 = legacy (tiles+connections), 3 = unified segments. */
   version?: number;
   createdAt: number;
+  updatedAt?: number;
   /** Music filename relative to public/assets/music/customLevels/{id}/ */
   musicFile?: string;
   /** Sky gradient theme — defaults to 'day' when absent. */
@@ -562,9 +563,10 @@ export function smoothDrawnRail(
 
 export function saveCustomLevel(level: EditorLevel) {
   const levels = loadCustomLevels();
+  const stamped = { ...level, updatedAt: Date.now() };
   const idx = levels.findIndex((l) => l.name === level.name);
-  if (idx >= 0) levels[idx] = level;
-  else levels.push(level);
+  if (idx >= 0) levels[idx] = stamped;
+  else levels.push(stamped);
   localStorage.setItem("cable-riders-custom-levels", JSON.stringify(levels));
 }
 

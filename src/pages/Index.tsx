@@ -16,6 +16,7 @@ const Index = () => {
   const [world, setWorld] = useState<WorldType>('overworld');
   const [showSettings, setShowSettings] = useState(false);
   const [customLevel, setCustomLevel] = useState<EditorLevel | null>(null);
+  const [editLevel, setEditLevel] = useState<EditorLevel | null>(null);
   const [raceGhost, setRaceGhost] = useState(false);
 
   const startGame = useCallback((w: WorldType) => {
@@ -60,7 +61,7 @@ const Index = () => {
   }
 
   if (phase === 'editor') {
-    return <LevelEditor onBack={backToMenu} />;
+    return <LevelEditor onBack={backToMenu} initialLevel={editLevel ?? undefined} />;
   }
 
   if (phase === 'customPlay' && customLevel) {
@@ -79,7 +80,7 @@ const Index = () => {
         save={save}
         onStartGame={startGame}
         onUpdateSave={setSave}
-        onOpenEditor={() => setPhase('editor')}
+        onOpenEditor={(level) => { setEditLevel(level ?? null); setPhase('editor'); }}
         onOpenSettings={() => setShowSettings(true)}
         onPlayCustomLevel={(level, ghost) => {
           setCustomLevel(level);

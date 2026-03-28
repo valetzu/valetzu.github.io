@@ -11,12 +11,12 @@ interface GameMenuProps {
   save: SaveData;
   onStartGame: (world: WorldType) => void;
   onUpdateSave: (save: SaveData) => void;
-  onOpenEditor: () => void;
+  onOpenEditor: (level?: EditorLevel) => void;
   onOpenSettings: () => void;
   onPlayCustomLevel?: (level: EditorLevel, raceGhost: boolean) => void;
 }
 
-type MenuView = 'main' | 'shop' | 'play';
+type MenuView = 'main' | 'shop' | 'play' | 'experimental' | 'endless' | 'editorSelect';
 
 export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor, onOpenSettings, onPlayCustomLevel }: GameMenuProps) {
   const [view, setView] = useState<MenuView>('main');
@@ -91,7 +91,7 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
           </div>
 
           <button
-            onClick={() => setView('main')}
+            onClick={() => setView('endless')}
             className="mt-6 w-full py-3 rounded-xl bg-game-card border-2 border-game-card-border text-game-title font-bold text-lg hover:brightness-110 active:scale-[0.98] transition-all"
           >
             ← Back
@@ -102,7 +102,7 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
   }
 
   if (view === 'play') {
-    const levels = loadCustomLevels();
+    const levels = loadCustomLevels().sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt));
 
     return (
       <div className="fixed inset-0 flex items-center justify-center bg-game-bg">
@@ -198,6 +198,118 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
     );
   }
 
+  if (view === 'experimental') {
+    return (
+      <div className="fixed inset-0 flex flex-col items-center justify-center bg-game-bg">
+        <h2 className="text-3xl font-black text-game-title mb-2">EXPERIMENTAL</h2>
+        <p className="text-game-subtitle text-sm mb-8">Work in progress features</p>
+
+        <div className="flex flex-col gap-3 w-full max-w-md mb-6">
+          <button
+            onClick={() => setView('endless')}
+            className="py-4 rounded-xl bg-game-card border-2 border-game-card-border text-game-title font-bold text-xl hover:border-game-accent active:scale-[0.98] transition-all"
+          >
+            ♾️ Endless Mode
+          </button>
+        </div>
+
+        <button
+          onClick={() => setView('main')}
+          className="w-full max-w-md py-3 rounded-xl bg-game-card border-2 border-game-card-border text-game-title font-bold text-lg hover:brightness-110 active:scale-[0.98] transition-all"
+        >
+          ← Back
+        </button>
+      </div>
+    );
+  }
+
+  if (view === 'endless') {
+    return (
+      <div className="fixed inset-0 flex flex-col items-center justify-center bg-game-bg">
+        <h2 className="text-3xl font-black text-game-title mb-2">ENDLESS MODE</h2>
+        <p className="text-game-subtitle text-sm mb-8">Procedural worlds — ride as far as you can</p>
+
+        <div className="grid grid-cols-3 gap-4 mb-6 w-full max-w-md">
+          {(Object.keys(WORLD_CONFIG) as WorldType[]).map((w) => {
+            const cfg = WORLD_CONFIG[w];
+            const record = save.records[w];
+            return (
+              <button
+                key={w}
+                onClick={() => onStartGame(w)}
+                className="flex flex-col items-center p-5 rounded-2xl bg-game-card border-2 border-game-card-border hover:border-game-accent hover:scale-105 active:scale-95 transition-all"
+              >
+                <span className="text-4xl mb-2">{cfg.emoji}</span>
+                <span className="font-bold text-game-title">{cfg.name}</span>
+                {record > 0 && (
+                  <span className="text-xs text-game-cash mt-1">🏆 {Math.floor(record)}m</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex gap-3 w-full max-w-md mb-6">
+          <button
+            onClick={() => setView('shop')}
+            className="flex-1 py-4 rounded-xl bg-game-accent text-game-bg font-bold text-xl hover:brightness-110 active:scale-[0.98] transition-all"
+          >
+            🔧 Upgrades
+          </button>
+        </div>
+
+        <button
+          onClick={() => setView('experimental')}
+          className="w-full max-w-md py-3 rounded-xl bg-game-card border-2 border-game-card-border text-game-title font-bold text-lg hover:brightness-110 active:scale-[0.98] transition-all"
+        >
+          ← Back
+        </button>
+      </div>
+    );
+  }
+
+  if (view === 'editorSelect') {
+    const levels = loadCustomLevels().sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt));
+    return (
+      <div className="fixed inset-0 flex items-center justify-center bg-game-bg">
+        <div className="w-full max-w-lg p-6">
+          <h2 className="text-3xl font-black text-game-title mb-6">EDITOR</h2>
+
+          <button
+            onClick={() => onOpenEditor()}
+            className="w-full py-4 rounded-xl bg-game-accent text-game-bg font-bold text-xl hover:brightness-110 active:scale-[0.98] transition-all mb-4"
+          >
+            + Create New Level
+          </button>
+
+          {levels.length > 0 && (
+            <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1 mb-4">
+              {levels.map((level) => (
+                <button
+                  key={level.id}
+                  onClick={() => onOpenEditor(level)}
+                  className="w-full text-left px-4 py-3 rounded-xl bg-game-card border-2 border-game-card-border hover:border-game-accent active:scale-[0.99] transition-all"
+                >
+                  <div className="font-bold text-game-title">{level.name}</div>
+                  <div className="text-xs text-game-subtitle mt-0.5">
+                    {new Date(level.updatedAt ?? level.createdAt).toLocaleString()}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          <button
+            onClick={() => setView('main')}
+            className="w-full py-3 rounded-xl bg-game-card border-2 border-game-card-border text-game-title font-bold text-lg hover:brightness-110 active:scale-[0.98] transition-all"
+          >
+            ← Back
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 flex flex-col items-center justify-center bg-game-bg">
       <h1 className="text-6xl font-black text-game-title mb-2 tracking-tight drop-shadow-lg">
@@ -209,26 +321,6 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
 
       <div className="text-xl font-bold text-game-cash mb-6">💰 ${save.cash}</div>
 
-      <div className="grid grid-cols-3 gap-4 mb-6 w-full max-w-md">
-        {(Object.keys(WORLD_CONFIG) as WorldType[]).map((w) => {
-          const cfg = WORLD_CONFIG[w];
-          const record = save.records[w];
-          return (
-            <button
-              key={w}
-              onClick={() => onStartGame(w)}
-              className="flex flex-col items-center p-5 rounded-2xl bg-game-card border-2 border-game-card-border hover:border-game-accent hover:scale-105 active:scale-95 transition-all"
-            >
-              <span className="text-4xl mb-2">{cfg.emoji}</span>
-              <span className="font-bold text-game-title">{cfg.name}</span>
-              {record > 0 && (
-                <span className="text-xs text-game-cash mt-1">🏆 {Math.floor(record)}m</span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
       <div className="flex gap-3 w-full max-w-md mb-3">
         <button
           onClick={() => setView('play')}
@@ -238,15 +330,9 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
         </button>
       </div>
 
-      <div className="flex gap-3 w-full max-w-md">
+      <div className="flex gap-3 w-full max-w-md mb-3">
         <button
-          onClick={() => setView('shop')}
-          className="flex-1 py-4 rounded-xl bg-game-accent text-game-bg font-bold text-xl hover:brightness-110 active:scale-[0.98] transition-all"
-        >
-          🔧 Upgrades
-        </button>
-        <button
-          onClick={onOpenEditor}
+          onClick={() => setView('editorSelect')}
           className="flex-1 py-4 rounded-xl bg-game-bar-bg text-game-title font-bold text-xl border-2 border-game-card-border hover:border-game-accent active:scale-[0.98] transition-all"
         >
           🗺️ Editor
@@ -257,6 +343,15 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
           title="Settings"
         >
           ⚙
+        </button>
+      </div>
+
+      <div className="flex gap-3 w-full max-w-md">
+        <button
+          onClick={() => setView('experimental')}
+          className="flex-1 py-3 rounded-xl bg-game-bar-bg text-game-subtitle font-bold text-base border-2 border-game-card-border hover:border-game-accent active:scale-[0.98] transition-all"
+        >
+          🧪 Experimental
         </button>
       </div>
 

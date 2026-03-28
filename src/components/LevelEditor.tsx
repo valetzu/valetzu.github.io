@@ -65,9 +65,10 @@ import {
 
 interface LevelEditorProps {
   onBack: () => void;
+  initialLevel?: EditorLevel;
 }
 
-const OBSTACLE_TOOLS = OBSTACLE_DEFINITIONS.map((d) => ({
+const OBSTACLE_TOOLS = OBSTACLE_DEFINITIONS.filter((d) => d.tileType !== 'stalactite').map((d) => ({
   tool: d.tileType as EditorTool,
   label: d.label,
   emoji: d.emoji,
@@ -152,7 +153,7 @@ function dedupOverlapping<T extends { pt: { x: number; y: number }; segmentId: s
   return { items: result, partnerOf };
 }
 
-export default function LevelEditor({ onBack }: LevelEditorProps) {
+export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [tool, setTool] = useState<EditorTool>("none");
   const [segments, setSegments] = useState<RailSegment[]>([]);
@@ -2728,6 +2729,11 @@ export default function LevelEditor({ onBack }: LevelEditorProps) {
     setShowLoadDialog(false);
     lastPlacedRailRef.current = null;
   };
+
+  // Load a level passed in from outside (e.g. editor select screen)
+  useEffect(() => {
+    if (initialLevel) handleLoad(initialLevel);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDelete = (name: string) => {
     if (!confirm(`Delete level "${name}"? This cannot be undone.`)) return;
