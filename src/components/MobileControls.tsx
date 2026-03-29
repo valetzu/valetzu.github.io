@@ -5,6 +5,7 @@ import { loadSettings } from '@/game/settings';
 interface MobileControlsProps {
   engineRef: React.RefObject<GameEngine | null>;
   onPause: () => void;
+  isEndless: boolean;
 }
 
 /** Returns true if the device likely has a touch screen (mobile/tablet). */
@@ -110,7 +111,7 @@ function useGyroTilt(engineRef: React.RefObject<GameEngine | null>, enabled: boo
 
 // ----- Main component -----
 
-export default function MobileControls({ engineRef, onPause }: MobileControlsProps) {
+export default function MobileControls({ engineRef, onPause, isEndless }: MobileControlsProps) {
   const held = useRef({ up: 0, down: 0, left: 0, right: 0 });
   const isLandscape = useIsLandscape();
   const gyroControls = loadSettings().gyroControls;
@@ -165,16 +166,20 @@ export default function MobileControls({ engineRef, onPause }: MobileControlsPro
         onClick={() => engineRef.current?.flipDirection()}
         className={`${actionSize} bg-white/20 active:bg-white/40 border border-white/40`}
       />
-      <TapButton
-        label="🚀"
-        onClick={() => engineRef.current?.activateRocket()}
-        className={`${actionSize} bg-orange-400/50 active:bg-orange-400/80 border border-orange-300/60`}
-      />
-      <TapButton
-        label="🛡️"
-        onClick={() => engineRef.current?.activateShield()}
-        className={`${actionSize} bg-blue-400/50 active:bg-blue-400/80 border border-blue-300/60`}
-      />
+      {isEndless && (
+        <TapButton
+          label="🚀"
+          onClick={() => engineRef.current?.activateRocket()}
+          className={`${actionSize} bg-orange-400/50 active:bg-orange-400/80 border border-orange-300/60`}
+        />
+      )}
+      {isEndless && (
+        <TapButton
+          label="🛡️"
+          onClick={() => engineRef.current?.activateShield()}
+          className={`${actionSize} bg-blue-400/50 active:bg-blue-400/80 border border-blue-300/60`}
+        />
+      )}
     </div>
   );
 
@@ -182,18 +187,18 @@ export default function MobileControls({ engineRef, onPause }: MobileControlsPro
   if (gyroControls) {
     return (
       <div className="fixed inset-0 pointer-events-none z-50" style={{ touchAction: 'none' }}>
-        {/* Left half — throttle forward */}
-        <HoldButton
-          label=""
-          onStart={press('up')}
-          onEnd={release('up')}
-          className="pointer-events-auto absolute top-0 bottom-0 left-0 w-1/2 rounded-none bg-transparent border-none active:bg-white/5"
-        />
-        {/* Right half — throttle reverse */}
+        {/* Left half — reverse */}
         <HoldButton
           label=""
           onStart={press('down')}
           onEnd={release('down')}
+          className="pointer-events-auto absolute top-0 bottom-0 left-0 w-1/2 rounded-none bg-transparent border-none active:bg-white/5"
+        />
+        {/* Right half — throttle forward */}
+        <HoldButton
+          label=""
+          onStart={press('up')}
+          onEnd={release('up')}
           className="pointer-events-auto absolute top-0 bottom-0 right-0 w-1/2 rounded-none bg-transparent border-none active:bg-white/5"
         />
 
@@ -202,23 +207,26 @@ export default function MobileControls({ engineRef, onPause }: MobileControlsPro
 
         {/* Throttle direction labels */}
         <div
-          className="pointer-events-none absolute bottom-12 left-1/4 -translate-x-1/2 text-white/30 text-3xl font-bold"
+          className="pointer-events-none absolute left-1/4 -translate-x-1/2 text-white/30 text-3xl font-bold"
           style={{ bottom: safeBottom }}
         >
-          ▲
+          ▼
         </div>
         <div
           className="pointer-events-none absolute right-1/4 translate-x-1/2 text-white/30 text-3xl font-bold"
           style={{ bottom: safeBottom }}
         >
-          ▼
+          ▲
         </div>
 
         {/* Pause */}
         {pauseBtn}
 
-        {/* Actions — top center */}
-        <div className="pointer-events-auto absolute top-4 left-1/2 -translate-x-1/2 flex gap-2">
+        {/* Actions + recalibrate — bottom center */}
+        <div
+          className="pointer-events-auto absolute left-1/2 -translate-x-1/2 flex gap-2"
+          style={{ bottom: safeBottom }}
+        >
           {actionButtons()}
           <button
             className={`select-none touch-none flex items-center justify-center rounded-full text-white text-xs font-bold ${actionSize} bg-white/20 active:bg-white/40 border border-white/40`}
@@ -260,8 +268,8 @@ export default function MobileControls({ engineRef, onPause }: MobileControlsPro
       >
         {actionButtons()}
         <div className="flex gap-3">
-          <HoldButton label="▲" onStart={press('up')} onEnd={release('up')} className={throttleSize} />
           <HoldButton label="▼" onStart={press('down')} onEnd={release('down')} className={throttleSize} />
+          <HoldButton label="▲" onStart={press('up')} onEnd={release('up')} className={throttleSize} />
         </div>
       </div>
     </div>

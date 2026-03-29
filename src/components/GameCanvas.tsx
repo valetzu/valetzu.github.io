@@ -61,6 +61,7 @@ export default function GameCanvas({ world, upgrades, onGameOver, onBack }: Game
     const engine = new GameEngine(canvas, world, upgrades, {
       onGameOver: handleGameOver,
     });
+    engine.isMobile = isMobile;
     engineRef.current = engine;
     engine.start();
 
@@ -104,7 +105,7 @@ export default function GameCanvas({ world, upgrades, onGameOver, onBack }: Game
       />
       {paused && <PauseMenu onResume={handleResume} onQuit={handleQuit} />}
       {isMobile && !paused && (
-        <MobileControls engineRef={engineRef} onPause={handlePause} />
+        <MobileControls engineRef={engineRef} onPause={handlePause} isEndless />
       )}
     </>
   );

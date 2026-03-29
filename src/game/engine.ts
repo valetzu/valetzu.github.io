@@ -51,6 +51,8 @@ export class GameEngine {
   keys = { up: false, down: false, left: false, right: false, space: false, shift: false };
   /** Continuous tilt input from gyroscope, -1 (full left) to +1 (full right). Sums with key input. */
   analogTiltInput: number = 0;
+  /** When true, renders a compact top-center speed HUD instead of top-right. */
+  isMobile: boolean = false;
   noBackground = false;
   skyOverride: { skyTop: string; skyBottom: string } | null = null;
   bgTiles: Record<string, BgTile> = {};
@@ -1842,24 +1844,40 @@ export class GameEngine {
       badgeX += badge.w + 6;
     }
 
-    // Speed + distance panel (top-right)
+    // Speed + distance panel
     const speedText = `⚡ ${Math.floor(Math.abs(this.speed) * 0.36)} km/h`;
     const distText = `📏 ${Math.floor(this.distance)}m`;
-    ctx.font = 'bold 18px system-ui, sans-serif';
-    const speedTextW = ctx.measureText(speedText).width;
-    ctx.font = 'bold 14px system-ui, sans-serif';
-    const distTextW = ctx.measureText(distText).width;
-    const speedPanelW = Math.max(speedTextW, distTextW) + 24;
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    this.roundRect(w - speedPanelW - 10, 10, speedPanelW, 52, 6);
-    ctx.fill();
-    ctx.font = 'bold 18px system-ui, sans-serif';
-    ctx.fillStyle = '#FFF';
-    ctx.textAlign = 'right';
-    ctx.fillText(speedText, w - 20, 34);
-    ctx.fillStyle = '#FFF';
-    ctx.font = 'bold 14px system-ui, sans-serif';
-    ctx.fillText(distText, w - 20, 50);
+    if (this.isMobile) {
+      // Compact, top-center
+      ctx.font = 'bold 12px system-ui, sans-serif';
+      const sw = ctx.measureText(speedText).width;
+      const dw = ctx.measureText(distText).width;
+      const spW = Math.max(sw, dw) + 16;
+      const spX = (w - spW) / 2;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      this.roundRect(spX, 10, spW, 32, 6);
+      ctx.fill();
+      ctx.fillStyle = '#FFF';
+      ctx.textAlign = 'center';
+      ctx.fillText(speedText, w / 2, 24);
+      ctx.fillText(distText, w / 2, 36);
+    } else {
+      ctx.font = 'bold 18px system-ui, sans-serif';
+      const speedTextW = ctx.measureText(speedText).width;
+      ctx.font = 'bold 14px system-ui, sans-serif';
+      const distTextW = ctx.measureText(distText).width;
+      const speedPanelW = Math.max(speedTextW, distTextW) + 24;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      this.roundRect(w - speedPanelW - 10, 10, speedPanelW, 52, 6);
+      ctx.fill();
+      ctx.font = 'bold 18px system-ui, sans-serif';
+      ctx.fillStyle = '#FFF';
+      ctx.textAlign = 'right';
+      ctx.fillText(speedText, w - 20, 34);
+      ctx.fillStyle = '#FFF';
+      ctx.font = 'bold 14px system-ui, sans-serif';
+      ctx.fillText(distText, w - 20, 50);
+    }
 
     // Passengers
     const passengersY = 10 + panelH + 30;

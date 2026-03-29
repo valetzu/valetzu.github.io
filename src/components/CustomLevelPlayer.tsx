@@ -104,6 +104,7 @@ export default function CustomLevelPlayer({
         },
       );
 
+      engine.isMobile = isMobile;
       engine.rail = railPoints;
       engine.allRailSegments = allSegments;
       engine.buildSegmentBounds();
@@ -295,6 +296,7 @@ export default function CustomLevelPlayer({
       {isMobile && !paused && !levelComplete && (
         <MobileControls
           engineRef={engineRef}
+          isEndless={false}
           onPause={() => {
             setPaused((prev) => {
               const next = !prev;
