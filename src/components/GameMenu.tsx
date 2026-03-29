@@ -43,7 +43,7 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
 
   if (view === 'shop') {
     return (
-      <div className="fixed inset-0 flex items-center justify-center bg-game-bg">
+      <div className="fixed inset-0 flex items-center justify-center bg-game-bg overflow-y-auto">
         <div className="w-full max-w-lg p-6">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-3xl font-black text-game-title">UPGRADES</h2>
@@ -106,7 +106,7 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
 
   if (view === 'playSelect') {
     return (
-      <div className="fixed inset-0 flex flex-col items-center justify-center bg-game-bg">
+      <div className="fixed inset-0 flex flex-col items-center justify-center bg-game-bg overflow-y-auto">
         <h2 className="text-3xl font-black text-game-title mb-8">PLAY</h2>
 
         <div className="flex flex-col gap-4 w-full max-w-md mb-6">
@@ -138,7 +138,7 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
     const levels = loadAdventureLevels();
 
     return (
-      <div className="fixed inset-0 flex items-center justify-center bg-game-bg">
+      <div className="fixed inset-0 flex items-center justify-center bg-game-bg overflow-y-auto">
         <div className="w-full max-w-lg p-6">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-3xl font-black text-game-title">ADVENTURE</h2>
@@ -149,7 +149,7 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
               <p className="text-game-subtitle text-lg">No levels yet</p>
             </div>
           ) : (
-            <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+            <div className="space-y-3 max-h-[60vh] overflow-y-auto overscroll-contain pr-1">
               {levels.map((level) => {
                 const levelId = level.id || level.name;
                 const records = getRecords(levelId);
@@ -265,7 +265,7 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
     const levels = loadCustomLevels().sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt));
 
     return (
-      <div className="fixed inset-0 flex items-center justify-center bg-game-bg">
+      <div className="fixed inset-0 flex items-center justify-center bg-game-bg overflow-y-auto">
         <div className="w-full max-w-lg p-6">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-3xl font-black text-game-title">CUSTOM LEVELS</h2>
@@ -277,7 +277,7 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
               <p className="text-game-subtitle text-sm">Create levels in the Editor!</p>
             </div>
           ) : (
-            <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+            <div className="space-y-3 max-h-[60vh] overflow-y-auto overscroll-contain pr-1">
               {levels.map((level) => {
                 const levelId = level.id || level.name;
                 const records = getRecords(levelId);
@@ -405,7 +405,7 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
 
   if (view === 'experimental') {
     return (
-      <div className="fixed inset-0 flex flex-col items-center justify-center bg-game-bg">
+      <div className="fixed inset-0 flex flex-col items-center justify-center bg-game-bg overflow-y-auto">
         <h2 className="text-3xl font-black text-game-title mb-2">EXPERIMENTAL</h2>
         <p className="text-game-subtitle text-sm mb-8">Work in progress features</p>
 
@@ -430,7 +430,7 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
 
   if (view === 'endless') {
     return (
-      <div className="fixed inset-0 flex flex-col items-center justify-center bg-game-bg">
+      <div className="fixed inset-0 flex flex-col items-center justify-center bg-game-bg overflow-y-auto">
         <h2 className="text-3xl font-black text-game-title mb-2">ENDLESS MODE</h2>
         <p className="text-game-subtitle text-sm mb-8">Procedural worlds — ride as far as you can</p>
 
@@ -476,7 +476,7 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
   if (view === 'editorSelect') {
     const levels = loadCustomLevels().sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt));
     return (
-      <div className="fixed inset-0 flex items-center justify-center bg-game-bg">
+      <div className="fixed inset-0 flex items-center justify-center bg-game-bg overflow-y-auto">
         <div className="w-full max-w-lg p-6">
           <h2 className="text-3xl font-black text-game-title mb-6">EDITOR</h2>
 
@@ -488,7 +488,7 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
           </button>
 
           {levels.length > 0 && (
-            <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1 mb-4">
+            <div className="space-y-2 max-h-[50vh] overflow-y-auto overscroll-contain pr-1 mb-4">
               {levels.map((level) => (
                 <div key={`${levelListVersion}-${level.id}`} className="flex items-center gap-2">
                   <button
@@ -529,7 +529,7 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
   }
 
   return (
-    <div className="fixed inset-0 flex flex-col items-center justify-center bg-game-bg">
+    <div className="fixed inset-0 flex flex-col items-center justify-center bg-game-bg overflow-y-auto">
       <h1 className="text-6xl font-black text-game-title mb-2 tracking-tight drop-shadow-lg">
         🚡 Doggorail
       </h1>

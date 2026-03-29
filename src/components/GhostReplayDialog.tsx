@@ -80,7 +80,7 @@ export default function GhostReplayDialog({
         </div>
 
         {/* Rows */}
-        <div className="overflow-y-auto flex-1 px-4 py-1">
+        <div className="overflow-y-auto overscroll-contain flex-1 px-4 py-1">
           {sorted.length === 0 ? (
             <p className="text-game-subtitle text-sm text-center py-6">No replays saved.</p>
           ) : (

@@ -309,8 +309,8 @@ export default function CustomLevelPlayer({
       )}
 
       {levelComplete && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-20">
-          <div className="bg-game-card border-2 border-game-accent rounded-2xl p-8 w-96 text-center">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-20 overflow-y-auto overscroll-contain py-4">
+          <div className="bg-game-card border-2 border-game-accent rounded-2xl p-8 w-96 max-w-[calc(100vw-2rem)] text-center my-auto">
             <h2 className="text-4xl font-bold text-white mb-2">
               {levelComplete.isNewBest ? "🏆 New Best!" : "🎉 Level Complete!"}
             </h2>

@@ -53,6 +53,7 @@ import {
   ParamFieldMeta,
 } from "@/game/obstacleDefinitions";
 import SettingsMenu from "@/components/SettingsMenu";
+import { isMobileDevice } from "@/components/MobileControls";
 import { loadSettings, updateSetting } from "@/game/settings";
 import {
   GhostRecorder,
@@ -186,6 +187,12 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
   const [zoom, setZoom] = useState(1);
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+  const zoomRef = useRef(zoom);
+  const cameraRef = useRef(camera);
+  const pinchRef = useRef<{ dist: number } | null>(null);
+  const touchPanRef = useRef<{ wx: number; wy: number } | null>(null);
+  const touchDrawingRef = useRef(false);
+  const isMobile = isMobileDevice();
   const [isDrawing, setIsDrawing] = useState(false);
   const [levelName, setLevelName] = useState("");
   const [currentLevelName, setCurrentLevelName] = useState("");
@@ -220,6 +227,7 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
   const [currentLevelId, setCurrentLevelId] = useState<string>("");
   const [currentMusicFile, setCurrentMusicFile] = useState<string>("");
   const [showMusicMenu, setShowMusicMenu] = useState(false);
+  const [showLevelSettings, setShowLevelSettings] = useState(false);
 
   const [obstacleParams, setObstacleParams] = useState<
     Record<string, ObstacleParams>
@@ -264,6 +272,9 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
     worldY: number;
     index: number;
   }>({ worldX: -999, worldY: -999, index: 0 });
+
+  zoomRef.current = zoom;
+  cameraRef.current = camera;
 
   const hasUnsavedChanges = () =>
     JSON.stringify(segments) !== lastSavedSegmentsRef.current ||
@@ -2255,6 +2266,70 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
     }
   };
 
+  const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const tl = e.touches;
+    if (tl.length >= 2) {
+      if (touchDrawingRef.current) { handleMouseUp(); touchDrawingRef.current = false; }
+      const t0 = tl[0], t1 = tl[1];
+      pinchRef.current = { dist: Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY) };
+      const cx = (t0.clientX + t1.clientX) / 2;
+      const cy = (t0.clientY + t1.clientY) / 2;
+      touchPanRef.current = { wx: cx / zoomRef.current + cameraRef.current.x, wy: cy / zoomRef.current + cameraRef.current.y };
+    } else if (tl.length === 1) {
+      pinchRef.current = null;
+      const t = tl[0];
+      if (tool === 'none') {
+        touchPanRef.current = { wx: t.clientX / zoomRef.current + cameraRef.current.x, wy: t.clientY / zoomRef.current + cameraRef.current.y };
+      } else {
+        touchPanRef.current = null;
+        touchDrawingRef.current = true;
+        handleMouseDown({ button: 0, clientX: t.clientX, clientY: t.clientY, preventDefault: () => {} } as any);
+      }
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const tl = e.touches;
+    if (tl.length >= 2 && pinchRef.current && touchPanRef.current) {
+      const t0 = tl[0], t1 = tl[1];
+      const newDist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+      const ratio = newDist / pinchRef.current.dist;
+      const cx = (t0.clientX + t1.clientX) / 2;
+      const cy = (t0.clientY + t1.clientY) / 2;
+      const newZoom = Math.max(0.25, Math.min(3, zoomRef.current * ratio));
+      const newCam = { x: touchPanRef.current.wx - cx / newZoom, y: touchPanRef.current.wy - cy / newZoom };
+      zoomRef.current = newZoom;
+      cameraRef.current = newCam;
+      pinchRef.current.dist = newDist;
+      setZoom(newZoom);
+      setCamera(newCam);
+    } else if (tl.length === 1) {
+      const t = tl[0];
+      if (touchPanRef.current) {
+        const newCam = { x: touchPanRef.current.wx - t.clientX / zoomRef.current, y: touchPanRef.current.wy - t.clientY / zoomRef.current };
+        cameraRef.current = newCam;
+        setCamera(newCam);
+      } else if (touchDrawingRef.current) {
+        handleMouseMove({ clientX: t.clientX, clientY: t.clientY } as any);
+      }
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    if (e.touches.length === 0) {
+      if (touchDrawingRef.current) { handleMouseUp(); touchDrawingRef.current = false; }
+      touchPanRef.current = null;
+      pinchRef.current = null;
+    } else if (e.touches.length === 1 && pinchRef.current) {
+      pinchRef.current = null;
+      const t = e.touches[0];
+      touchPanRef.current = { wx: t.clientX / zoomRef.current + cameraRef.current.x, wy: t.clientY / zoomRef.current + cameraRef.current.y };
+    }
+  };
+
   /** Check if a world point overlaps an existing rail segment point within the same grid cell. */
   /** Check if a world point is near any segment endpoint (snappoint). */
   const isNearSnapPoint = (wx: number, wy: number) => {
@@ -3023,6 +3098,10 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
         onWheel={handleWheel}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        style={{ touchAction: 'none' }}
       />
 
       {/* Test validation alert */}
@@ -3093,8 +3172,80 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
         </div>
       )}
 
+      {isMobile && (
+        <>
+          <div className="fixed top-3 right-3 flex gap-2 z-20">
+            <button onClick={startTest} className="px-3 py-2 rounded-lg bg-green-600 text-white font-bold text-sm hover:bg-green-500">▶ Test</button>
+            <button onClick={handleQuickSave} className="px-3 py-2 rounded-lg bg-blue-700 text-white font-bold text-sm hover:bg-blue-600">⚡ {currentLevelName ? "Save" : "Save"}</button>
+          </div>
+          {(tool === 'rail' || tool === 'line' || tool === 'line2' || tool === 'draw_rail') && (
+            <div className="fixed bottom-14 left-0 right-0 z-20 px-3 py-2 bg-game-card border-t border-game-card-border flex gap-2 overflow-x-auto" style={{ scrollbarWidth: 'none' } as any}>
+              {tool === 'line2' && (
+                <button onClick={() => { setLine2GridSnap(v => { const n = !v; updateSetting('defaultFreeLineToolBehaviour', n ? 'grid_snap' : 'normal'); return n; }); }} className={`px-2 py-1 rounded text-xs font-bold whitespace-nowrap ${line2GridSnap ? 'bg-green-700 text-white' : 'bg-gray-700 text-gray-300'}`}>{line2GridSnap ? '🧲 Snap: On' : '🧲 Snap: Off'}</button>
+              )}
+              {(tool === 'line' || tool === 'line2') && (
+                <button onClick={() => { setContinuousLine(v => { const n = !v; updateSetting('continuousLine', n); return n; }); }} className={`px-2 py-1 rounded text-xs font-bold whitespace-nowrap ${continuousLine ? 'bg-green-700 text-white' : 'bg-gray-700 text-gray-300'}`}>{continuousLine ? '🔗 Continuous: On' : '🔗 Continuous: Off'}</button>
+              )}
+              <button onClick={() => setAutoconnect(a => !a)} className={`px-2 py-1 rounded text-xs font-bold whitespace-nowrap ${autoconnect ? 'bg-green-700 text-white' : 'bg-gray-700 text-gray-300'}`}>{autoconnect ? '🔗 Autoconnect: On' : '🔗 Autoconnect: Off'}</button>
+            </div>
+          )}
+          {tool === 'paint' && (
+            <div className="fixed bottom-14 left-0 right-0 z-20 px-3 py-2 bg-game-card border-t border-game-card-border overflow-y-auto" style={{ maxHeight: '35vh' }}>
+              <div className="grid grid-cols-9 gap-1 mb-2">
+                {BG_PALETTE.map((c) => (<button key={c} onClick={() => setPaintColor(c)} className={`w-7 h-7 rounded-sm border-2 ${paintColor === c ? 'border-white scale-110' : 'border-transparent'}`} style={{ background: c }} />))}
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <label className="text-game-subtitle text-xs">Custom:</label>
+                <input type="color" value={paintColor} onChange={(e) => setPaintColor(e.target.value)} className="w-7 h-7 cursor-pointer border-0 p-0 bg-transparent" />
+                <button onClick={() => setPaintOutline(!paintOutline)} className={`px-2 py-1 rounded text-xs font-bold ${paintOutline ? 'bg-green-700 text-white' : 'bg-gray-700 text-gray-300'}`}>{paintOutline ? 'Outline: On' : 'Outline: Off'}</button>
+                {paintOutline && <input type="color" value={paintOutlineColor} onChange={(e) => setPaintOutlineColor(e.target.value)} className="w-7 h-7 cursor-pointer border-0 p-0 bg-transparent" />}
+                <span className="text-game-subtitle text-xs">Size:</span>
+                {[1, 2, 3, 5].map((s) => (<button key={s} onClick={() => setPaintSize(s)} className={`w-7 h-7 rounded text-xs font-bold ${paintSize === s ? 'bg-game-accent text-game-bg' : 'bg-gray-700 text-gray-300'}`}>{s}</button>))}
+              </div>
+            </div>
+          )}
+          <div className="fixed bottom-0 left-0 right-0 z-10 bg-game-card border-t border-game-card-border" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+            <div className="flex gap-1 overflow-x-auto px-2 py-1.5 items-center" style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' } as any}>
+              <button onClick={() => { setTool('none'); lastPlacedRailRef.current = null; setArcCenter(null); setArcPreview([]); setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); setLineStart(null); setLinePreview([]); setLine2Start(null); setDrawRailPoints(null); setDrawRailAttach(null); setDrawRailPending(null); setShowTilesMenu(false); setShowToolsMenu(false); }} className={`flex-none px-2.5 py-1.5 rounded-lg font-bold text-sm whitespace-nowrap ${tool === 'none' ? 'bg-game-accent text-game-bg' : 'bg-game-bar-bg text-game-title border border-game-card-border'}`}>✋</button>
+              <div className="relative flex-none">
+                <button onClick={() => { if (TILE_TOOL_TYPES.has(tool)) setTool('none'); setShowTilesMenu(v => !v); setShowToolsMenu(false); setShowFileMenu(false); setShowLevelSettings(false); }} className={`px-2.5 py-1.5 rounded-lg font-bold text-sm whitespace-nowrap ${TILE_TOOL_TYPES.has(tool) ? 'bg-game-accent text-game-bg' : 'bg-game-bar-bg text-game-title border border-game-card-border'}`}>{(() => { const a = TOOLS.find(t => t.tool === tool && TILE_TOOL_TYPES.has(t.tool)); return a ? a.emoji : '🧱'; })()} ▾</button>
+                {showTilesMenu && (<div className="absolute bottom-full left-0 mb-1 bg-game-card border border-game-card-border rounded-lg p-1 shadow-lg z-30" style={{ minWidth: 140 }}>{TOOLS.filter(t => TILE_TOOL_TYPES.has(t.tool)).map(t => (<button key={t.tool} onClick={() => { setTool(t.tool); lastPlacedRailRef.current = null; setArcCenter(null); setArcPreview([]); setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); setLineStart(null); setLinePreview([]); setShowTilesMenu(false); }} className={`w-full text-left px-3 py-2 rounded font-bold text-sm ${tool === t.tool ? 'bg-game-accent text-game-bg' : 'text-game-title hover:bg-game-bar-bg'}`}>{t.emoji} {t.label}</button>))}</div>)}
+              </div>
+              <div className="relative flex-none">
+                <button onClick={() => { if (SHAPE_TOOL_TYPES.has(tool)) { setTool('none'); setArcCenter(null); setArcPreview([]); setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); } setShowToolsMenu(v => !v); setShowTilesMenu(false); setShowFileMenu(false); setShowLevelSettings(false); }} className={`px-2.5 py-1.5 rounded-lg font-bold text-sm whitespace-nowrap ${SHAPE_TOOL_TYPES.has(tool) ? 'bg-game-accent text-game-bg' : 'bg-game-bar-bg text-game-title border border-game-card-border'}`}>{(() => { const a = TOOLS.find(t => t.tool === tool && SHAPE_TOOL_TYPES.has(t.tool)); return a ? a.emoji : '🛠'; })()} ▾</button>
+                {showToolsMenu && (<div className="absolute bottom-full left-0 mb-1 bg-game-card border border-game-card-border rounded-lg p-1 shadow-lg z-30" style={{ minWidth: 140 }}>{TOOLS.filter(t => SHAPE_TOOL_TYPES.has(t.tool)).map(t => (<button key={t.tool} onClick={() => { setTool(t.tool); lastPlacedRailRef.current = null; if (t.tool !== 'polygon' && t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); } if (t.tool !== 'curve' && t.tool !== 'circular_curve' && t.tool !== 'loop') { setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); } setLineStart(null); setLinePreview([]); setShowToolsMenu(false); }} className={`w-full text-left px-3 py-2 rounded font-bold text-sm ${tool === t.tool ? 'bg-game-accent text-game-bg' : 'text-game-title hover:bg-game-bar-bg'}`}>{t.emoji} {t.label}</button>))}</div>)}
+              </div>
+              {(['rail', 'eraser', 'line', 'line2', 'draw_rail'] as EditorTool[]).map(toolType => { const t = TOOLS.find(x => x.tool === toolType)!; return (<button key={toolType} onClick={() => { if (tool === toolType) setTool('none'); else setTool(toolType as EditorTool); lastPlacedRailRef.current = null; setArcCenter(null); setArcPreview([]); setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); setLineStart(null); setLinePreview([]); if (toolType === 'line2') setLine2Start(null); setDrawRailPoints(null); setDrawRailAttach(null); setDrawRailPending(null); setShowTilesMenu(false); }} className={`flex-none px-2.5 py-1.5 rounded-lg font-bold text-sm whitespace-nowrap ${tool === toolType ? 'bg-game-accent text-game-bg' : 'bg-game-bar-bg text-game-title border border-game-card-border'}`}>{t.emoji} {t.label}</button>); })}
+              <button onClick={() => { if (tool === 'paint') setTool('none'); else setTool('paint'); }} className={`flex-none px-2.5 py-1.5 rounded-lg font-bold text-sm whitespace-nowrap ${tool === 'paint' ? 'bg-game-accent text-game-bg' : 'bg-game-bar-bg text-game-title border border-game-card-border'}`}><span className="inline-block w-3 h-3 rounded-sm mr-1 align-middle border border-white/30" style={{ background: paintColor }} />Paint</button>
+              <div className="flex-none w-px h-5 bg-game-card-border mx-1" />
+              <div className="relative flex-none">
+                <button onClick={() => { setShowFileMenu(v => !v); setShowTilesMenu(false); setShowToolsMenu(false); setShowLevelSettings(false); }} className="px-2.5 py-1.5 rounded-lg font-bold text-sm whitespace-nowrap bg-game-bar-bg text-game-title border border-game-card-border">📁 File ▾</button>
+                {showFileMenu && (<div className="absolute bottom-full right-0 mb-1 bg-game-card border border-game-card-border rounded-lg p-1 shadow-lg z-30" style={{ minWidth: 150 }}>
+                  <button onClick={() => { setShowSaveDialog(true); setShowFileMenu(false); }} className="w-full text-left px-3 py-2 rounded font-bold text-sm text-game-title hover:bg-game-bar-bg">💾 Save As</button>
+                  <button onClick={() => { openLoadDialog(); setShowFileMenu(false); }} className="w-full text-left px-3 py-2 rounded font-bold text-sm text-game-title hover:bg-game-bar-bg">📂 Load</button>
+                  <hr className="border-game-card-border my-1" />
+                  <button onClick={() => { handleExport(); setShowFileMenu(false); }} className="w-full text-left px-3 py-2 rounded font-bold text-sm text-game-title hover:bg-game-bar-bg">📤 Export</button>
+                  <button onClick={() => { importFileRef.current?.click(); setShowFileMenu(false); }} className="w-full text-left px-3 py-2 rounded font-bold text-sm text-game-title hover:bg-game-bar-bg">📥 Import</button>
+                  <hr className="border-game-card-border my-1" />
+                  <button onClick={() => { clearAll(); setShowFileMenu(false); }} className="w-full text-left px-3 py-2 rounded font-bold text-sm text-red-400 hover:bg-game-bar-bg">🗑️ Clear</button>
+                  <button onClick={handleBack} className="w-full text-left px-3 py-2 rounded font-bold text-sm text-game-title hover:bg-game-bar-bg">← Menu</button>
+                </div>)}
+              </div>
+              <div className="relative flex-none">
+                <button onClick={() => { setShowLevelSettings(v => !v); setShowFileMenu(false); setShowTilesMenu(false); setShowToolsMenu(false); }} className="px-2.5 py-1.5 rounded-lg font-bold text-sm whitespace-nowrap bg-game-bar-bg text-game-title border border-game-card-border">⚙️ Level ▾</button>
+                {showLevelSettings && (<div className="absolute bottom-full right-0 mb-1 bg-game-card border border-game-card-border rounded-lg p-3 shadow-lg z-30" style={{ minWidth: 200 }}>
+                  <p className="text-game-subtitle text-xs font-bold mb-1">🎵 Music</p>
+                  <button onClick={() => { setShowMusicMenu(true); setShowLevelSettings(false); }} className={`w-full text-left px-3 py-2 rounded-lg font-bold text-sm mb-3 ${currentMusicFile ? 'bg-game-accent text-game-bg' : 'bg-game-bar-bg text-game-title border border-game-card-border'}`}>{currentMusicFile ? (getAvailableTracks().find(t => t.file === currentMusicFile)?.label ?? currentMusicFile) : '— None —'}</button>
+                  <p className="text-game-subtitle text-xs font-bold mb-1">🌅 Sky Theme</p>
+                  <div className="flex gap-1 flex-wrap">{(Object.keys(SKY_THEMES) as SkyThemeId[]).map(id => (<button key={id} onClick={() => setSkyTheme(id)} className={`px-2 py-1 rounded text-xs font-bold ${skyTheme === id ? 'bg-game-accent text-game-bg' : 'bg-game-bar-bg text-game-title border border-game-card-border'}`}>{SKY_THEMES[id].name}</button>))}</div>
+                </div>)}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
       {/* Top bar */}
-      <div className="fixed top-4 left-4 right-4 flex items-start justify-between z-10">
+      {!isMobile && <div className="fixed top-4 left-4 right-4 flex items-start justify-between z-10">
         {/* Left: Tiles menu + Tools + Eraser/Line */}
         <div className="flex gap-2 items-start">
           {/* Tiles dropdown */}
@@ -3576,7 +3727,7 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
             ← Menu
           </button>
         </div>
-      </div>
+      </div>}
 
       {/* Zoom buttons */}
       <div className="fixed bottom-12 right-4 flex gap-2 z-10">
@@ -3629,7 +3780,7 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
               </span>
               .
             </p>
-            <div className="overflow-y-auto space-y-1 flex-1">
+            <div className="overflow-y-auto overscroll-contain space-y-1 flex-1">
               {/* None option */}
               <button
                 onClick={() => {
@@ -3705,7 +3856,7 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
                   <p className="text-game-subtitle text-xs mb-2">
                     Or overwrite an existing level:
                   </p>
-                  <div className="max-h-[30vh] overflow-y-auto space-y-1">
+                  <div className="max-h-[30vh] overflow-y-auto overscroll-contain space-y-1">
                     {existing.map((level) => (
                       <button
                         key={level.name}
@@ -3906,7 +4057,7 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
                 No saved levels yet
               </p>
             ) : (
-              <div className="flex-1 overflow-y-auto space-y-2">
+              <div className="flex-1 overflow-y-auto overscroll-contain space-y-2">
                 {savedLevels.map((level) => (
                   <div
                     key={level.name}

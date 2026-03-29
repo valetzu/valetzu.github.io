@@ -66,7 +66,7 @@ export default function SettingsMenu({
 
   return (
     <div className="fixed inset-0 flex items-center justify-center z-50 bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-md bg-game-card border-2 border-game-card-border rounded-2xl shadow-2xl overflow-hidden">
+      <div className="w-full max-w-md bg-game-card border-2 border-game-card-border rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-game-card-border">
           <h2 className="text-2xl font-black text-game-title">SETTINGS</h2>
@@ -95,7 +95,7 @@ export default function SettingsMenu({
         </div>
 
         {/* Content */}
-        <div className="p-6 space-y-5">
+        <div className="p-6 space-y-5 overflow-y-auto overscroll-contain">
           {activeTab === "sound" && (
             <>
               {isMobileDevice() && (
