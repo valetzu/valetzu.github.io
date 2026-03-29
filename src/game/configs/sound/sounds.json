@@ -1,0 +1,14 @@
+{
+  "basePath": "/assets/sound/",
+  "debounceMs": 80,
+  "sounds": {
+    "level_complete":      { "file": "level_complete.mp3",      "volume": 1.0 },
+    "level_complete_best": { "file": "level_complete_best.mp3", "volume": 1.0 },
+    "star_collect":        { "file": "star_collect.mp3",        "volume": 1.0 },
+    "hit":                 { "file": "hit.mp3",                 "volume": 1.0 },
+    "laser_fire":          { "file": "laser_fire.mp3",          "volume": 0.7 },
+    "mine_explode":        { "file": "mine_explode.mp3",        "volume": 1.0 },
+    "game_over":           { "file": "game_over.mp3",           "volume": 1.0 },
+    "beat_ghost":          { "file": "beat_ghost.mp3",          "volume": 1.0 }
+  }
+}

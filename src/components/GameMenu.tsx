@@ -4,7 +4,7 @@ import {
   UPGRADE_COSTS, UPGRADE_MAX, UPGRADE_LABELS, UPGRADE_DESC,
   saveSave, getRecords, formatTime,
 } from '@/game/types';
-import { loadCustomLevels, deleteCustomLevel, type EditorLevel } from '@/game/editorTypes';
+import { loadCustomLevels, loadAdventureLevels, deleteCustomLevel, type EditorLevel } from '@/game/editorTypes';
 import { getReplaysForLevel, getReplay, deleteReplay, type ReplayData } from '@/game/replay';
 
 interface GameMenuProps {
@@ -16,7 +16,7 @@ interface GameMenuProps {
   onPlayCustomLevel?: (level: EditorLevel, ghostReplay: ReplayData | null) => void;
 }
 
-type MenuView = 'main' | 'shop' | 'play' | 'experimental' | 'endless' | 'editorSelect';
+type MenuView = 'main' | 'shop' | 'playSelect' | 'play' | 'adventure' | 'experimental' | 'endless' | 'editorSelect';
 
 export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor, onOpenSettings, onPlayCustomLevel }: GameMenuProps) {
   const [view, setView] = useState<MenuView>('main');
@@ -107,6 +107,208 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
 
           <button
             onClick={() => setView('endless')}
+            className="mt-6 w-full py-3 rounded-xl bg-game-card border-2 border-game-card-border text-game-title font-bold text-lg hover:brightness-110 active:scale-[0.98] transition-all"
+          >
+            ← Back
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (view === 'playSelect') {
+    return (
+      <div className="fixed inset-0 flex flex-col items-center justify-center bg-game-bg">
+        <h2 className="text-3xl font-black text-game-title mb-8">PLAY</h2>
+
+        <div className="flex flex-col gap-4 w-full max-w-md mb-6">
+          <button
+            onClick={() => setView('adventure')}
+            className="py-5 rounded-xl bg-green-700 text-white font-bold text-xl hover:bg-green-600 active:scale-[0.98] transition-all"
+          >
+            🗺️ Adventure
+          </button>
+          <button
+            onClick={() => setView('play')}
+            className="py-5 rounded-xl bg-game-card border-2 border-game-card-border text-game-title font-bold text-xl hover:border-game-accent active:scale-[0.98] transition-all"
+          >
+            🎮 Custom Levels
+          </button>
+        </div>
+
+        <button
+          onClick={() => setView('main')}
+          className="w-full max-w-md py-3 rounded-xl bg-game-card border-2 border-game-card-border text-game-title font-bold text-lg hover:brightness-110 active:scale-[0.98] transition-all"
+        >
+          ← Back
+        </button>
+      </div>
+    );
+  }
+
+  if (view === 'adventure') {
+    const levels = loadAdventureLevels();
+
+    return (
+      <div className="fixed inset-0 flex items-center justify-center bg-game-bg">
+        <div className="w-full max-w-lg p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-3xl font-black text-game-title">ADVENTURE</h2>
+          </div>
+
+          {levels.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-game-subtitle text-lg">No levels yet</p>
+            </div>
+          ) : (
+            <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+              {levels.map((level) => {
+                const levelId = level.id || level.name;
+                const records = getRecords(levelId);
+                const replays = getReplaysForLevel(levelId);
+                const bestTime = records.length > 0 ? records[0].time : null;
+
+                return (
+                  <div
+                    key={levelId}
+                    className="p-4 rounded-xl bg-game-card border-2 border-game-card-border"
+                  >
+                    <div className="mb-3">
+                      <div className="font-bold text-game-title text-lg">{level.name}</div>
+                      {bestTime !== null && (
+                        <div className="text-sm text-game-cash">
+                          🏆 Best: {formatTime(bestTime)}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => onPlayCustomLevel?.(level, null)}
+                        className="flex-1 py-2 rounded-lg bg-green-600 text-white font-bold text-sm hover:bg-green-500 active:scale-95 transition-all"
+                      >
+                        ▶ Play
+                      </button>
+                      {replays.length > 0 && (
+                        <button
+                          onClick={() => onPlayCustomLevel?.(level, getReplay(levelId))}
+                          className="flex-1 py-2 rounded-lg bg-blue-600 text-white font-bold text-sm hover:bg-blue-500 active:scale-95 transition-all"
+                        >
+                          👻 Race Ghost
+                        </button>
+                      )}
+                      {records.length > 0 && (
+                        <button
+                          onClick={() => {
+                            const next = leaderboardLevelId === levelId ? null : levelId;
+                            setLeaderboardLevelId(next);
+                            if (next) setGhostListLevelId(null);
+                          }}
+                          className="py-2 px-3 rounded-lg bg-game-bar-bg text-game-title font-bold text-sm border-2 border-game-card-border hover:border-game-accent active:scale-95 transition-all"
+                        >
+                          📊
+                        </button>
+                      )}
+                      {replays.length > 0 && (
+                        <button
+                          onClick={() => {
+                            const next = ghostListLevelId === levelId ? null : levelId;
+                            setGhostListLevelId(next);
+                            if (next) setLeaderboardLevelId(null);
+                          }}
+                          className="py-2 px-3 rounded-lg bg-game-bar-bg text-game-title font-bold text-sm border-2 border-game-card-border hover:border-game-accent active:scale-95 transition-all"
+                        >
+                          👻
+                        </button>
+                      )}
+                    </div>
+                    {leaderboardLevelId === levelId && records.length > 0 && (
+                      <div className="mt-3 bg-game-bg rounded-xl p-3">
+                        <p className="text-game-subtitle text-xs mb-2 text-center font-bold">
+                          Top Times
+                        </p>
+                        {records.map((r, i) => {
+                          const matchReplay = replays.find(rep => Math.abs(rep.time - r.time) < 0.001);
+                          return (
+                            <div
+                              key={i}
+                              className="flex items-center justify-between text-sm py-1 text-game-subtitle"
+                            >
+                              <span className="w-8">#{i + 1}</span>
+                              <span className="flex-1">{formatTime(r.time)}</span>
+                              {matchReplay && (
+                                <button
+                                  onClick={() => onPlayCustomLevel?.(level, matchReplay)}
+                                  className="text-xs px-2 py-0.5 rounded-md bg-blue-700 text-white hover:bg-blue-500 active:scale-95 transition-all"
+                                >
+                                  👻 Race
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {ghostListLevelId === levelId && replays.length > 0 && (() => {
+                      const dir = ghostSortDir === 'asc' ? 1 : -1;
+                      const sorted = [...replays].sort((a, b) =>
+                        ghostSortKey === 'time' ? (a.time - b.time) * dir : (a.date - b.date) * dir
+                      );
+                      const sortArrow = (key: 'time' | 'date') =>
+                        ghostSortKey === key ? (ghostSortDir === 'asc' ? ' ↑' : ' ↓') : '';
+                      return (
+                        <div className="mt-3 bg-game-bg rounded-xl p-3">
+                          <p className="text-game-subtitle text-xs mb-2 text-center font-bold">
+                            Ghost Replays
+                          </p>
+                          <div className="flex items-center gap-2 text-xs text-game-subtitle mb-1">
+                            <span className="flex-1">Name</span>
+                            <button onClick={() => handleGhostSort('time')} className={`shrink-0 w-14 text-right hover:text-game-title transition-colors${ghostSortKey === 'time' ? ' text-game-accent font-bold' : ''}`}>
+                              Time{sortArrow('time')}
+                            </button>
+                            <button onClick={() => handleGhostSort('date')} className={`shrink-0 w-20 text-right hover:text-game-title transition-colors${ghostSortKey === 'date' ? ' text-game-accent font-bold' : ''}`}>
+                              Saved{sortArrow('date')}
+                            </button>
+                            <span className="shrink-0 w-[70px]" />
+                          </div>
+                          {sorted.map((r, i) => (
+                            <div
+                              key={`${replayVersion}-${i}`}
+                              className="flex items-center justify-between text-sm py-1 text-game-subtitle gap-2"
+                            >
+                              <span className="flex-1 truncate">{r.name}</span>
+                              <span className="shrink-0 w-14 text-right">{formatTime(r.time)}</span>
+                              <span className="shrink-0 w-20 text-right text-xs">{fmtDate(r.date)}</span>
+                              <button
+                                onClick={() => onPlayCustomLevel?.(level, r)}
+                                className="shrink-0 text-xs px-2 py-0.5 rounded-md bg-blue-700 text-white hover:bg-blue-500 active:scale-95 transition-all"
+                              >
+                                👻 Race
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (window.confirm(`Delete replay "${r.name}"?`)) {
+                                    deleteReplay(levelId, r.name);
+                                    setReplayVersion(v => v + 1);
+                                  }
+                                }}
+                                className="shrink-0 text-xs px-1.5 py-0.5 rounded-md bg-red-900 text-white hover:bg-red-600 active:scale-95 transition-all"
+                                title="Delete replay"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <button
+            onClick={() => { setView('playSelect'); setLeaderboardLevelId(null); setGhostListLevelId(null); }}
             className="mt-6 w-full py-3 rounded-xl bg-game-card border-2 border-game-card-border text-game-title font-bold text-lg hover:brightness-110 active:scale-[0.98] transition-all"
           >
             ← Back
@@ -293,7 +495,7 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
           )}
 
           <button
-            onClick={() => { setView('main'); setLeaderboardLevelId(null); setGhostListLevelId(null); }}
+            onClick={() => { setView('playSelect'); setLeaderboardLevelId(null); setGhostListLevelId(null); }}
             className="mt-6 w-full py-3 rounded-xl bg-game-card border-2 border-game-card-border text-game-title font-bold text-lg hover:brightness-110 active:scale-[0.98] transition-all"
           >
             ← Back
@@ -441,7 +643,7 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
 
       <div className="flex gap-3 w-full max-w-md mb-3">
         <button
-          onClick={() => setView('play')}
+          onClick={() => setView('playSelect')}
           className="flex-1 py-4 rounded-xl bg-green-600 text-white font-bold text-xl hover:bg-green-500 active:scale-[0.98] transition-all"
         >
           ▶ Play

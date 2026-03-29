@@ -24,8 +24,4 @@ dist-ssr
 *.sw?
 
 # Game related files
-public/assets/
-public/assets/music/
-public/assets/sound/
-public/assets/sprites/
 

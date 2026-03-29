@@ -974,6 +974,7 @@ export class GameEngine {
     this.flashTimer = 0.3;
     if (this.passengers <= 0) {
       this.gameOver = true;
+      soundManager.playGameOver();
       const cash = Math.floor(this.distance * 0.5);
       this.onGameOver?.(this.distance, cash);
     }
@@ -1811,8 +1812,41 @@ export class GameEngine {
     ctx.font = 'bold 14px system-ui, sans-serif';
     ctx.fillText(`⏱ ${timeLabel}`, w - 20, 50);
 
+    // Star count (top center) — only in levels that have collectible stars
+    if (this.collectibleStars.length > 0) {
+      const total = this.collectibleStars.length;
+      const collected = this.starsCollected;
+      if (total > 3) {
+        // Numeric display for many stars
+        const label = `⭐ ${collected} / ${total}`;
+        ctx.font = 'bold 16px system-ui, sans-serif';
+        const labelW = ctx.measureText(label).width + 24;
+        const labelX = Math.round((w - labelW) / 2);
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        this.roundRect(labelX, 10, labelW, 34, 6);
+        ctx.fill();
+        ctx.fillStyle = '#FFD54F';
+        ctx.textAlign = 'left';
+        ctx.fillText(label, labelX + 12, 33);
+      } else {
+        // Icon display for ≤3 stars
+        const starPanelW = 36 + total * 28;
+        const starPanelX = Math.round((w - starPanelW) / 2);
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        this.roundRect(starPanelX, 10, starPanelW, 36, 6);
+        ctx.fill();
+        ctx.font = '22px system-ui';
+        ctx.textAlign = 'left';
+        for (let s = 0; s < total; s++) {
+          ctx.globalAlpha = s < collected ? 1.0 : 0.25;
+          ctx.fillText('⭐', starPanelX + 8 + s * 28, 36);
+        }
+        ctx.globalAlpha = 1.0;
+      }
+    }
+
     // Passengers
-    const passengersY = 10 + panelH + 16;
+    const passengersY = 10 + panelH + 30;
     ctx.textAlign = 'left';
     for (let p = 0; p < 3 + this.upgrades.health; p++) {
       ctx.fillStyle = p < this.passengers ? '#E53935' : 'rgba(255,255,255,0.2)';

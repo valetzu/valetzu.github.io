@@ -2342,8 +2342,6 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
         return next;
       });
     } else if (tool === "star") {
-      // Max 3 stars per level
-      if (Object.keys(stars).length >= 3 && !stars[key]) return;
       setStars((prev) => ({ ...prev, [key]: "star" }));
     } else if (tool === "rail" || tool === "rail_crossing") {
       // Skip if we already placed on this exact tile during this drag
@@ -2659,7 +2657,7 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
       obstacles,
       startMarker: startMarker ?? undefined,
       endMarker: endMarker ?? undefined,
-      createdAt: Date.now(),
+      createdAt: existing?.createdAt ?? Date.now(),
       musicFile: currentMusicFile || undefined,
       skyTheme: skyTheme !== 'day' ? skyTheme : undefined,
       bgTiles: Object.keys(bgTiles).length > 0 ? bgTiles : undefined,
@@ -2683,6 +2681,7 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
       return;
     }
     const id = currentLevelId || generateLevelId();
+    const existing = loadCustomLevels().find((l) => l.id === id);
     const level: EditorLevel = {
       name: currentLevelName,
       id,
@@ -2691,7 +2690,7 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
       obstacles,
       startMarker: startMarker ?? undefined,
       endMarker: endMarker ?? undefined,
-      createdAt: Date.now(),
+      createdAt: existing?.createdAt ?? Date.now(),
       musicFile: currentMusicFile || undefined,
       skyTheme: skyTheme !== 'day' ? skyTheme : undefined,
       bgTiles: Object.keys(bgTiles).length > 0 ? bgTiles : undefined,
@@ -3265,7 +3264,7 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
                   {t.emoji} {t.label}
                 </button>
 
-                {(isFreeLine || t.tool === "line") && isActive && (
+                {(isFreeLine || t.tool === "line" || t.tool === "rail" || t.tool === "draw_rail") && isActive && (
                   <div className="bg-game-card border border-game-card-border rounded-lg p-2 min-w-[180px] shadow-lg flex flex-col gap-1">
                     {isFreeLine && (
                       <button
@@ -3293,26 +3292,43 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
                         {line2GridSnap ? "🧲 Grid snap: On" : "🧲 Grid snap: Off"}
                       </button>
                     )}
+                    {(isFreeLine || t.tool === "line") && (
+                      <button
+                        onClick={() => {
+                          setContinuousLine((enabled) => {
+                            const nextEnabled = !enabled;
+                            updateSetting("continuousLine", nextEnabled);
+                            return nextEnabled;
+                          });
+                        }}
+                        className={`w-full px-3 py-2 rounded-lg text-sm font-bold transition-all text-left ${
+                          continuousLine
+                            ? "bg-green-700 text-white hover:bg-green-600"
+                            : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+                        }`}
+                        title={
+                          continuousLine
+                            ? "Continuous: ON — endpoint becomes next start point"
+                            : "Continuous: OFF — each line placed independently"
+                        }
+                      >
+                        {continuousLine ? "🔗 Continuous: On" : "🔗 Continuous: Off"}
+                      </button>
+                    )}
                     <button
-                      onClick={() => {
-                        setContinuousLine((enabled) => {
-                          const nextEnabled = !enabled;
-                          updateSetting("continuousLine", nextEnabled);
-                          return nextEnabled;
-                        });
-                      }}
+                      onClick={() => setAutoconnect((a) => !a)}
                       className={`w-full px-3 py-2 rounded-lg text-sm font-bold transition-all text-left ${
-                        continuousLine
+                        autoconnect
                           ? "bg-green-700 text-white hover:bg-green-600"
                           : "bg-gray-700 text-gray-300 hover:bg-gray-600"
                       }`}
                       title={
-                        continuousLine
-                          ? "Continuous: ON — endpoint becomes next start point"
-                          : "Continuous: OFF — each line placed independently"
+                        autoconnect
+                          ? "Autoconnect: ON — rail auto-connects to nearby segment endpoints"
+                          : "Autoconnect: OFF"
                       }
                     >
-                      {continuousLine ? "🔗 Continuous: On" : "🔗 Continuous: Off"}
+                      {autoconnect ? "🔗 Autoconnect: On" : "🔗 Autoconnect: Off"}
                     </button>
                   </div>
                 )}
@@ -3461,21 +3477,6 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
             title={`Sky: ${SKY_THEMES[skyTheme].name}`}
           >
             {SKY_THEMES[skyTheme].name}
-          </button>
-          <button
-            onClick={() => setAutoconnect((a) => !a)}
-            className={`px-3 py-2 rounded-lg text-sm font-bold ${
-              autoconnect
-                ? "bg-green-700 text-white hover:bg-green-600"
-                : "bg-gray-700 text-gray-300 hover:bg-gray-600"
-            }`}
-            title={
-              autoconnect
-                ? "Autoconnect: ON — rail tiles auto-connect to nearby segment endpoints"
-                : "Autoconnect: OFF"
-            }
-          >
-            {autoconnect ? "🔗 Auto" : "🔗"}
           </button>
           <button
             onClick={startTest}

@@ -1,4 +1,5 @@
 import { Obstacle, Point } from './types';
+import { soundManager } from './soundManager';
 
 // ---------------------------------------------------------------------------
 // Behavior interface — each obstacle type implements update, collision, render
@@ -242,7 +243,15 @@ export const pendulumBehavior: ObstacleBehavior = {
 
 export const laserBehavior: ObstacleBehavior = {
   update(obs, dt) {
+    const warnRad = obs.bounceSpeed * (obs.warningTime ?? 2.0);
+    const cycle = warnRad + Math.PI;
+    const phasePrev = obs.angle % cycle;
     obs.angle += obs.bounceSpeed * dt;
+    const phaseNext = obs.angle % cycle;
+    // Play sound at the exact moment the beam switches from warning → active
+    if (phasePrev < warnRad && phaseNext >= warnRad) {
+      soundManager.playLaserFire();
+    }
   },
 
   checkCollision(obs, cx, cy, hitRadius) {
@@ -662,6 +671,7 @@ export const mineBehavior: ObstacleBehavior = {
       if (obs.bounceSpeed <= 0) {
         obs.armLength = 2;
         obs.amplitude = 0;
+        soundManager.playMineExplode();
         const cab2 = gameCtx.getCabinCenter();
         const dx = cab2.x - obs.x;
         const dy = cab2.y - obs.y;

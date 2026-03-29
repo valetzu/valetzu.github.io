@@ -98,6 +98,8 @@ export default function CustomLevelPlayer({
                 const hash = computeLevelHash(level);
                 saveAutoReplay(recorder.toReplayData(levelId, hash, formatTime(time), time, starsCollected));
               }
+            } else if (engine.ghostTime != null && time < engine.ghostTime) {
+              soundManager.playBeatGhost();
             } else {
               soundManager.playLevelComplete();
             }
@@ -298,24 +300,35 @@ export default function CustomLevelPlayer({
       {levelComplete && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-20">
           <div className="bg-game-card border-2 border-game-accent rounded-2xl p-8 w-96 text-center">
-            <h2 className="text-4xl font-bold text-game-accent mb-2">
+            <h2 className="text-4xl font-bold text-white mb-2">
               {levelComplete.isNewBest ? "🏆 New Best!" : "🎉 Level Complete!"}
             </h2>
             <p className="text-game-subtitle text-lg mb-4">{level.name}</p>
 
-            <div className="flex justify-center gap-2 mb-3">
-              {[0, 1, 2].map((i) => (
-                <span
-                  key={i}
-                  className={`text-3xl ${i < levelComplete.starsCollected ? "opacity-100" : "opacity-25"}`}
-                >
-                  ⭐
-                </span>
-              ))}
-            </div>
-            <p className="text-game-subtitle text-sm mb-4">
-              {levelComplete.starsCollected}/3 Stars
-            </p>
+            {(() => {
+              const total = Object.keys(level.stars ?? {}).length || 3;
+              return total > 3 ? (
+                <p className="text-2xl font-bold text-yellow-400 mb-4">
+                  ⭐ {levelComplete.starsCollected} / {total} Stars
+                </p>
+              ) : (
+                <>
+                  <div className="flex justify-center gap-2 mb-3">
+                    {Array.from({ length: total }).map((_, i) => (
+                      <span
+                        key={i}
+                        className={`text-3xl ${i < levelComplete.starsCollected ? "opacity-100" : "opacity-25"}`}
+                      >
+                        ⭐
+                      </span>
+                    ))}
+                  </div>
+                  <p className="text-game-subtitle text-sm mb-4">
+                    {levelComplete.starsCollected}/{total} Stars
+                  </p>
+                </>
+              );
+            })()}
 
             <div className="bg-game-bg rounded-xl p-4 mb-4">
               <p className="text-game-subtitle text-sm">Completion Time</p>
@@ -369,6 +382,7 @@ export default function CustomLevelPlayer({
                           <button onClick={() => handleGhostSort('time')} className={`shrink-0 w-14 text-right hover:text-game-title transition-colors${ghostSortKey === 'time' ? ' text-game-accent font-bold' : ''}`}>
                             Time{sortArrow('time')}
                           </button>
+                          <span className="shrink-0 w-8 text-center">⭐</span>
                           <button onClick={() => handleGhostSort('date')} className={`shrink-0 w-20 text-right hover:text-game-title transition-colors${ghostSortKey === 'date' ? ' text-game-accent font-bold' : ''}`}>
                             Saved{sortArrow('date')}
                           </button>
@@ -378,6 +392,7 @@ export default function CustomLevelPlayer({
                           <div key={`${replayVersion}-${i}`} className="flex items-center gap-2 text-sm py-1 text-game-subtitle">
                             <span className="flex-1 truncate">{r.name}</span>
                             <span className="shrink-0 w-14 text-right">{formatTime(r.time)}</span>
+                            <span className="shrink-0 w-8 text-center text-xs">{r.starsCollected ?? 0}⭐</span>
                             <span className="shrink-0 w-20 text-right text-xs">{fmtDate(r.date)}</span>
                             <button
                               onClick={() => handleReplay(r)}
@@ -418,6 +433,9 @@ export default function CustomLevelPlayer({
                         >
                           <span className="w-8">#{i + 1}</span>
                           <span className="flex-1">{formatTime(r.time)}</span>
+                          {r.starsCollected != null && (
+                            <span className="text-xs shrink-0">{r.starsCollected}⭐</span>
+                          )}
                           {matchReplay && (
                             <button
                               onClick={() => handleReplay(matchReplay)}

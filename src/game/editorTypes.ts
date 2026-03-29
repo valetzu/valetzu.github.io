@@ -564,7 +564,10 @@ export function smoothDrawnRail(
 export function saveCustomLevel(level: EditorLevel) {
   const levels = loadCustomLevels();
   const stamped = { ...level, updatedAt: Date.now() };
-  const idx = levels.findIndex((l) => l.name === level.name);
+  // Match by ID first (preferred), fall back to name for legacy entries without IDs
+  const idx = level.id
+    ? levels.findIndex((l) => l.id === level.id)
+    : levels.findIndex((l) => l.name === level.name);
   if (idx >= 0) levels[idx] = stamped;
   else levels.push(stamped);
   localStorage.setItem("cable-riders-custom-levels", JSON.stringify(levels));
@@ -581,6 +584,17 @@ export function loadCustomLevels(): EditorLevel[] {
 export function deleteCustomLevel(name: string) {
   const levels = loadCustomLevels().filter((l) => l.name !== name);
   localStorage.setItem("cable-riders-custom-levels", JSON.stringify(levels));
+}
+
+// Adventure levels — static JSON files in src/game/levels/, bundled at build time
+const _adventureLevelModules = import.meta.glob<EditorLevel>(
+  './levels/*.json',
+  { eager: true, import: 'default' },
+);
+
+export function loadAdventureLevels(): EditorLevel[] {
+  return Object.values(_adventureLevelModules)
+    .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
 }
 
 // ─── Unified Segment Builders ────────────────────────────────────────────────
