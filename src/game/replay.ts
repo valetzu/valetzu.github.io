@@ -20,6 +20,7 @@ export interface ReplayData {
   levelId: string;
   levelHash: string;
   name: string; // user-chosen or auto-generated formatted time
+  nickname?: string; // player display name at time of recording
   time: number; // completion time (seconds)
   starsCollected: number;
   date: number; // Date.now()
@@ -154,12 +155,14 @@ export class GhostRecorder {
     name: string,
     time: number,
     starsCollected: number,
+    nickname?: string,
   ): ReplayData {
     return {
       version: 1,
       levelId,
       levelHash,
       name,
+      nickname,
       time,
       starsCollected,
       date: Date.now(),

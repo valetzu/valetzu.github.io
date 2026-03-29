@@ -23,10 +23,11 @@ import {
   saveAutoReplay,
   getReplay,
   getReplaysForLevel,
-  deleteReplay,
   type ReplayData,
 } from "@/game/replay";
 import PauseMenu from "./PauseMenu";
+import GhostReplayDialog from "./GhostReplayDialog";
+import { loadSettings } from "@/game/settings";
 
 interface CustomLevelPlayerProps {
   level: EditorLevel;
@@ -45,19 +46,6 @@ export default function CustomLevelPlayer({
   const gameOverRef = useRef(false);
   const [paused, setPaused] = useState(false);
   const [showGhostList, setShowGhostList] = useState(false);
-  const [ghostSortKey, setGhostSortKey] = useState<'time' | 'date'>('time');
-  const [ghostSortDir, setGhostSortDir] = useState<'asc' | 'desc'>('asc');
-  const [replayVersion, setReplayVersion] = useState(0);
-
-  const handleGhostSort = (key: 'time' | 'date') => {
-    if (ghostSortKey === key) setGhostSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    else { setGhostSortKey(key); setGhostSortDir('asc'); }
-  };
-
-  const fmtDate = (ts: number) => {
-    const d = new Date(ts);
-    return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-  };
   const [levelComplete, setLevelComplete] = useState<{
     time: number;
     records: LevelRecord[];
@@ -96,7 +84,8 @@ export default function CustomLevelPlayer({
               const recorder = ghostRecorderRef.current;
               if (recorder && recorder.frames.length > 0) {
                 const hash = computeLevelHash(level);
-                saveAutoReplay(recorder.toReplayData(levelId, hash, formatTime(time), time, starsCollected));
+                const { nickname } = loadSettings();
+                saveAutoReplay(recorder.toReplayData(levelId, hash, formatTime(time), time, starsCollected, nickname || undefined));
               }
             } else if (engine.ghostTime != null && time < engine.ghostTime) {
               soundManager.playBeatGhost();
@@ -174,6 +163,7 @@ export default function CustomLevelPlayer({
       if (replay) {
         engine.ghostPlayer = new GhostPlayer(replay);
         engine.ghostTime = replay.time;
+        engine.ghostNickname = replay.nickname || null;
       }
 
       engineRef.current = engine;
@@ -249,19 +239,22 @@ export default function CustomLevelPlayer({
   const getCurrentRunReplay = (): ReplayData | null => {
     const recorder = ghostRecorderRef.current;
     if (!recorder || recorder.frames.length === 0 || !levelComplete) return null;
-    return recorder.toReplayData(levelId, computeLevelHash(level), "_current_", levelComplete.time, levelComplete.starsCollected);
+    const { nickname } = loadSettings();
+    return recorder.toReplayData(levelId, computeLevelHash(level), "_current_", levelComplete.time, levelComplete.starsCollected, nickname || undefined);
   };
 
   const handleSaveGhost = (name: string) => {
     const recorder = ghostRecorderRef.current;
     if (!recorder || recorder.frames.length === 0 || !levelComplete) return;
     const hash = computeLevelHash(level);
+    const { nickname } = loadSettings();
     const replay = recorder.toReplayData(
       levelId,
       hash,
       name,
       levelComplete.time,
       levelComplete.starsCollected,
+      nickname || undefined,
     );
     saveReplay(replay);
   };
@@ -349,108 +342,59 @@ export default function CustomLevelPlayer({
                 <div className="bg-game-bg rounded-xl p-3 mb-4 text-left">
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-game-subtitle text-xs font-bold flex-1 text-center">
-                      {showGhostList ? "Ghost Replays" : "Top Times"}
+                      Top Times
                     </p>
                     {replays.length > 0 && (
-                      <div className="flex rounded-md overflow-hidden border border-game-card-border text-xs font-bold">
-                        <button
-                          onClick={() => setShowGhostList(false)}
-                          className={`px-2 py-0.5 transition-all ${!showGhostList ? "bg-game-accent text-game-bg" : "bg-game-bar-bg text-game-subtitle hover:text-game-title"}`}
-                        >
-                          Best
-                        </button>
-                        <button
-                          onClick={() => setShowGhostList(true)}
-                          className={`px-2 py-0.5 transition-all ${showGhostList ? "bg-game-accent text-game-bg" : "bg-game-bar-bg text-game-subtitle hover:text-game-title"}`}
-                        >
-                          All 👻
-                        </button>
-                      </div>
+                      <button
+                        onClick={() => setShowGhostList(true)}
+                        className="text-xs px-2 py-0.5 rounded-md bg-game-bar-bg border border-game-card-border text-game-subtitle hover:text-game-title font-bold transition-all"
+                      >
+                        All 👻
+                      </button>
                     )}
                   </div>
-                  {showGhostList ? (() => {
-                    const dir = ghostSortDir === 'asc' ? 1 : -1;
-                    const sorted = [...replays].sort((a, b) =>
-                      ghostSortKey === 'time' ? (a.time - b.time) * dir : (a.date - b.date) * dir
-                    );
-                    const sortArrow = (key: 'time' | 'date') =>
-                      ghostSortKey === key ? (ghostSortDir === 'asc' ? ' ↑' : ' ↓') : '';
-                    return (
-                      <>
-                        <div className="flex items-center gap-2 text-xs text-game-subtitle mb-1">
-                          <span className="flex-1">Name</span>
-                          <button onClick={() => handleGhostSort('time')} className={`shrink-0 w-14 text-right hover:text-game-title transition-colors${ghostSortKey === 'time' ? ' text-game-accent font-bold' : ''}`}>
-                            Time{sortArrow('time')}
-                          </button>
-                          <span className="shrink-0 w-8 text-center">⭐</span>
-                          <button onClick={() => handleGhostSort('date')} className={`shrink-0 w-20 text-right hover:text-game-title transition-colors${ghostSortKey === 'date' ? ' text-game-accent font-bold' : ''}`}>
-                            Saved{sortArrow('date')}
-                          </button>
-                          <span className="shrink-0 w-[70px]" />
-                        </div>
-                        {sorted.map((r, i) => (
-                          <div key={`${replayVersion}-${i}`} className="flex items-center gap-2 text-sm py-1 text-game-subtitle">
-                            <span className="flex-1 truncate">{r.name}</span>
-                            <span className="shrink-0 w-14 text-right">{formatTime(r.time)}</span>
-                            <span className="shrink-0 w-8 text-center text-xs">{r.starsCollected ?? 0}⭐</span>
-                            <span className="shrink-0 w-20 text-right text-xs">{fmtDate(r.date)}</span>
-                            <button
-                              onClick={() => handleReplay(r)}
-                              className="shrink-0 text-xs px-2 py-0.5 rounded-md bg-blue-700 text-white hover:bg-blue-500 active:scale-95 transition-all"
-                            >
-                              👻 Race
-                            </button>
-                            <button
-                              onClick={() => {
-                                if (window.confirm(`Delete replay "${r.name}"?`)) {
-                                  deleteReplay(levelId, r.name);
-                                  setReplayVersion(v => v + 1);
-                                }
-                              }}
-                              className="shrink-0 text-xs px-1.5 py-0.5 rounded-md bg-red-900 text-white hover:bg-red-600 active:scale-95 transition-all"
-                              title="Delete replay"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        ))}
-                      </>
-                    );
-                  })() : (
-                    levelComplete.records.map((r, i) => {
-                      const isCurrentRun =
-                        r.time === levelComplete.time &&
-                        r.date === Math.max(
-                          ...levelComplete.records
-                            .filter((x) => x.time === levelComplete.time)
-                            .map((x) => x.date),
-                        );
-                      const matchReplay = replays.find((rep) => Math.abs(rep.time - r.time) < 0.001);
-                      return (
-                        <div
-                          key={i}
-                          className={`flex items-center text-sm py-1 gap-1 ${isCurrentRun ? "text-game-accent font-bold" : "text-game-subtitle"}`}
-                        >
-                          <span className="w-8">#{i + 1}</span>
-                          <span className="flex-1">{formatTime(r.time)}</span>
-                          {r.starsCollected != null && (
-                            <span className="text-xs shrink-0">{r.starsCollected}⭐</span>
-                          )}
-                          {matchReplay && (
-                            <button
-                              onClick={() => handleReplay(matchReplay)}
-                              className="text-xs px-2 py-0.5 rounded-md bg-blue-700 text-white hover:bg-blue-500 active:scale-95 transition-all"
-                            >
-                              👻 Race
-                            </button>
-                          )}
-                        </div>
+                  {levelComplete.records.map((r, i) => {
+                    const isCurrentRun =
+                      r.time === levelComplete.time &&
+                      r.date === Math.max(
+                        ...levelComplete.records
+                          .filter((x) => x.time === levelComplete.time)
+                          .map((x) => x.date),
                       );
-                    })
-                  )}
+                    const matchReplay = replays.find((rep) => Math.abs(rep.time - r.time) < 0.001);
+                    return (
+                      <div
+                        key={i}
+                        className={`flex items-center text-sm py-1 gap-1 ${isCurrentRun ? "text-game-accent font-bold" : "text-game-subtitle"}`}
+                      >
+                        <span className="w-8">#{i + 1}</span>
+                        <span className="flex-1">{formatTime(r.time)}</span>
+                        {r.starsCollected != null && (
+                          <span className="text-xs shrink-0">{r.starsCollected}⭐</span>
+                        )}
+                        {matchReplay && (
+                          <button
+                            onClick={() => handleReplay(matchReplay)}
+                            className="text-xs px-2 py-0.5 rounded-md bg-blue-700 text-white hover:bg-blue-500 active:scale-95 transition-all"
+                          >
+                            👻 Race
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               );
             })()}
+
+            {showGhostList && (
+              <GhostReplayDialog
+                levelId={levelId}
+                replays={getReplaysForLevel(levelId)}
+                onRace={(r) => { setShowGhostList(false); handleReplay(r); }}
+                onClose={() => setShowGhostList(false)}
+              />
+            )}
 
             {/* Ghost buttons */}
             <div className="flex gap-2 mb-3">

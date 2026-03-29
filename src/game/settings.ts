@@ -3,6 +3,7 @@ export interface GameSettings {
   snapRadius: number; // pixels, min 5
   defaultFreeLineToolBehaviour: "normal" | "grid_snap";
   continuousLine: boolean;
+  nickname: string;
 }
 
 const SETTINGS_KEY = "game-settings";
@@ -12,6 +13,7 @@ const defaults: GameSettings = {
   snapRadius: 25,
   defaultFreeLineToolBehaviour: "normal",
   continuousLine: false,
+  nickname: "",
 };
 
 export function loadSettings(): GameSettings {

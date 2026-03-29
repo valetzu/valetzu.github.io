@@ -25,6 +25,11 @@ export default function SettingsMenu({
     musicManager.setVolume(vol);
   };
 
+  const handleNickname = (val: string) => {
+    const next = updateSetting("nickname", val.slice(0, 20));
+    setSettings(next);
+  };
+
   const handleSnapRadius = (val: number) => {
     const clamped = Math.max(MIN_SNAP, Math.min(MAX_SNAP, val));
     const next = updateSetting("snapRadius", clamped);
@@ -79,6 +84,22 @@ export default function SettingsMenu({
         <div className="p-6 space-y-5">
           {activeTab === "sound" && (
             <>
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="font-bold text-game-title">Nickname</label>
+                  <span className="text-game-subtitle text-xs tabular-nums">
+                    {settings.nickname.length}/20
+                  </span>
+                </div>
+                <input
+                  type="text"
+                  maxLength={20}
+                  value={settings.nickname}
+                  onChange={(e) => handleNickname(e.target.value)}
+                  placeholder="Your name on replays…"
+                  className="w-full px-3 py-2 rounded-lg bg-game-bar-bg border-2 border-game-card-border text-game-title text-sm focus:border-game-accent outline-none"
+                />
+              </div>
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="font-bold text-game-title">

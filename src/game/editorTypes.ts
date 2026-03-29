@@ -162,6 +162,15 @@ export interface SnapPoint {
   endpoint: "A" | "B";
 }
 
+export interface LevelMeta {
+  /** Display title — shown in-game; separate from the storage filename (`name`). */
+  title?: string;
+  /** Short description shown in level lists. */
+  description?: string;
+  /** Author nickname at time of save. */
+  author?: string;
+}
+
 export interface EditorLevel {
   name: string;
   /** Stable unique identifier used for music folder paths and deduplication. */
@@ -170,6 +179,8 @@ export interface EditorLevel {
   version?: number;
   createdAt: number;
   updatedAt?: number;
+  /** Optional display metadata (title, description, author). */
+  meta?: LevelMeta;
   /** Music filename relative to public/assets/music/customLevels/{id}/ */
   musicFile?: string;
   /** Sky gradient theme — defaults to 'day' when absent. */

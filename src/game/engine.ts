@@ -120,6 +120,7 @@ export class GameEngine {
 
   ghostRecorder: GhostRecorder | null = null;
   ghostPlayer: GhostPlayer | null = null;
+  ghostNickname: string | null = null;
   debugHitbox = false;
 
   /** Personal best time for the current level (seconds), or null if none */
@@ -1344,6 +1345,26 @@ export class GameEngine {
       }
 
       ctx.restore();
+
+      // Ghost nickname label — visible for first 5s, fades out in the last second
+      // Drawn after restore() so coordinates are in screen space
+      if (this.ghostNickname && this.elapsedTime < 5) {
+        const labelAlpha = Math.min(1, 5 - this.elapsedTime);
+        const cableEnd = GONDOLA_HANG + CABIN_H / 2;
+        const labelX = sx - Math.sin(frame.pa) * cableEnd;
+        const labelY = sy + Math.cos(frame.pa) * cableEnd + 16;
+        ctx.save();
+        ctx.globalAlpha = labelAlpha * 0.9;
+        ctx.font = 'bold 12px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+        ctx.lineWidth = 3;
+        ctx.lineJoin = 'round';
+        ctx.strokeText(`👻 ${this.ghostNickname}`, labelX, labelY);
+        ctx.fillStyle = '#90CAF9';
+        ctx.fillText(`👻 ${this.ghostNickname}`, labelX, labelY);
+        ctx.restore();
+      }
     } else if (gp.lastFrame && gp.finishedAge < 2) {
       // Ghost finished — show checkered flag indicator for 2s
       gp.finishedAge += this.FIXED_DT;

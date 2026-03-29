@@ -175,7 +175,7 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
   const lastPlacedKeyRef = useRef<string | null>(null);
   const [skyTheme, setSkyTheme] = useState<SkyThemeId>('day');
   const [bgTiles, setBgTiles] = useState<Record<string, BgTile>>({});
-  const [paintColor, setPaintColor] = useState(BG_PALETTE[0]);
+  const [paintColor, setPaintColor] = useState<string>(BG_PALETTE[0]);
   const [paintOutline, setPaintOutline] = useState(false);
   const [paintOutlineColor, setPaintOutlineColor] = useState('#000000');
   const [paintSize, setPaintSize] = useState(1);
@@ -189,6 +189,9 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
   const [isDrawing, setIsDrawing] = useState(false);
   const [levelName, setLevelName] = useState("");
   const [currentLevelName, setCurrentLevelName] = useState("");
+  const [levelMetaTitle, setLevelMetaTitle] = useState("");
+  const [levelMetaDescription, setLevelMetaDescription] = useState("");
+  const [levelMetaAuthor, setLevelMetaAuthor] = useState("");
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [showLoadDialog, setShowLoadDialog] = useState(false);
   const [savedLevels, setSavedLevels] = useState<EditorLevel[]>([]);
@@ -2907,9 +2910,10 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
                       stars: Object.keys(stars).length > 0 ? stars : undefined,
                     };
                     const hash = computeLevelHash(level);
+                    const { nickname } = loadSettings();
                     const replay = recorder.toReplayData(
                       levelId, hash, "Personal Best",
-                      levelComplete.time, levelComplete.starsCollected,
+                      levelComplete.time, levelComplete.starsCollected, nickname || undefined,
                     );
                     saveReplay(replay);
                     alert("Ghost saved as Personal Best!");
@@ -2938,9 +2942,10 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
                       stars: Object.keys(stars).length > 0 ? stars : undefined,
                     };
                     const hash = computeLevelHash(level);
+                    const { nickname } = loadSettings();
                     const replay = recorder.toReplayData(
                       levelId, hash, name,
-                      levelComplete.time, levelComplete.starsCollected,
+                      levelComplete.time, levelComplete.starsCollected, nickname || undefined,
                     );
                     saveReplay(replay);
                     alert(`Ghost saved as "${name}"!`);
