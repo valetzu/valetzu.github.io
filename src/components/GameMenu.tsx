@@ -677,7 +677,9 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
 
       <div className="mt-8 text-game-subtitle text-sm text-center space-y-1">
         <p>⬆️ Arrow Up = Throttle &nbsp; ⬇️ Arrow Down = Brake/Reverse</p>
-        <p>🚀 SPACE = Rocket Boost &nbsp; 🛡️ SHIFT = Shield</p>
+        <p>⬅️ Arrow Left = Tilt Cabin Left&nbsp; ➡️ Arrow Right = Tilt Cabin Right</p>
+          <p>Space = Switch Throttle Direction</p>
+        {/* <p>🚀 SPACE = Rocket Boost &nbsp; 🛡️ SHIFT = Shield</p> */}
       </div>
     </div>
   );

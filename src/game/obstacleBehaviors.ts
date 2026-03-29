@@ -311,7 +311,13 @@ export const laserBehavior: ObstacleBehavior = {
     }
 
     if (isActive) {
+      const activePhase = phase - warnRad;
+      const fadeDur = activeRad * 0.18;
+      const fadeIn = Math.min(activePhase / fadeDur, 1);
+      const fadeOut = Math.min((activeRad - activePhase) / fadeDur, 1);
+      const beamAlpha = Math.min(fadeIn, fadeOut);
       ctx.save();
+      ctx.globalAlpha = beamAlpha;
       ctx.shadowColor = '#ff0000';
       ctx.shadowBlur = 14;
       ctx.lineCap = 'round';

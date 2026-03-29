@@ -1748,10 +1748,13 @@ export class GameEngine {
   renderHUD(w: number, h: number) {
     const { ctx } = this;
 
-    // Distance + PB/Ghost times
-    const distText = `📏 ${Math.floor(this.distance)}m`;
+    // Elapsed time + PB/Ghost times (top-left)
+    const totalSeconds = Math.floor(this.elapsedTime);
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    const timeLabel = `⏱ ${mins}:${secs.toString().padStart(2, '0')}`;
     ctx.font = 'bold 18px system-ui, sans-serif';
-    const distTextW = ctx.measureText(distText).width + 20; // 10px padding each side
+    const timeLabelW = ctx.measureText(timeLabel).width + 20; // 10px padding each side
 
     let timeBadges: { label: string; color: string }[] = [];
     if (this.personalBestTime != null) {
@@ -1769,7 +1772,7 @@ export class GameEngine {
     }));
     const badgeTotalW = badgeMetrics.reduce((s, b) => s + b.w + 6, 0); // 6px gap
 
-    const panelW = Math.max(180, distTextW + badgeTotalW + 10);
+    const panelW = Math.max(180, timeLabelW + badgeTotalW + 10);
     const hasBadges = badgeMetrics.length > 0;
     const panelH = hasBadges ? 54 : 36;
 
@@ -1777,13 +1780,13 @@ export class GameEngine {
     this.roundRect(10, 10, panelW, panelH, 6);
     ctx.fill();
 
-    ctx.fillStyle = '#FFF';
+    ctx.fillStyle = '#FFD54F';
     ctx.font = 'bold 18px system-ui, sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText(distText, 20, 34);
+    ctx.fillText(timeLabel, 20, 34);
 
-    // PB and ghost time badges to the right of distance
-    let badgeX = 20 + distTextW + 4;
+    // PB and ghost time badges to the right of elapsed time
+    let badgeX = 20 + timeLabelW + 4;
     for (const badge of badgeMetrics) {
       ctx.fillStyle = 'rgba(0,0,0,0.3)';
       this.roundRect(badgeX, 16, badge.w, 24, 4);
@@ -1795,55 +1798,24 @@ export class GameEngine {
       badgeX += badge.w + 6;
     }
 
-    // Speed + timer panel (top-right)
+    // Speed + distance panel (top-right)
+    const speedText = `⚡ ${Math.floor(Math.abs(this.speed) * 0.36)} km/h`;
+    const distText = `📏 ${Math.floor(this.distance)}m`;
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    const speedTextW = ctx.measureText(speedText).width;
+    ctx.font = 'bold 14px system-ui, sans-serif';
+    const distTextW = ctx.measureText(distText).width;
+    const speedPanelW = Math.max(speedTextW, distTextW) + 24;
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    this.roundRect(w - 190, 10, 180, 52, 6);
+    this.roundRect(w - speedPanelW - 10, 10, speedPanelW, 52, 6);
     ctx.fill();
+    ctx.font = 'bold 18px system-ui, sans-serif';
     ctx.fillStyle = '#FFF';
     ctx.textAlign = 'right';
-    ctx.fillText(`⚡ ${Math.floor(Math.abs(this.speed) * 0.36)} km/h`, w - 20, 34);
-
-    // Elapsed time (visible game timer in top-right section)
-    const totalSeconds = Math.floor(this.elapsedTime);
-    const mins = Math.floor(totalSeconds / 60);
-    const secs = totalSeconds % 60;
-    const timeLabel = `${mins}:${secs.toString().padStart(2, '0')}`;
-    ctx.fillStyle = '#FFD54F';
+    ctx.fillText(speedText, w - 20, 34);
+    ctx.fillStyle = '#FFF';
     ctx.font = 'bold 14px system-ui, sans-serif';
-    ctx.fillText(`⏱ ${timeLabel}`, w - 20, 50);
-
-    // Star count (top center) — only in levels that have collectible stars
-    if (this.collectibleStars.length > 0) {
-      const total = this.collectibleStars.length;
-      const collected = this.starsCollected;
-      if (total > 3) {
-        // Numeric display for many stars
-        const label = `⭐ ${collected} / ${total}`;
-        ctx.font = 'bold 16px system-ui, sans-serif';
-        const labelW = ctx.measureText(label).width + 24;
-        const labelX = Math.round((w - labelW) / 2);
-        ctx.fillStyle = 'rgba(0,0,0,0.6)';
-        this.roundRect(labelX, 10, labelW, 34, 6);
-        ctx.fill();
-        ctx.fillStyle = '#FFD54F';
-        ctx.textAlign = 'left';
-        ctx.fillText(label, labelX + 12, 33);
-      } else {
-        // Icon display for ≤3 stars
-        const starPanelW = 36 + total * 28;
-        const starPanelX = Math.round((w - starPanelW) / 2);
-        ctx.fillStyle = 'rgba(0,0,0,0.6)';
-        this.roundRect(starPanelX, 10, starPanelW, 36, 6);
-        ctx.fill();
-        ctx.font = '22px system-ui';
-        ctx.textAlign = 'left';
-        for (let s = 0; s < total; s++) {
-          ctx.globalAlpha = s < collected ? 1.0 : 0.25;
-          ctx.fillText('⭐', starPanelX + 8 + s * 28, 36);
-        }
-        ctx.globalAlpha = 1.0;
-      }
-    }
+    ctx.fillText(distText, w - 20, 50);
 
     // Passengers
     const passengersY = 10 + panelH + 30;
@@ -1854,15 +1826,63 @@ export class GameEngine {
       ctx.fillText('❤️', 15 + p * 28, passengersY);
     }
 
+    // Star count (below health) — only in levels that have collectible stars
+    if (this.collectibleStars.length > 0) {
+      const total = this.collectibleStars.length;
+      const collected = this.starsCollected;
+      const starsY = passengersY + 28;
+      if (total > 3) {
+        // Numeric display for many stars
+        const label = `⭐ ${collected} / ${total}`;
+        ctx.font = 'bold 16px system-ui, sans-serif';
+        ctx.fillStyle = '#FFD54F';
+        ctx.textAlign = 'left';
+        ctx.fillText(label, 15, starsY);
+      } else {
+        // Icon display for ≤3 stars
+        ctx.font = '22px system-ui';
+        ctx.textAlign = 'left';
+        for (let s = 0; s < total; s++) {
+          ctx.globalAlpha = s < collected ? 1.0 : 0.25;
+          ctx.fillText('⭐', 15 + s * 28, starsY);
+        }
+        ctx.globalAlpha = 1.0;
+      }
+    }
+
     // Throttle/Brake bar
     const barW = 280;
     const barH = 30;
     const barX = (w - barW) / 2;
     const barY = h - 50;
+    const arrowRowH = 22; // height reserved above bar for the throttle direction indicator
 
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    this.roundRect(barX - 80, barY - 2, barW + 160, barH + 4, 8);
-    ctx.fill();
+
+    // Throttle direction arrow (shows which physical direction ▲ UP key will propel the gondola)
+    {
+      const upMeansForward = !this.directionFlipped;
+      const upPressed = this.keys.up;
+      // The arrow showing UP key's mapped direction
+      const upArrow = upMeansForward ? '▶' : '◀';
+      const cx = w / 2;
+      const arrowY = barY - arrowRowH / 2 + 6;
+
+      ctx.font = 'bold 13px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+
+      // UP key direction indicator
+      if (upPressed) {
+        ctx.fillStyle = '#4CAF50';
+        ctx.fillText(upArrow, cx, arrowY);
+      } else {
+        ctx.strokeStyle = '#FFF';
+        ctx.lineWidth = 3;
+        ctx.lineJoin = 'round';
+        ctx.strokeText(upArrow, cx, arrowY);
+        ctx.fillStyle = '#000';
+        ctx.fillText(upArrow, cx, arrowY);
+      }
+    }
 
     // Bar background
     ctx.fillStyle = '#333';
