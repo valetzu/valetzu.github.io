@@ -26,6 +26,7 @@ import {
   type ReplayData,
 } from "@/game/replay";
 import PauseMenu from "./PauseMenu";
+import MobileControls, { isMobileDevice } from "./MobileControls";
 import GhostReplayDialog from "./GhostReplayDialog";
 import { loadSettings } from "@/game/settings";
 
@@ -42,6 +43,7 @@ export default function CustomLevelPlayer({
 }: CustomLevelPlayerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
+  const isMobile = isMobileDevice();
   const ghostRecorderRef = useRef<GhostRecorder | null>(null);
   const gameOverRef = useRef(false);
   const [paused, setPaused] = useState(false);
@@ -286,6 +288,20 @@ export default function CustomLevelPlayer({
             engineRef.current?.stop();
             musicManager.stop();
             onBack();
+          }}
+        />
+      )}
+
+      {isMobile && !paused && !levelComplete && (
+        <MobileControls
+          engineRef={engineRef}
+          onPause={() => {
+            setPaused((prev) => {
+              const next = !prev;
+              if (next) engineRef.current?.pause();
+              else engineRef.current?.resume();
+              return next;
+            });
           }}
         />
       )}

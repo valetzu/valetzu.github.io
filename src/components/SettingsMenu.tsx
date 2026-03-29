@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { loadSettings, updateSetting, GameSettings } from "@/game/settings";
 import { musicManager } from "@/game/musicManager";
+import { isMobileDevice } from "./MobileControls";
 
 export type SettingsTab = "sound" | "editor";
 
@@ -40,6 +41,19 @@ export default function SettingsMenu({
     behaviour: GameSettings["defaultFreeLineToolBehaviour"],
   ) => {
     const next = updateSetting("defaultFreeLineToolBehaviour", behaviour);
+    setSettings(next);
+  };
+
+  const handleGyroControls = async (enable: boolean) => {
+    if (enable && typeof (DeviceOrientationEvent as any).requestPermission === "function") {
+      try {
+        const result = await (DeviceOrientationEvent as any).requestPermission();
+        if (result !== "granted") return;
+      } catch {
+        return;
+      }
+    }
+    const next = updateSetting("gyroControls", enable);
     setSettings(next);
   };
 
@@ -84,6 +98,22 @@ export default function SettingsMenu({
         <div className="p-6 space-y-5">
           {activeTab === "sound" && (
             <>
+              {isMobileDevice() && (
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="font-bold text-game-title">Gyro Controls</div>
+                    <div className="text-xs text-game-subtitle">Tilt phone to tilt cabin</div>
+                  </div>
+                  <button
+                    onClick={() => handleGyroControls(!settings.gyroControls)}
+                    className={`relative w-12 h-6 rounded-full transition-colors ${settings.gyroControls ? "bg-game-accent" : "bg-game-bar-bg border border-game-card-border"}`}
+                  >
+                    <span
+                      className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${settings.gyroControls ? "translate-x-6" : "translate-x-0.5"}`}
+                    />
+                  </button>
+                </div>
+              )}
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="font-bold text-game-title">Nickname</label>

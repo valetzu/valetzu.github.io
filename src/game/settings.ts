@@ -4,6 +4,7 @@ export interface GameSettings {
   defaultFreeLineToolBehaviour: "normal" | "grid_snap";
   continuousLine: boolean;
   nickname: string;
+  gyroControls: boolean;
 }
 
 const SETTINGS_KEY = "game-settings";
@@ -14,6 +15,7 @@ const defaults: GameSettings = {
   defaultFreeLineToolBehaviour: "normal",
   continuousLine: false,
   nickname: "",
+  gyroControls: false,
 };
 
 export function loadSettings(): GameSettings {

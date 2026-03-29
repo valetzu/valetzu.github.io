@@ -49,6 +49,8 @@ export class GameEngine {
   distance: number = 0;
   obstacles: Obstacle[] = [];
   keys = { up: false, down: false, left: false, right: false, space: false, shift: false };
+  /** Continuous tilt input from gyroscope, -1 (full left) to +1 (full right). Sums with key input. */
+  analogTiltInput: number = 0;
   noBackground = false;
   skyOverride: { skyTop: string; skyBottom: string } | null = null;
   bgTiles: Record<string, BgTile> = {};
@@ -298,6 +300,25 @@ export class GameEngine {
     if (this.animFrame) cancelAnimationFrame(this.animFrame);
   }
 
+  // --- Mobile input helpers ---
+  activateRocket() {
+    if (this.rocketTimer <= 0 && this.rocketCharges > 0) {
+      this.rocketTimer = ROCKET_DURATION;
+      this.rocketCharges--;
+    }
+  }
+
+  activateShield() {
+    if (this.shieldTimer <= 0 && this.shieldCharges > 0) {
+      this.shieldTimer = SHIELD_DURATION;
+      this.shieldCharges--;
+    }
+  }
+
+  flipDirection() {
+    this.directionFlipped = !this.directionFlipped;
+  }
+
   pause() {
     this.paused = true;
   }
@@ -365,6 +386,7 @@ export class GameEngine {
       let pendAlpha = -(gEff / GONDOLA_HANG) * Math.sin(this.pendulumAngle);
       if (this.keys.left) pendAlpha -= AIRBORNE_PLAYER_TORQUE;
       if (this.keys.right) pendAlpha += AIRBORNE_PLAYER_TORQUE;
+      pendAlpha += this.analogTiltInput * AIRBORNE_PLAYER_TORQUE;
       pendAlpha -= PENDULUM_DAMPING * this.pendulumVel;
       this.pendulumVel += pendAlpha * dt;
       this.pendulumAngle += this.pendulumVel * dt;
@@ -626,6 +648,7 @@ export class GameEngine {
     // Player tilt input (on-rail only)
     if (this.keys.left) pendAlpha -= PENDULUM_PLAYER_TORQUE;
     if (this.keys.right) pendAlpha += PENDULUM_PLAYER_TORQUE;
+    pendAlpha += this.analogTiltInput * PENDULUM_PLAYER_TORQUE;
 
     pendAlpha -= PENDULUM_DAMPING * this.pendulumVel;
 
