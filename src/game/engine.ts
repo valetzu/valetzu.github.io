@@ -2022,7 +2022,7 @@ export class GameEngine {
 
       ctx.font = '18px system-ui';
       ctx.fillStyle = '#AAA';
-      ctx.fillText('Press ENTER to continue', w / 2, h / 2 + 90);
+      ctx.fillText(this.isMobile ? 'Tap to continue' : 'Press ENTER to continue', w / 2, h / 2 + 90);
     }
 
     ctx.restore();

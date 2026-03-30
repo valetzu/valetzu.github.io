@@ -93,8 +93,8 @@ function useGyroTilt(engineRef: React.RefObject<GameEngine | null>, enabled: boo
       // Auto-calibrate on first reading
       if (calibrationRef.current === null) calibrationRef.current = raw;
       const relative = raw - calibrationRef.current;
-      // 30° of tilt = full torque; clamp to ±1
-      const input = Math.max(-1, Math.min(1, relative / 30));
+      // 30° of tilt = full torque; clamp to ±1; negated so tilt direction matches expectation
+      const input = Math.max(-1, Math.min(1, -(relative / 30)));
       if (engineRef.current) engineRef.current.analogTiltInput = input;
     };
 
@@ -152,8 +152,9 @@ export default function MobileControls({ engineRef, onPause, isEndless }: Mobile
   const tiltSize     = isLandscape ? 'w-16 h-20' : 'w-20 h-24';
   const throttleSize = isLandscape ? 'w-14 h-14' : 'w-16 h-16';
   const actionSize   = isLandscape ? 'w-10 h-10' : 'w-12 h-12';
+  const flipSize     = isLandscape ? 'w-20 h-20' : 'w-24 h-24';
 
-  // Shared action + pause chrome used by both layouts
+  // Shared pause button used by both layouts
   const pauseBtn = (
     <button
       className="pointer-events-auto absolute top-4 w-11 h-11 rounded-full bg-white/20 border border-white/40 text-white text-base flex items-center justify-center select-none"
@@ -164,32 +165,7 @@ export default function MobileControls({ engineRef, onPause, isEndless }: Mobile
     </button>
   );
 
-  const actionButtons = (className = '') => (
-    <div className={`pointer-events-auto flex gap-2 ${className}`}>
-      <TapButton
-        label="FLIP"
-        onClick={() => engineRef.current?.flipDirection()}
-        className={`${actionSize} bg-white/20 active:bg-white/40 border border-white/40`}
-      />
-      {isEndless && (
-        <TapButton
-          label="🚀"
-          onClick={() => engineRef.current?.activateRocket()}
-          className={`${actionSize} bg-orange-400/50 active:bg-orange-400/80 border border-orange-300/60`}
-        />
-      )}
-      {isEndless && (
-        <TapButton
-          label="🛡️"
-          onClick={() => engineRef.current?.activateShield()}
-          className={`${actionSize} bg-blue-400/50 active:bg-blue-400/80 border border-blue-300/60`}
-        />
-      )}
-    </div>
-  );
-
   // ---- Gyro mode ----
-  const flipSize = isLandscape ? 'w-20 h-20' : 'w-24 h-24';
   if (gyroControls) {
     return (
       <div className="fixed inset-0 pointer-events-none z-50" style={{ touchAction: 'none' }}>
@@ -253,32 +229,64 @@ export default function MobileControls({ engineRef, onPause, isEndless }: Mobile
     <div className="fixed inset-0 pointer-events-none z-50" style={{ touchAction: 'none' }}>
       {pauseBtn}
 
-      {/* Tilt LEFT — left edge */}
+      {/* Tilt LEFT — left side, vertically centered */}
       <div
-        className="pointer-events-auto absolute flex items-end"
-        style={{ left: safeLeft, bottom: safeBottom }}
+        className="pointer-events-auto absolute top-1/2 -translate-y-1/2"
+        style={{ left: safeLeft }}
       >
         <HoldButton label="◄" onStart={press('left')} onEnd={release('left')} className={tiltSize} />
       </div>
 
-      {/* Tilt RIGHT — right edge */}
+      {/* Tilt RIGHT — right side, vertically centered */}
       <div
-        className="pointer-events-auto absolute flex items-end"
-        style={{ right: safeRight, bottom: safeBottom }}
+        className="pointer-events-auto absolute top-1/2 -translate-y-1/2"
+        style={{ right: safeRight }}
       >
         <HoldButton label="►" onStart={press('right')} onEnd={release('right')} className={tiltSize} />
       </div>
 
-      {/* Throttle + actions — center bottom */}
+      {/* Reverse — bottom-left corner */}
+      <div
+        className="pointer-events-auto absolute"
+        style={{ left: safeLeft, bottom: safeBottom }}
+      >
+        <HoldButton label="▼" onStart={press('down')} onEnd={release('down')} className={throttleSize} />
+      </div>
+
+      {/* Throttle — bottom-right corner */}
+      <div
+        className="pointer-events-auto absolute"
+        style={{ right: safeRight, bottom: safeBottom }}
+      >
+        <HoldButton label="▲" onStart={press('up')} onEnd={release('up')} className={throttleSize} />
+      </div>
+
+      {/* FLIP + optional endless actions — bottom center */}
       <div
         className="pointer-events-auto absolute left-1/2 -translate-x-1/2 flex flex-col items-center gap-2"
         style={{ bottom: safeBottom }}
       >
-        {actionButtons()}
-        <div className="flex gap-3">
-          <HoldButton label="▼" onStart={press('down')} onEnd={release('down')} className={throttleSize} />
-          <HoldButton label="▲" onStart={press('up')} onEnd={release('up')} className={throttleSize} />
-        </div>
+        {isEndless && (
+          <div className="flex gap-2">
+            <TapButton
+              label="🚀"
+              onClick={() => engineRef.current?.activateRocket()}
+              className={`${actionSize} bg-orange-400/50 active:bg-orange-400/80 border border-orange-300/60`}
+            />
+            <TapButton
+              label="🛡️"
+              onClick={() => engineRef.current?.activateShield()}
+              className={`${actionSize} bg-blue-400/50 active:bg-blue-400/80 border border-blue-300/60`}
+            />
+          </div>
+        )}
+        <button
+          className={`select-none touch-none flex items-center justify-center rounded-full text-white text-base font-bold ${flipSize} bg-white/20 active:bg-white/40 border border-white/40`}
+          style={{ WebkitUserSelect: 'none', userSelect: 'none' }}
+          onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); engineRef.current?.flipDirection(); }}
+        >
+          FLIP
+        </button>
       </div>
     </div>
   );

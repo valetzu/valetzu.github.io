@@ -97,11 +97,19 @@ All colors MUST be HSL.
 @layer base {
   * {
     @apply border-border;
+    -webkit-touch-callout: none;
+    user-select: none;
   }
 
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* Re-enable selection inside form inputs and textareas */
+input, textarea {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 /* Game Design Tokens */
