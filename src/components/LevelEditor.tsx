@@ -205,6 +205,7 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
   const [showLoadDialog, setShowLoadDialog] = useState(false);
   const [savedLevels, setSavedLevels] = useState<EditorLevel[]>([]);
   const [testing, setTesting] = useState(false);
+  const [testRunId, setTestRunId] = useState(0);
   const [showTilesMenu, setShowTilesMenu] = useState(false);
   const [showToolsMenu, setShowToolsMenu] = useState(false);
   const [showFileMenu, setShowFileMenu] = useState(false);
@@ -2561,11 +2562,20 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
     gameOverRef.current = false;
   };
 
+  const restartTestRun = useCallback(() => {
+    engineRef.current?.stop();
+    setLevelComplete(null);
+    gameOverRef.current = false;
+    setTestRunId((prev) => prev + 1);
+  }, []);
+
   // Test mode rendering
   useEffect(() => {
     if (!testing) return;
     const canvas = testCanvasRef.current;
     if (!canvas) return;
+
+    gameOverRef.current = false;
 
     const resize = () => {
       canvas.width = window.innerWidth;
@@ -2637,6 +2647,7 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
     (engine as any).startTilePos = railPoints.length > 0 ? railPoints[0] : null;
     // End tile world position for proximity-based trigger
     (engine as any).endTilePos = endTileWorldPos;
+    engine.refreshFiniteDeathBounds();
     engine.ground = engine.rail.map((p) => p.y + 150);
     engine.noBackground = true;
     const theme = SKY_THEMES[skyTheme];
@@ -2709,8 +2720,7 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
         setTesting(false);
       }
       if (e.code === "Enter" && gameOverRef.current) {
-        engine.stop();
-        setTesting(false);
+        restartTestRun();
       }
     };
     window.addEventListener("keydown", handleKey);
@@ -2722,7 +2732,7 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
       window.removeEventListener("orientationchange", resize);
       window.removeEventListener("keydown", handleKey);
     };
-  }, [testing, segments, obstacles, startMarker, endMarker]);
+  }, [testing, testRunId, segments, obstacles, startMarker, endMarker, restartTestRun]);
 
   // Save dialog
   const handleSave = () => {
@@ -2911,7 +2921,13 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
   if (testing) {
     return (
       <div className="fixed inset-0">
-        <canvas ref={testCanvasRef} className="w-full h-full" />
+        <canvas
+          ref={testCanvasRef}
+          className="w-full h-full"
+          onPointerDown={() => {
+            if (isMobile && gameOverRef.current) restartTestRun();
+          }}
+        />
         {/* Place the test-mode back button in the bottom-left to avoid overlapping in-canvas HUD (distance/hearts/speed) */}
         <div className="fixed bottom-4 left-4 z-10">
           <button

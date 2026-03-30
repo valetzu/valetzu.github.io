@@ -16,13 +16,23 @@ export default function GameCanvas({ world, upgrades, onGameOver, onBack }: Game
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
   const gameOverRef = useRef(false);
+  const [runId, setRunId] = useState(0);
   const [paused, setPaused] = useState(false);
+  const [isGameOver, setIsGameOver] = useState(false);
   const isMobile = isMobileDevice();
 
   const handleGameOver = useCallback((distance: number, cash: number) => {
     gameOverRef.current = true;
+    setIsGameOver(true);
     onGameOver(distance, cash);
   }, [onGameOver]);
+
+  const restartRun = useCallback(() => {
+    gameOverRef.current = false;
+    setIsGameOver(false);
+    setPaused(false);
+    setRunId((prev) => prev + 1);
+  }, []);
 
   const handleResume = useCallback(() => {
     setPaused(false);
@@ -49,6 +59,9 @@ export default function GameCanvas({ world, upgrades, onGameOver, onBack }: Game
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    gameOverRef.current = false;
+    setIsGameOver(false);
+
     const resize = () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
@@ -68,7 +81,7 @@ export default function GameCanvas({ world, upgrades, onGameOver, onBack }: Game
 
     const handleKey = (e: KeyboardEvent) => {
       if (e.code === 'Enter' && gameOverRef.current) {
-        onBack();
+        restartRun();
         return;
       }
       if (e.code === 'Escape') {
@@ -96,7 +109,7 @@ export default function GameCanvas({ world, upgrades, onGameOver, onBack }: Game
       window.removeEventListener('orientationchange', resize);
       window.removeEventListener('keydown', handleKey);
     };
-  }, [world, upgrades, handleGameOver, onBack]);
+  }, [world, upgrades, handleGameOver, onBack, restartRun, runId]);
 
   return (
     <>
@@ -104,9 +117,12 @@ export default function GameCanvas({ world, upgrades, onGameOver, onBack }: Game
         ref={canvasRef}
         className="fixed inset-0 w-full h-full"
         style={{ cursor: 'none' }}
+        onPointerDown={() => {
+          if (isMobile && gameOverRef.current) restartRun();
+        }}
       />
       {paused && <PauseMenu onResume={handleResume} onQuit={handleQuit} />}
-      {isMobile && !paused && (
+      {isMobile && !paused && !isGameOver && (
         <MobileControls engineRef={engineRef} onPause={handlePause} isEndless />
       )}
     </>

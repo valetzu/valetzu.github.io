@@ -19,6 +19,9 @@ const ROCKET_DURATION = 3;
 const SHIELD_DURATION = 2.5;
 const OBSTACLE_MIN_GAP = 280;
 const OBSTACLE_MAX_GAP = 500;
+const FINITE_LEVEL_DEATH_MARGIN_X = 500;
+const FINITE_LEVEL_DEATH_MARGIN_TOP = 400;
+const FINITE_LEVEL_DEATH_MARGIN_BOTTOM = 1200;
 const ROLLING_INERTIA_FACTOR = 1.5; // effective mass multiplier (solid disk: 1 + I/mr² = 1.5)
 const PENDULUM_DAMPING = 4.5;        // angular velocity damping (~0.5× critical, settles naturally)
 const PENDULUM_PLAYER_TORQUE = 15;   // rad/s² strong torque matching airborne rotation control
@@ -28,6 +31,7 @@ const PENDULUM_MASS_RATIO = 0.15;    // cabin reaction force ratio on wheel
 interface Cloud { x: number; y: number; w: number; h: number }
 interface Star { x: number; y: number; s: number }
 interface Mountain { x: number; y: number; w: number; h: number }
+interface BoundsRect { minX: number; minY: number; maxX: number; maxY: number }
 
 export class GameEngine {
   canvas: HTMLCanvasElement;
@@ -40,6 +44,7 @@ export class GameEngine {
   allRailSegments: Point[][] = [];
   /** Precomputed AABBs for each rail segment (built once at level load) */
   segmentBounds: { seg: Point[]; minX: number; minY: number; maxX: number; maxY: number }[] = [];
+  finiteDeathBounds: BoundsRect | null = null;
   ground: number[] = []; // groundY for each rail point
   pos: number = 0;
   speed: number = 0;
@@ -542,6 +547,10 @@ export class GameEngine {
       // Obstacle collisions and star collection while airborne
       this.checkCollisions();
       this.checkStarCollection();
+      if (this.isOutsideFiniteDeathBounds()) {
+        this.triggerGameOver();
+        return;
+      }
 
       // Update obstacle state machines and animations
       const octx = this.getGameUpdateContext();
@@ -690,6 +699,10 @@ export class GameEngine {
     // Collision
     this.checkCollisions();
     this.checkStarCollection();
+    if (this.isOutsideFiniteDeathBounds()) {
+      this.triggerGameOver();
+      return;
+    }
 
     // Update obstacle state machines and animations
     this.updateObstacles(dt);
@@ -850,6 +863,72 @@ export class GameEngine {
     });
   }
 
+  refreshFiniteDeathBounds() {
+    if (!this.hasFinitePath) {
+      this.finiteDeathBounds = null;
+      return;
+    }
+
+    const points: Point[] = [];
+    for (const seg of this.allRailSegments) {
+      points.push(...seg);
+    }
+    if (points.length === 0) {
+      points.push(...this.rail);
+    }
+    if (this.startTilePos) points.push(this.startTilePos);
+    if (this.endTilePos) points.push(this.endTilePos);
+
+    if (points.length === 0) {
+      this.finiteDeathBounds = null;
+      return;
+    }
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const p of points) {
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y > maxY) maxY = p.y;
+    }
+
+    this.finiteDeathBounds = {
+      minX: minX - FINITE_LEVEL_DEATH_MARGIN_X,
+      maxX: maxX + FINITE_LEVEL_DEATH_MARGIN_X,
+      minY: minY - FINITE_LEVEL_DEATH_MARGIN_TOP,
+      maxY: maxY + FINITE_LEVEL_DEATH_MARGIN_BOTTOM,
+    };
+  }
+
+  isOutsideFiniteDeathBounds(): boolean {
+    if (!this.hasFinitePath || !this.finiteDeathBounds) return false;
+
+    const wheel = this.getGondolaPos();
+    const cabin = this.getCabinCenter();
+    const left = Math.min(wheel.x - WHEEL_RADIUS, cabin.x - CABIN_W / 2);
+    const right = Math.max(wheel.x + WHEEL_RADIUS, cabin.x + CABIN_W / 2);
+    const top = Math.min(wheel.y - WHEEL_RADIUS, cabin.y - CABIN_H / 2);
+    const bottom = Math.max(wheel.y + WHEEL_RADIUS, cabin.y + CABIN_H / 2);
+
+    return (
+      right < this.finiteDeathBounds.minX ||
+      left > this.finiteDeathBounds.maxX ||
+      bottom < this.finiteDeathBounds.minY ||
+      top > this.finiteDeathBounds.maxY
+    );
+  }
+
+  triggerGameOver() {
+    if (this.gameOver || this.levelCompleted) return;
+    this.gameOver = true;
+    soundManager.playGameOver();
+    const cash = Math.floor(this.distance * 0.5);
+    this.onGameOver?.(this.distance, cash);
+  }
+
   /**
    * Swept circle vs line segment collision.
    * Returns earliest t ∈ [0,1] where a circle of `radius` moving from (cx,cy) by (dx,dy)
@@ -999,10 +1078,7 @@ export class GameEngine {
     this.invulnTimer = INVULN_TIME;
     this.flashTimer = 0.3;
     if (this.passengers <= 0) {
-      this.gameOver = true;
-      soundManager.playGameOver();
-      const cash = Math.floor(this.distance * 0.5);
-      this.onGameOver?.(this.distance, cash);
+      this.triggerGameOver();
     }
   }
 
@@ -2022,7 +2098,7 @@ export class GameEngine {
 
       ctx.font = '18px system-ui';
       ctx.fillStyle = '#AAA';
-      ctx.fillText(this.isMobile ? 'Tap to continue' : 'Press ENTER to continue', w / 2, h / 2 + 90);
+      ctx.fillText(this.isMobile ? 'Tap to restart' : 'Press ENTER to restart', w / 2, h / 2 + 90);
     }
 
     ctx.restore();

@@ -46,7 +46,9 @@ export default function CustomLevelPlayer({
   const isMobile = isMobileDevice();
   const ghostRecorderRef = useRef<GhostRecorder | null>(null);
   const gameOverRef = useRef(false);
+  const [runId, setRunId] = useState(0);
   const [paused, setPaused] = useState(false);
+  const [isGameOver, setIsGameOver] = useState(false);
   const [showGhostList, setShowGhostList] = useState(false);
   const [levelComplete, setLevelComplete] = useState<{
     time: number;
@@ -77,6 +79,7 @@ export default function CustomLevelPlayer({
         {
           onGameOver: () => {
             gameOverRef.current = true;
+            setIsGameOver(true);
           },
           onLevelComplete: (time: number, starsCollected: number) => {
             const result = recordTime(levelId, time, starsCollected);
@@ -113,6 +116,7 @@ export default function CustomLevelPlayer({
       (engine as any).startTilePos =
         railPoints.length > 0 ? railPoints[0] : null;
       (engine as any).endTilePos = endTileWorldPos;
+      engine.refreshFiniteDeathBounds();
       engine.ground = engine.rail.map((p) => p.y + 150);
       engine.noBackground = true;
       const theme = SKY_THEMES[level.skyTheme ?? 'day'];
@@ -180,9 +184,22 @@ export default function CustomLevelPlayer({
     [level, levelId],
   );
 
+  const restartRun = useCallback(() => {
+    engineRef.current?.stop();
+    setPaused(false);
+    setLevelComplete(null);
+    setShowGhostList(false);
+    setIsGameOver(false);
+    gameOverRef.current = false;
+    setRunId((prev) => prev + 1);
+  }, []);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+
+    gameOverRef.current = false;
+    setIsGameOver(false);
 
     const resize = () => {
       canvas.width = window.innerWidth;
@@ -196,9 +213,7 @@ export default function CustomLevelPlayer({
 
     const handleKey = (e: KeyboardEvent) => {
       if (e.code === "Enter" && gameOverRef.current) {
-        engineRef.current?.stop();
-        musicManager.stop();
-        onBack();
+        restartRun();
         return;
       }
       if (e.code === "Escape") {
@@ -228,7 +243,7 @@ export default function CustomLevelPlayer({
       window.removeEventListener("orientationchange", resize);
       window.removeEventListener("keydown", handleKey);
     };
-  }, [ghostReplay, startEngine, onBack]);
+  }, [ghostReplay, onBack, restartRun, runId, startEngine]);
 
   const handleReplay = (replay: ReplayData | null) => {
     engineRef.current?.stop();
@@ -270,6 +285,9 @@ export default function CustomLevelPlayer({
         ref={canvasRef}
         className="fixed inset-0 w-full h-full"
         style={{ cursor: "none" }}
+        onPointerDown={() => {
+          if (isMobile && gameOverRef.current) restartRun();
+        }}
       />
 
       {paused && (
@@ -280,12 +298,7 @@ export default function CustomLevelPlayer({
             engineRef.current?.resume();
           }}
           onRestart={() => {
-            engineRef.current?.stop();
-            setPaused(false);
-            setLevelComplete(null);
-            gameOverRef.current = false;
-            const canvas = canvasRef.current;
-            if (canvas) startEngine(canvas, ghostReplay);
+            restartRun();
           }}
           onQuit={() => {
             engineRef.current?.stop();
@@ -295,7 +308,7 @@ export default function CustomLevelPlayer({
         />
       )}
 
-      {isMobile && !paused && !levelComplete && (
+      {isMobile && !paused && !levelComplete && !isGameOver && (
         <MobileControls
           engineRef={engineRef}
           isEndless={false}
