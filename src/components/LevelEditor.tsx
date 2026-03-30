@@ -62,7 +62,9 @@ import {
   saveReplay,
   getReplay,
   getReplaysForLevel,
+  type ReplayData,
 } from "@/game/replay";
+import GhostReplayDialog from "@/components/GhostReplayDialog";
 
 interface LevelEditorProps {
   onBack: () => void;
@@ -220,6 +222,8 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
   const gameOverRef = useRef(false);
   const ghostRecorderRef = useRef<GhostRecorder | null>(null);
   const [ghostEnabled, setGhostEnabled] = useState(true);
+  const [showGhostList, setShowGhostList] = useState(false);
+  const selectedTestGhostRef = useRef<ReplayData | null>(null);
   const lastSavedSegmentsRef = useRef<string>("[]");
   const lastSavedObstaclesRef = useRef<string>("{}");
   const lastSavedMarkersRef = useRef<string>("{}");
@@ -2569,6 +2573,7 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
     };
     resize();
     window.addEventListener("resize", resize);
+    window.addEventListener("orientationchange", resize);
 
     // Convert to engine-compatible format (already resampled at RAIL_SPACING)
     const level: EditorLevel = {
@@ -2619,6 +2624,8 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
         },
       },
     );
+
+    engine.isMobile = isMobileDevice();
 
     // Override the rail with our resampled one (already in world coordinates)
     engine.rail = railPoints;
@@ -2679,7 +2686,8 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
     // Ghost playback — load saved replay if available and enabled
     const levelId = currentLevelId || "unsaved";
     if (ghostEnabled) {
-      const replay = getReplay(levelId);
+      const replay = selectedTestGhostRef.current || getReplay(levelId);
+      selectedTestGhostRef.current = null;
       if (replay) {
         const currentHash = computeLevelHash(level);
         if (replay.levelHash !== currentHash) {
@@ -2688,6 +2696,8 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
         }
         engine.ghostPlayer = new GhostPlayer(replay);
       }
+    } else {
+      selectedTestGhostRef.current = null;
     }
 
     engineRef.current = engine;
@@ -2709,6 +2719,7 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
       engine.stop();
       musicManager.stop();
       window.removeEventListener("resize", resize);
+      window.removeEventListener("orientationchange", resize);
       window.removeEventListener("keydown", handleKey);
     };
   }, [testing, segments, obstacles, startMarker, endMarker]);
@@ -2915,29 +2926,38 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
           </button>
         </div>
         {levelComplete && (
-          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-20">
-            <div className="bg-game-card border-2 border-game-accent rounded-2xl p-8 w-96 text-center">
-              <h2 className="text-4xl font-bold text-game-accent mb-2">
-                {levelComplete.isNewBest
-                  ? "🏆 New Best!"
-                  : "🎉 Congratulations!"}
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-20 overflow-y-auto overscroll-contain py-4">
+            <div className="bg-game-card border-2 border-game-accent rounded-2xl p-8 w-96 max-w-[calc(100vw-2rem)] text-center my-auto">
+              <h2 className="text-4xl font-bold text-white mb-2">
+                {levelComplete.isNewBest ? "🏆 New Best!" : "🎉 Level Complete!"}
               </h2>
-              <p className="text-game-subtitle text-lg mb-4">
-                You reached the finish line!
-              </p>
-              <div className="flex justify-center gap-2 mb-3">
-                {[0, 1, 2].map((i) => (
-                  <span
-                    key={i}
-                    className={`text-3xl ${i < levelComplete.starsCollected ? "opacity-100" : "opacity-25"}`}
-                  >
-                    ⭐
-                  </span>
-                ))}
-              </div>
-              <p className="text-game-subtitle text-sm mb-4">
-                {levelComplete.starsCollected}/3 Stars
-              </p>
+              <p className="text-game-subtitle text-lg mb-4">{currentLevelName || "Test Level"}</p>
+
+              {(() => {
+                const total = Object.keys(stars).length || 3;
+                return total > 3 ? (
+                  <p className="text-2xl font-bold text-yellow-400 mb-4">
+                    ⭐ {levelComplete.starsCollected} / {total} Stars
+                  </p>
+                ) : (
+                  <>
+                    <div className="flex justify-center gap-2 mb-3">
+                      {Array.from({ length: total }).map((_, i) => (
+                        <span
+                          key={i}
+                          className={`text-3xl ${i < levelComplete.starsCollected ? "opacity-100" : "opacity-25"}`}
+                        >
+                          ⭐
+                        </span>
+                      ))}
+                    </div>
+                    <p className="text-game-subtitle text-sm mb-4">
+                      {levelComplete.starsCollected}/{total} Stars
+                    </p>
+                  </>
+                );
+              })()}
+
               <div className="bg-game-bg rounded-xl p-4 mb-4">
                 <p className="text-game-subtitle text-sm">Completion Time</p>
                 <p className="text-game-title text-3xl font-bold">
@@ -2950,63 +2970,95 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
                     </p>
                   )}
               </div>
-              {levelComplete.records.length > 1 && (
-                <div className="bg-game-bg rounded-xl p-3 mb-4 text-left">
-                  <p className="text-game-subtitle text-xs mb-2 text-center font-bold">
-                    Top Times
-                  </p>
-                  {levelComplete.records.map((r, i) => (
-                    <div
-                      key={i}
-                      className={`flex justify-between text-sm py-0.5 ${r.time === levelComplete.time && r.date === Math.max(...levelComplete.records.filter((x) => x.time === levelComplete.time).map((x) => x.date)) ? "text-game-accent font-bold" : "text-game-subtitle"}`}
-                    >
-                      <span>#{i + 1}</span>
-                      <span>{formatTime(r.time)}</span>
+
+              {levelComplete.records.length > 1 && (() => {
+                const testLevelId = currentLevelId || "unsaved";
+                const replays = getReplaysForLevel(testLevelId);
+                return (
+                  <div className="bg-game-bg rounded-xl p-3 mb-4 text-left">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-game-subtitle text-xs font-bold flex-1 text-center">
+                        Top Times
+                      </p>
+                      {replays.length > 0 && (
+                        <button
+                          onClick={() => setShowGhostList(true)}
+                          className="text-xs px-2 py-0.5 rounded-md bg-game-bar-bg border border-game-card-border text-game-subtitle hover:text-game-title font-bold transition-all"
+                        >
+                          All 👻
+                        </button>
+                      )}
                     </div>
-                  ))}
-                </div>
-              )}
-              <div className="flex gap-2 mb-3">
-                <button
-                  onClick={() => {
-                    const recorder = ghostRecorderRef.current;
-                    if (!recorder || recorder.frames.length === 0) return;
-                    const levelId = currentLevelId || "unsaved";
-                    const level: EditorLevel = {
-                      name: currentLevelName || "Test",
-                      id: levelId,
-                      version: 3,
-                      segments,
-                      obstacles,
-                      startMarker: startMarker!,
-                      endMarker: endMarker!,
-                      createdAt: Date.now(),
-                      obstacleParams: Object.keys(obstacleParams).length > 0 ? obstacleParams : undefined,
-                      stars: Object.keys(stars).length > 0 ? stars : undefined,
-                    };
-                    const hash = computeLevelHash(level);
-                    const { nickname } = loadSettings();
-                    const replay = recorder.toReplayData(
-                      levelId, hash, "Personal Best",
-                      levelComplete.time, levelComplete.starsCollected, nickname || undefined,
-                    );
-                    saveReplay(replay);
-                    alert("Ghost saved as Personal Best!");
+                    {levelComplete.records.map((r, i) => {
+                      const isCurrentRun =
+                        r.time === levelComplete.time &&
+                        r.date === Math.max(
+                          ...levelComplete.records
+                            .filter((x) => x.time === levelComplete.time)
+                            .map((x) => x.date),
+                        );
+                      const matchReplay = replays.find((rep) => Math.abs(rep.time - r.time) < 0.001);
+                      return (
+                        <div
+                          key={i}
+                          className={`flex items-center text-sm py-1 gap-1 ${isCurrentRun ? "text-game-accent font-bold" : "text-game-subtitle"}`}
+                        >
+                          <span className="w-8">#{i + 1}</span>
+                          <span className="flex-1">{formatTime(r.time)}</span>
+                          {r.starsCollected != null && (
+                            <span className="text-xs shrink-0">{r.starsCollected}⭐</span>
+                          )}
+                          {matchReplay && (
+                            <button
+                              onClick={() => {
+                                selectedTestGhostRef.current = matchReplay;
+                                setGhostEnabled(true);
+                                engineRef.current?.stop();
+                                setLevelComplete(null);
+                                setTesting(false);
+                                setTimeout(() => startTest(), 50);
+                              }}
+                              className="text-xs px-2 py-0.5 rounded-md bg-blue-700 text-white hover:bg-blue-500 active:scale-95 transition-all"
+                            >
+                              👻 Race
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
+              {showGhostList && (
+                <GhostReplayDialog
+                  levelId={currentLevelId || "unsaved"}
+                  replays={getReplaysForLevel(currentLevelId || "unsaved")}
+                  onRace={(r) => {
+                    setShowGhostList(false);
+                    selectedTestGhostRef.current = r;
+                    setGhostEnabled(true);
+                    engineRef.current?.stop();
+                    setLevelComplete(null);
+                    setTesting(false);
+                    setTimeout(() => startTest(), 50);
                   }}
-                  className="flex-1 py-2 rounded-lg bg-purple-600 text-white font-bold text-sm hover:bg-purple-500"
-                >
-                  👻 Save Ghost
-                </button>
+                  onClose={() => setShowGhostList(false)}
+                />
+              )}
+
+              {/* Ghost buttons */}
+              <div className="flex gap-2 mb-3">
                 <button
                   onClick={() => {
                     const recorder = ghostRecorderRef.current;
                     if (!recorder || recorder.frames.length === 0) return;
                     const name = prompt("Name this ghost replay:");
                     if (!name) return;
-                    const levelId = currentLevelId || "unsaved";
+                    const testLevelId = currentLevelId || "unsaved";
                     const level: EditorLevel = {
                       name: currentLevelName || "Test",
-                      id: levelId,
+                      id: testLevelId,
                       version: 3,
                       segments,
                       obstacles,
@@ -3019,7 +3071,7 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
                     const hash = computeLevelHash(level);
                     const { nickname } = loadSettings();
                     const replay = recorder.toReplayData(
-                      levelId, hash, name,
+                      testLevelId, hash, name,
                       levelComplete.time, levelComplete.starsCollected, nickname || undefined,
                     );
                     saveReplay(replay);
@@ -3027,23 +3079,11 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
                   }}
                   className="flex-1 py-2 rounded-lg bg-purple-800 text-white font-bold text-sm hover:bg-purple-700"
                 >
-                  💾 Save As...
+                  💾 Save Replay As
                 </button>
-                {getReplaysForLevel(currentLevelId || "unsaved").length > 0 && (
-                  <button
-                    onClick={() => {
-                      setGhostEnabled(true);
-                      engineRef.current?.stop();
-                      setLevelComplete(null);
-                      setTesting(false);
-                      setTimeout(() => startTest(), 50);
-                    }}
-                    className="flex-1 py-2 rounded-lg bg-blue-600 text-white font-bold text-sm hover:bg-blue-500"
-                  >
-                    👻 Race Ghost
-                  </button>
-                )}
               </div>
+
+              {/* Action buttons */}
               <div className="flex gap-3">
                 <button
                   onClick={() => {
@@ -3058,24 +3098,25 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
                 </button>
                 <button
                   onClick={() => {
+                    setGhostEnabled(true);
                     engineRef.current?.stop();
-                    setTesting(false);
                     setLevelComplete(null);
+                    setTesting(false);
+                    setTimeout(() => startTest(), 50);
                   }}
-                  className="flex-1 py-3 rounded-lg bg-game-accent text-game-bg font-bold text-lg hover:brightness-110"
+                  className="flex-1 py-3 rounded-lg bg-blue-600 text-white font-bold text-lg hover:bg-blue-500"
                 >
-                  ✕ Back to Editor
+                  👻 Race Ghost
                 </button>
                 <button
                   onClick={() => {
                     engineRef.current?.stop();
                     setTesting(false);
                     setLevelComplete(null);
-                    onBack();
                   }}
-                  className="flex-1 py-3 rounded-lg bg-game-bar-bg text-game-subtitle font-bold text-lg hover:brightness-110"
+                  className="flex-1 py-3 rounded-lg bg-game-accent text-game-bg font-bold text-lg hover:brightness-110"
                 >
-                  ← Menu
+                  ← Back to Editor
                 </button>
               </div>
             </div>
@@ -3205,40 +3246,42 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
             </div>
           )}
           <div className="fixed bottom-0 left-0 right-0 z-10 bg-game-card border-t border-game-card-border" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+            {/* Dropdown panels - rendered outside overflow-x-auto to avoid clipping */}
+            {showToolsMenu && (<div className="absolute bottom-full left-24 mb-1 bg-game-card border border-game-card-border rounded-lg p-1 shadow-lg z-30" style={{ minWidth: 140 }}>{TOOLS.filter(t => SHAPE_TOOL_TYPES.has(t.tool)).map(t => (<button key={t.tool} onClick={() => { setTool(t.tool); lastPlacedRailRef.current = null; if (t.tool !== 'polygon' && t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); } if (t.tool !== 'curve' && t.tool !== 'circular_curve' && t.tool !== 'loop') { setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); } setLineStart(null); setLinePreview([]); setShowToolsMenu(false); }} className={`w-full text-left px-3 py-2 rounded font-bold text-sm ${tool === t.tool ? 'bg-game-accent text-game-bg' : 'text-game-title hover:bg-game-bar-bg'}`}>{t.emoji} {t.label}</button>))}</div>)}
+            {showFileMenu && (<div className="absolute bottom-full right-2 mb-1 bg-game-card border border-game-card-border rounded-lg p-1 shadow-lg z-30" style={{ minWidth: 150 }}>
+              <button onClick={() => { setShowSaveDialog(true); setShowFileMenu(false); }} className="w-full text-left px-3 py-2 rounded font-bold text-sm text-game-title hover:bg-game-bar-bg">💾 Save As</button>
+              <button onClick={() => { openLoadDialog(); setShowFileMenu(false); }} className="w-full text-left px-3 py-2 rounded font-bold text-sm text-game-title hover:bg-game-bar-bg">📂 Load</button>
+              <hr className="border-game-card-border my-1" />
+              <button onClick={() => { handleExport(); setShowFileMenu(false); }} className="w-full text-left px-3 py-2 rounded font-bold text-sm text-game-title hover:bg-game-bar-bg">📤 Export</button>
+              <button onClick={() => { importFileRef.current?.click(); setShowFileMenu(false); }} className="w-full text-left px-3 py-2 rounded font-bold text-sm text-game-title hover:bg-game-bar-bg">📥 Import</button>
+              <hr className="border-game-card-border my-1" />
+              <button onClick={() => { clearAll(); setShowFileMenu(false); }} className="w-full text-left px-3 py-2 rounded font-bold text-sm text-red-400 hover:bg-game-bar-bg">🗑️ Clear</button>
+              <button onClick={handleBack} className="w-full text-left px-3 py-2 rounded font-bold text-sm text-game-title hover:bg-game-bar-bg">← Menu</button>
+            </div>)}
+            {showLevelSettings && (<div className="absolute bottom-full right-16 mb-1 bg-game-card border border-game-card-border rounded-lg p-3 shadow-lg z-30" style={{ minWidth: 200 }}>
+              <p className="text-game-subtitle text-xs font-bold mb-1">🎵 Music</p>
+              <button onClick={() => { setShowMusicMenu(true); setShowLevelSettings(false); }} className={`w-full text-left px-3 py-2 rounded-lg font-bold text-sm mb-3 ${currentMusicFile ? 'bg-game-accent text-game-bg' : 'bg-game-bar-bg text-game-title border border-game-card-border'}`}>{currentMusicFile ? (getAvailableTracks().find(t => t.file === currentMusicFile)?.label ?? currentMusicFile) : '— None —'}</button>
+              <p className="text-game-subtitle text-xs font-bold mb-1">🌅 Sky Theme</p>
+              <div className="flex gap-1 flex-wrap">{(Object.keys(SKY_THEMES) as SkyThemeId[]).map(id => (<button key={id} onClick={() => setSkyTheme(id)} className={`px-2 py-1 rounded text-xs font-bold ${skyTheme === id ? 'bg-game-accent text-game-bg' : 'bg-game-bar-bg text-game-title border border-game-card-border'}`}>{SKY_THEMES[id].name}</button>))}</div>
+            </div>)}
+            {/* Scrollable toolbar */}
             <div className="flex gap-1 overflow-x-auto px-2 py-1.5 items-center" style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' } as any}>
               <button onClick={() => { setTool('none'); lastPlacedRailRef.current = null; setArcCenter(null); setArcPreview([]); setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); setLineStart(null); setLinePreview([]); setLine2Start(null); setDrawRailPoints(null); setDrawRailAttach(null); setDrawRailPending(null); setShowTilesMenu(false); setShowToolsMenu(false); }} className={`flex-none px-2.5 py-1.5 rounded-lg font-bold text-sm whitespace-nowrap ${tool === 'none' ? 'bg-game-accent text-game-bg' : 'bg-game-bar-bg text-game-title border border-game-card-border'}`}>✋</button>
               <div className="relative flex-none">
                 <button onClick={() => { if (TILE_TOOL_TYPES.has(tool)) setTool('none'); setShowTilesMenu(v => !v); setShowToolsMenu(false); setShowFileMenu(false); setShowLevelSettings(false); }} className={`px-2.5 py-1.5 rounded-lg font-bold text-sm whitespace-nowrap ${TILE_TOOL_TYPES.has(tool) ? 'bg-game-accent text-game-bg' : 'bg-game-bar-bg text-game-title border border-game-card-border'}`}>{(() => { const a = TOOLS.find(t => t.tool === tool && TILE_TOOL_TYPES.has(t.tool)); return a ? a.emoji : '🧱'; })()} ▾</button>
-                {showTilesMenu && (<div className="absolute bottom-full left-0 mb-1 bg-game-card border border-game-card-border rounded-lg p-1 shadow-lg z-30" style={{ minWidth: 140 }}>{TOOLS.filter(t => TILE_TOOL_TYPES.has(t.tool)).map(t => (<button key={t.tool} onClick={() => { setTool(t.tool); lastPlacedRailRef.current = null; setArcCenter(null); setArcPreview([]); setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); setLineStart(null); setLinePreview([]); setShowTilesMenu(false); }} className={`w-full text-left px-3 py-2 rounded font-bold text-sm ${tool === t.tool ? 'bg-game-accent text-game-bg' : 'text-game-title hover:bg-game-bar-bg'}`}>{t.emoji} {t.label}</button>))}</div>)}
+                {showTilesMenu && (<div className="fixed left-2 bg-game-card border border-game-card-border rounded-lg p-1 shadow-lg z-50" style={{ minWidth: 140, bottom: 'calc(env(safe-area-inset-bottom) + 44px)' }}>{TOOLS.filter(t => TILE_TOOL_TYPES.has(t.tool)).map(t => (<button key={t.tool} onClick={() => { setTool(t.tool); lastPlacedRailRef.current = null; setArcCenter(null); setArcPreview([]); setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); setLineStart(null); setLinePreview([]); setShowTilesMenu(false); }} className={`w-full text-left px-3 py-2 rounded font-bold text-sm ${tool === t.tool ? 'bg-game-accent text-game-bg' : 'text-game-title hover:bg-game-bar-bg'}`}>{t.emoji} {t.label}</button>))}</div>)}
               </div>
               <div className="relative flex-none">
                 <button onClick={() => { if (SHAPE_TOOL_TYPES.has(tool)) { setTool('none'); setArcCenter(null); setArcPreview([]); setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); } setShowToolsMenu(v => !v); setShowTilesMenu(false); setShowFileMenu(false); setShowLevelSettings(false); }} className={`px-2.5 py-1.5 rounded-lg font-bold text-sm whitespace-nowrap ${SHAPE_TOOL_TYPES.has(tool) ? 'bg-game-accent text-game-bg' : 'bg-game-bar-bg text-game-title border border-game-card-border'}`}>{(() => { const a = TOOLS.find(t => t.tool === tool && SHAPE_TOOL_TYPES.has(t.tool)); return a ? a.emoji : '🛠'; })()} ▾</button>
-                {showToolsMenu && (<div className="absolute bottom-full left-0 mb-1 bg-game-card border border-game-card-border rounded-lg p-1 shadow-lg z-30" style={{ minWidth: 140 }}>{TOOLS.filter(t => SHAPE_TOOL_TYPES.has(t.tool)).map(t => (<button key={t.tool} onClick={() => { setTool(t.tool); lastPlacedRailRef.current = null; if (t.tool !== 'polygon' && t.tool !== 'arc') { setArcCenter(null); setArcPreview([]); } if (t.tool !== 'curve' && t.tool !== 'circular_curve' && t.tool !== 'loop') { setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); } setLineStart(null); setLinePreview([]); setShowToolsMenu(false); }} className={`w-full text-left px-3 py-2 rounded font-bold text-sm ${tool === t.tool ? 'bg-game-accent text-game-bg' : 'text-game-title hover:bg-game-bar-bg'}`}>{t.emoji} {t.label}</button>))}</div>)}
               </div>
               {(['rail', 'eraser', 'line', 'line2', 'draw_rail'] as EditorTool[]).map(toolType => { const t = TOOLS.find(x => x.tool === toolType)!; return (<button key={toolType} onClick={() => { if (tool === toolType) setTool('none'); else setTool(toolType as EditorTool); lastPlacedRailRef.current = null; setArcCenter(null); setArcPreview([]); setCurveStart(null); setCurveEnd(null); setCurveControl(null); setCurvePreview([]); setIsDraggingCurve(false); setLineStart(null); setLinePreview([]); if (toolType === 'line2') setLine2Start(null); setDrawRailPoints(null); setDrawRailAttach(null); setDrawRailPending(null); setShowTilesMenu(false); }} className={`flex-none px-2.5 py-1.5 rounded-lg font-bold text-sm whitespace-nowrap ${tool === toolType ? 'bg-game-accent text-game-bg' : 'bg-game-bar-bg text-game-title border border-game-card-border'}`}>{t.emoji} {t.label}</button>); })}
               <button onClick={() => { if (tool === 'paint') setTool('none'); else setTool('paint'); }} className={`flex-none px-2.5 py-1.5 rounded-lg font-bold text-sm whitespace-nowrap ${tool === 'paint' ? 'bg-game-accent text-game-bg' : 'bg-game-bar-bg text-game-title border border-game-card-border'}`}><span className="inline-block w-3 h-3 rounded-sm mr-1 align-middle border border-white/30" style={{ background: paintColor }} />Paint</button>
               <div className="flex-none w-px h-5 bg-game-card-border mx-1" />
               <div className="relative flex-none">
                 <button onClick={() => { setShowFileMenu(v => !v); setShowTilesMenu(false); setShowToolsMenu(false); setShowLevelSettings(false); }} className="px-2.5 py-1.5 rounded-lg font-bold text-sm whitespace-nowrap bg-game-bar-bg text-game-title border border-game-card-border">📁 File ▾</button>
-                {showFileMenu && (<div className="absolute bottom-full right-0 mb-1 bg-game-card border border-game-card-border rounded-lg p-1 shadow-lg z-30" style={{ minWidth: 150 }}>
-                  <button onClick={() => { setShowSaveDialog(true); setShowFileMenu(false); }} className="w-full text-left px-3 py-2 rounded font-bold text-sm text-game-title hover:bg-game-bar-bg">💾 Save As</button>
-                  <button onClick={() => { openLoadDialog(); setShowFileMenu(false); }} className="w-full text-left px-3 py-2 rounded font-bold text-sm text-game-title hover:bg-game-bar-bg">📂 Load</button>
-                  <hr className="border-game-card-border my-1" />
-                  <button onClick={() => { handleExport(); setShowFileMenu(false); }} className="w-full text-left px-3 py-2 rounded font-bold text-sm text-game-title hover:bg-game-bar-bg">📤 Export</button>
-                  <button onClick={() => { importFileRef.current?.click(); setShowFileMenu(false); }} className="w-full text-left px-3 py-2 rounded font-bold text-sm text-game-title hover:bg-game-bar-bg">📥 Import</button>
-                  <hr className="border-game-card-border my-1" />
-                  <button onClick={() => { clearAll(); setShowFileMenu(false); }} className="w-full text-left px-3 py-2 rounded font-bold text-sm text-red-400 hover:bg-game-bar-bg">🗑️ Clear</button>
-                  <button onClick={handleBack} className="w-full text-left px-3 py-2 rounded font-bold text-sm text-game-title hover:bg-game-bar-bg">← Menu</button>
-                </div>)}
               </div>
               <div className="relative flex-none">
                 <button onClick={() => { setShowLevelSettings(v => !v); setShowFileMenu(false); setShowTilesMenu(false); setShowToolsMenu(false); }} className="px-2.5 py-1.5 rounded-lg font-bold text-sm whitespace-nowrap bg-game-bar-bg text-game-title border border-game-card-border">⚙️ Level ▾</button>
-                {showLevelSettings && (<div className="absolute bottom-full right-0 mb-1 bg-game-card border border-game-card-border rounded-lg p-3 shadow-lg z-30" style={{ minWidth: 200 }}>
-                  <p className="text-game-subtitle text-xs font-bold mb-1">🎵 Music</p>
-                  <button onClick={() => { setShowMusicMenu(true); setShowLevelSettings(false); }} className={`w-full text-left px-3 py-2 rounded-lg font-bold text-sm mb-3 ${currentMusicFile ? 'bg-game-accent text-game-bg' : 'bg-game-bar-bg text-game-title border border-game-card-border'}`}>{currentMusicFile ? (getAvailableTracks().find(t => t.file === currentMusicFile)?.label ?? currentMusicFile) : '— None —'}</button>
-                  <p className="text-game-subtitle text-xs font-bold mb-1">🌅 Sky Theme</p>
-                  <div className="flex gap-1 flex-wrap">{(Object.keys(SKY_THEMES) as SkyThemeId[]).map(id => (<button key={id} onClick={() => setSkyTheme(id)} className={`px-2 py-1 rounded text-xs font-bold ${skyTheme === id ? 'bg-game-accent text-game-bg' : 'bg-game-bar-bg text-game-title border border-game-card-border'}`}>{SKY_THEMES[id].name}</button>))}</div>
-                </div>)}
               </div>
             </div>
           </div>

@@ -55,6 +55,7 @@ export default function GameCanvas({ world, upgrades, onGameOver, onBack }: Game
     };
     resize();
     window.addEventListener('resize', resize);
+    window.addEventListener('orientationchange', resize);
 
     musicManager.playForWorld(world);
 
@@ -92,6 +93,7 @@ export default function GameCanvas({ world, upgrades, onGameOver, onBack }: Game
       engine.stop();
       musicManager.stop();
       window.removeEventListener('resize', resize);
+      window.removeEventListener('orientationchange', resize);
       window.removeEventListener('keydown', handleKey);
     };
   }, [world, upgrades, handleGameOver, onBack]);

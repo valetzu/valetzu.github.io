@@ -99,8 +99,11 @@ function useGyroTilt(engineRef: React.RefObject<GameEngine | null>, enabled: boo
     };
 
     window.addEventListener('deviceorientation', handler);
+    const recalibrateHandler = () => { calibrationRef.current = null; };
+    window.addEventListener('gyro-recalibrate', recalibrateHandler as EventListener);
     return () => {
       window.removeEventListener('deviceorientation', handler);
+      window.removeEventListener('gyro-recalibrate', recalibrateHandler as EventListener);
       if (engineRef.current) engineRef.current.analogTiltInput = 0;
     };
   }, [enabled, engineRef]);
@@ -113,6 +116,8 @@ function useGyroTilt(engineRef: React.RefObject<GameEngine | null>, enabled: boo
 
 export default function MobileControls({ engineRef, onPause, isEndless }: MobileControlsProps) {
   const held = useRef({ up: 0, down: 0, left: 0, right: 0 });
+  const [reversing, setReversing] = useState(false);
+  const [throttling, setThrottling] = useState(false);
   const isLandscape = useIsLandscape();
   const gyroControls = loadSettings().gyroControls;
   const { recalibrate } = useGyroTilt(engineRef, gyroControls);
@@ -184,37 +189,41 @@ export default function MobileControls({ engineRef, onPause, isEndless }: Mobile
   );
 
   // ---- Gyro mode ----
+  const flipSize = isLandscape ? 'w-20 h-20' : 'w-24 h-24';
   if (gyroControls) {
     return (
       <div className="fixed inset-0 pointer-events-none z-50" style={{ touchAction: 'none' }}>
-        {/* Left half — reverse */}
-        <HoldButton
-          label=""
-          onStart={press('down')}
-          onEnd={release('down')}
-          className="pointer-events-auto absolute top-0 bottom-0 left-0 w-1/2 rounded-none bg-transparent border-none active:bg-white/5"
+        {/* Left half — reverse (invisible, full half acts as button) */}
+        <button
+          className="pointer-events-auto select-none touch-none absolute top-0 bottom-0 left-0 w-1/2 rounded-none bg-transparent border-none"
+          style={{ WebkitUserSelect: 'none', userSelect: 'none' }}
+          onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); press('down')(); setReversing(true); }}
+          onPointerUp={() => { release('down')(); setReversing(false); }}
+          onPointerCancel={() => { release('down')(); setReversing(false); }}
+          onPointerLeave={() => { release('down')(); setReversing(false); }}
         />
-        {/* Right half — throttle forward */}
-        <HoldButton
-          label=""
-          onStart={press('up')}
-          onEnd={release('up')}
-          className="pointer-events-auto absolute top-0 bottom-0 right-0 w-1/2 rounded-none bg-transparent border-none active:bg-white/5"
+        {/* Right half — throttle forward (invisible, full half acts as button) */}
+        <button
+          className="pointer-events-auto select-none touch-none absolute top-0 bottom-0 right-0 w-1/2 rounded-none bg-transparent border-none"
+          style={{ WebkitUserSelect: 'none', userSelect: 'none' }}
+          onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); press('up')(); setThrottling(true); }}
+          onPointerUp={() => { release('up')(); setThrottling(false); }}
+          onPointerCancel={() => { release('up')(); setThrottling(false); }}
+          onPointerLeave={() => { release('up')(); setThrottling(false); }}
         />
 
-        {/* Divider hint */}
-        <div className="absolute inset-y-0 left-1/2 w-px bg-white/10 pointer-events-none" />
-
-        {/* Throttle direction labels */}
+        {/* Reverse pedal indicator — bottom-left corner */}
         <div
-          className="pointer-events-none absolute left-1/4 -translate-x-1/2 text-white/30 text-3xl font-bold"
-          style={{ bottom: safeBottom }}
+          className={`pointer-events-none absolute left-4 flex items-center justify-center rounded-2xl border-2 text-2xl font-bold transition-colors duration-75 ${reversing ? 'bg-red-500/60 border-red-300 text-white' : 'bg-white/10 border-white/20 text-white/40'}`}
+          style={{ bottom: safeBottom, width: 56, height: 68 }}
         >
           ▼
         </div>
+
+        {/* Throttle pedal indicator — bottom-right corner */}
         <div
-          className="pointer-events-none absolute right-1/4 translate-x-1/2 text-white/30 text-3xl font-bold"
-          style={{ bottom: safeBottom }}
+          className={`pointer-events-none absolute right-4 flex items-center justify-center rounded-2xl border-2 text-2xl font-bold transition-colors duration-75 ${throttling ? 'bg-green-500/60 border-green-300 text-white' : 'bg-white/10 border-white/20 text-white/40'}`}
+          style={{ bottom: safeBottom, width: 56, height: 68 }}
         >
           ▲
         </div>
@@ -222,18 +231,17 @@ export default function MobileControls({ engineRef, onPause, isEndless }: Mobile
         {/* Pause */}
         {pauseBtn}
 
-        {/* Actions + recalibrate — bottom center */}
+        {/* FLIP button — bottom center, twice as big */}
         <div
-          className="pointer-events-auto absolute left-1/2 -translate-x-1/2 flex gap-2"
+          className="pointer-events-auto absolute left-1/2 -translate-x-1/2"
           style={{ bottom: safeBottom }}
         >
-          {actionButtons()}
           <button
-            className={`select-none touch-none flex items-center justify-center rounded-full text-white text-xs font-bold ${actionSize} bg-white/20 active:bg-white/40 border border-white/40`}
+            className={`select-none touch-none flex items-center justify-center rounded-full text-white text-base font-bold ${flipSize} bg-white/20 active:bg-white/40 border border-white/40`}
             style={{ WebkitUserSelect: 'none', userSelect: 'none' }}
-            onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); recalibrate(); }}
+            onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); engineRef.current?.flipDirection(); }}
           >
-            ⊕
+            FLIP
           </button>
         </div>
       </div>

@@ -190,6 +190,7 @@ export default function CustomLevelPlayer({
     };
     resize();
     window.addEventListener("resize", resize);
+    window.addEventListener("orientationchange", resize);
 
     startEngine(canvas, ghostReplay);
 
@@ -224,6 +225,7 @@ export default function CustomLevelPlayer({
       engineRef.current?.stop();
       musicManager.stop();
       window.removeEventListener("resize", resize);
+      window.removeEventListener("orientationchange", resize);
       window.removeEventListener("keydown", handleKey);
     };
   }, [ghostReplay, startEngine, onBack]);

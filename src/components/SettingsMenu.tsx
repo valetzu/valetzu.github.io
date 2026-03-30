@@ -99,20 +99,30 @@ export default function SettingsMenu({
           {activeTab === "sound" && (
             <>
               {isMobileDevice() && (
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="font-bold text-game-title">Gyro Controls</div>
-                    <div className="text-xs text-game-subtitle">Tilt phone to tilt cabin</div>
+                <>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="font-bold text-game-title">Gyro Controls</div>
+                      <div className="text-xs text-game-subtitle">Tilt phone to tilt cabin</div>
+                    </div>
+                    <button
+                      onClick={() => handleGyroControls(!settings.gyroControls)}
+                      className={`relative w-12 h-6 rounded-full transition-colors ${settings.gyroControls ? "bg-game-accent" : "bg-game-bar-bg border border-game-card-border"}`}
+                    >
+                      <span
+                        className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${settings.gyroControls ? "translate-x-6" : "translate-x-0.5"}`}
+                      />
+                    </button>
                   </div>
-                  <button
-                    onClick={() => handleGyroControls(!settings.gyroControls)}
-                    className={`relative w-12 h-6 rounded-full transition-colors ${settings.gyroControls ? "bg-game-accent" : "bg-game-bar-bg border border-game-card-border"}`}
-                  >
-                    <span
-                      className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${settings.gyroControls ? "translate-x-6" : "translate-x-0.5"}`}
-                    />
-                  </button>
-                </div>
+                  {settings.gyroControls && (
+                    <button
+                      onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); window.dispatchEvent(new Event('gyro-recalibrate')); }}
+                      className="w-full py-2 rounded-lg bg-game-bar-bg border border-game-card-border text-game-title text-sm font-bold hover:brightness-110 active:scale-[0.98] transition-all"
+                    >
+                      ⊕ Recalibrate Gyro
+                    </button>
+                  )}
+                </>
               )}
               <div>
                 <div className="flex items-center justify-between mb-2">

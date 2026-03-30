@@ -1848,19 +1848,19 @@ export class GameEngine {
     const speedText = `⚡ ${Math.floor(Math.abs(this.speed) * 0.36)} km/h`;
     const distText = `📏 ${Math.floor(this.distance)}m`;
     if (this.isMobile) {
-      // Compact, top-center
-      ctx.font = 'bold 12px system-ui, sans-serif';
+      // Compact, top-right (beside the pause button)
+      ctx.font = 'bold 11px system-ui, sans-serif';
       const sw = ctx.measureText(speedText).width;
       const dw = ctx.measureText(distText).width;
-      const spW = Math.max(sw, dw) + 16;
-      const spX = (w - spW) / 2;
+      const spW = Math.max(sw, dw) + 14;
+      const spX = w - spW - 58;
       ctx.fillStyle = 'rgba(0,0,0,0.6)';
       this.roundRect(spX, 10, spW, 32, 6);
       ctx.fill();
       ctx.fillStyle = '#FFF';
-      ctx.textAlign = 'center';
-      ctx.fillText(speedText, w / 2, 24);
-      ctx.fillText(distText, w / 2, 36);
+      ctx.textAlign = 'right';
+      ctx.fillText(speedText, spX + spW - 7, 24);
+      ctx.fillText(distText, spX + spW - 7, 36);
     } else {
       ctx.font = 'bold 18px system-ui, sans-serif';
       const speedTextW = ctx.measureText(speedText).width;
@@ -1913,58 +1913,75 @@ export class GameEngine {
     }
 
     // Throttle/Brake bar
-    const barW = 280;
-    const barH = 30;
-    const barX = (w - barW) / 2;
-    const barY = h - 50;
-    const arrowRowH = 22; // height reserved above bar for the throttle direction indicator
-
-
-    // Throttle direction arrow (shows which physical direction ▲ UP key will propel the gondola)
-    {
-      const upMeansForward = !this.directionFlipped;
-      const upPressed = this.keys.up;
-      // The arrow showing UP key's mapped direction
-      const upArrow = upMeansForward ? '▶' : '◀';
-      const cx = w / 2;
-      const arrowY = barY - arrowRowH / 2 + 6;
-
-      ctx.font = 'bold 13px system-ui, sans-serif';
-      ctx.textAlign = 'center';
-
-      // UP key direction indicator
-      if (upPressed) {
+    if (this.isMobile) {
+      // Mobile: compact top-center bar (half scale)
+      const mBarW = 140;
+      const mBarH = 15;
+      const mBarX = (w - mBarW) / 2;
+      const mBarY = 10;
+      ctx.fillStyle = '#333';
+      this.roundRect(mBarX, mBarY, mBarW, mBarH, 3);
+      ctx.fill();
+      const mSpeedFrac = this.speed / (MAX_SPEED_BASE + this.upgrades.motor * 80);
+      const mFillW = Math.abs(mSpeedFrac) * mBarW / 2;
+      if (mSpeedFrac > 0) {
         ctx.fillStyle = '#4CAF50';
-        ctx.fillText(upArrow, cx, arrowY);
-      } else {
-        ctx.strokeStyle = '#FFF';
-        ctx.lineWidth = 3;
-        ctx.lineJoin = 'round';
-        ctx.strokeText(upArrow, cx, arrowY);
-        ctx.fillStyle = '#000';
-        ctx.fillText(upArrow, cx, arrowY);
+        ctx.fillRect(mBarX + mBarW / 2, mBarY + 1, mFillW, mBarH - 2);
+      } else if (mSpeedFrac < 0) {
+        ctx.fillStyle = '#E53935';
+        ctx.fillRect(mBarX + mBarW / 2 - mFillW, mBarY + 1, mFillW, mBarH - 2);
       }
+      ctx.fillStyle = '#FFF';
+      ctx.fillRect(mBarX + mBarW / 2 - 1, mBarY, 2, mBarH);
+    } else {
+      // Desktop: full bar at bottom center
+      const barW = 280;
+      const barH = 30;
+      const barX = (w - barW) / 2;
+      const barY = h - 50;
+      const arrowRowH = 22;
+
+      // Throttle direction arrow
+      {
+        const upMeansForward = !this.directionFlipped;
+        const upPressed = this.keys.up;
+        const upArrow = upMeansForward ? '▶' : '◀';
+        const cx = w / 2;
+        const arrowY = barY - arrowRowH / 2 + 6;
+
+        ctx.font = 'bold 13px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+
+        if (upPressed) {
+          ctx.fillStyle = '#4CAF50';
+          ctx.fillText(upArrow, cx, arrowY);
+        } else {
+          ctx.strokeStyle = '#FFF';
+          ctx.lineWidth = 3;
+          ctx.lineJoin = 'round';
+          ctx.strokeText(upArrow, cx, arrowY);
+          ctx.fillStyle = '#000';
+          ctx.fillText(upArrow, cx, arrowY);
+        }
+      }
+
+      ctx.fillStyle = '#333';
+      this.roundRect(barX, barY, barW, barH, 4);
+      ctx.fill();
+
+      const speedFrac = this.speed / (MAX_SPEED_BASE + this.upgrades.motor * 80);
+      const fillW = Math.abs(speedFrac) * barW / 2;
+      if (speedFrac > 0) {
+        ctx.fillStyle = '#4CAF50';
+        ctx.fillRect(barX + barW / 2, barY + 2, fillW, barH - 4);
+      } else if (speedFrac < 0) {
+        ctx.fillStyle = '#E53935';
+        ctx.fillRect(barX + barW / 2 - fillW, barY + 2, fillW, barH - 4);
+      }
+
+      ctx.fillStyle = '#FFF';
+      ctx.fillRect(barX + barW / 2 - 1, barY, 2, barH);
     }
-
-    // Bar background
-    ctx.fillStyle = '#333';
-    this.roundRect(barX, barY, barW, barH, 4);
-    ctx.fill();
-
-    // Speed indicator
-    const speedFrac = this.speed / (MAX_SPEED_BASE + this.upgrades.motor * 80);
-    const fillW = Math.abs(speedFrac) * barW / 2;
-    if (speedFrac > 0) {
-      ctx.fillStyle = '#4CAF50';
-      ctx.fillRect(barX + barW / 2, barY + 2, fillW, barH - 4);
-    } else if (speedFrac < 0) {
-      ctx.fillStyle = '#E53935';
-      ctx.fillRect(barX + barW / 2 - fillW, barY + 2, fillW, barH - 4);
-    }
-
-    // Center mark
-    ctx.fillStyle = '#FFF';
-    ctx.fillRect(barX + barW / 2 - 1, barY, 2, barH);
 
     // Power-ups
     let pyOffset = 100;
