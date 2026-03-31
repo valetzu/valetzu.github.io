@@ -50,6 +50,7 @@ import {
   resolveParams,
   ObstacleParams,
   drawReach,
+  drawObstaclePreview,
   ParamFieldMeta,
 } from "@/game/obstacleDefinitions";
 import SettingsMenu from "@/components/SettingsMenu";
@@ -126,6 +127,8 @@ const TILE_COLORS: Record<string, string> = {
   ...OBSTACLE_COLORS,
 };
 
+const HITBOX_ONLY_PREVIEW_THRESHOLD = 160;
+
 /**
  * At a shared snappoint, N segment endpoints overlap. Each pair (one going in,
  * one going out) is one logical connection. Keep ceil(N/2) representatives by
@@ -182,6 +185,7 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
   const [paintOutline, setPaintOutline] = useState(false);
   const [paintOutlineColor, setPaintOutlineColor] = useState('#000000');
   const [paintSize, setPaintSize] = useState(1);
+  const [eraserSize, setEraserSize] = useState(1);
   const [autoconnect, setAutoconnect] = useState(true);
 
   const SNAP_TOLERANCE = 8; // px — for merging segment endpoints
@@ -426,6 +430,24 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
       ctx.globalAlpha = 1;
     }
 
+    // Eraser tool brush preview
+    if (tool === "eraser" && mouseWorld) {
+      const hoverGX = Math.floor(mouseWorld.x / GRID_SIZE);
+      const hoverGY = Math.floor(mouseWorld.y / GRID_SIZE);
+      const half = Math.floor(eraserSize / 2);
+      for (let dx = 0; dx < eraserSize; dx++) {
+        for (let dy = 0; dy < eraserSize; dy++) {
+          const bx = (hoverGX - half + dx) * GRID_SIZE - cx;
+          const by = (hoverGY - half + dy) * GRID_SIZE - cy;
+          ctx.fillStyle = "rgba(255, 80, 80, 0.2)";
+          ctx.fillRect(bx, by, GRID_SIZE, GRID_SIZE);
+          ctx.strokeStyle = "rgba(255, 80, 80, 0.8)";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(bx + 1, by + 1, GRID_SIZE - 2, GRID_SIZE - 2);
+        }
+      }
+    }
+
     // Grid
 
     ctx.strokeStyle = "rgba(255,255,255,0.08)";
@@ -458,7 +480,10 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
     // Compute individual rail segments for polyline rendering
     const individualSegs = buildIndividualSegmentsFromRailSegments(segments);
 
-    // Obstacle tiles — grid squares
+    const hitboxOnlyObstaclePreview =
+      Object.keys(obstacles).length > HITBOX_ONLY_PREVIEW_THRESHOLD;
+
+    // Obstacle tiles — grid squares + static preview
     for (const [key, type] of Object.entries(obstacles)) {
       const [gx, gy] = parseTileKey(key);
       const sx = gx * GRID_SIZE - cx;
@@ -473,13 +498,25 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
       {
         const def = obstacleDefMap.get(type);
         if (def) {
+          const params = resolveParams(type, obstacleParams[key]);
           ctx.fillStyle = def.tileColor;
           ctx.fillRect(sx + 2, sy + 2, GRID_SIZE - 4, GRID_SIZE - 4);
-          ctx.font = `${GRID_SIZE * 0.6}px system-ui`;
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          ctx.fillStyle = "white";
-          ctx.fillText(def.emoji, sx + GRID_SIZE / 2, sy + GRID_SIZE / 2);
+          if (params) {
+            drawObstaclePreview(
+              ctx,
+              type,
+              params,
+              sx + GRID_SIZE / 2,
+              sy + GRID_SIZE / 2,
+              { hitboxOnly: hitboxOnlyObstaclePreview },
+            );
+          } else {
+            ctx.font = `${GRID_SIZE * 0.6}px system-ui`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillStyle = "white";
+            ctx.fillText(def.emoji, sx + GRID_SIZE / 2, sy + GRID_SIZE / 2);
+          }
 
           // Selection highlight
           if (key === selectedObstacleKey) {
@@ -497,7 +534,6 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
             Math.floor(mouseWorld.x / GRID_SIZE) === gx &&
             Math.floor(mouseWorld.y / GRID_SIZE) === gy;
           if (isSelected || isHovered) {
-            const params = resolveParams(type, obstacleParams[key]);
             if (params) {
               const worldX = (gx + 0.5) * GRID_SIZE;
               const worldY = (gy + 0.5) * GRID_SIZE;
@@ -538,17 +574,15 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
           const zones = def.getReach(params as any);
           const rotRad = (((params as any).rotation ?? 0) * Math.PI) / 180;
           drawReach(ctx, zones, worldX - cx, worldY - cy, rotRad);
-          // Ghost tile preview
+          // Ghost tile + static preview
           ctx.globalAlpha = 0.55;
           const sx = hoverGx * GRID_SIZE - cx;
           const sy = hoverGy * GRID_SIZE - cy;
           ctx.fillStyle = def.tileColor;
           ctx.fillRect(sx + 2, sy + 2, GRID_SIZE - 4, GRID_SIZE - 4);
-          ctx.font = `${GRID_SIZE * 0.6}px system-ui`;
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          ctx.fillStyle = "white";
-          ctx.fillText(def.emoji, worldX - cx, worldY - cy);
+          drawObstaclePreview(ctx, tool, params, worldX - cx, worldY - cy, {
+            alpha: 0.85,
+          });
           ctx.globalAlpha = 1.0;
         }
       }
@@ -1190,6 +1224,7 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
     bgTiles,
     paintColor,
     paintSize,
+    eraserSize,
     paintOutline,
     paintOutlineColor,
   ]);
@@ -1613,6 +1648,20 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
       gx: Math.round((start.gx + end.gx) / 2 + perpX * offset),
       gy: Math.round((start.gy + end.gy) / 2 + perpY * offset),
     };
+  };
+
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    if (tool !== "none") return;
+    const { gx, gy } = screenToGrid(e.clientX, e.clientY);
+    const key = tileKey(gx, gy);
+    if (stars[key]) {
+      setStars((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      setTool("star");
+    }
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -2384,11 +2433,11 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
   };
 
   const eraseBgTiles = (gx: number, gy: number) => {
-    const half = Math.floor(paintSize / 2);
+    const half = Math.floor(eraserSize / 2);
     setBgTiles((prev) => {
       const next = { ...prev };
-      for (let dx = 0; dx < paintSize; dx++) {
-        for (let dy = 0; dy < paintSize; dy++) {
+      for (let dx = 0; dx < eraserSize; dx++) {
+        for (let dy = 0; dy < eraserSize; dy++) {
           delete next[tileKey(gx - half + dx, gy - half + dy)];
         }
       }
@@ -2406,22 +2455,29 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
     }
 
     if (tool === "eraser") {
-      // Erase obstacle at grid cell (rail segments are erased via hit-test in mousedown)
+      // Erase obstacle/star/bg at grid cells within brush area (rail segments are erased via hit-test in mousedown)
       eraseBgTiles(gx, gy);
-      setSelectedObstacleKey((prev) => (prev === key ? null : prev));
+      const half = Math.floor(eraserSize / 2);
+      const keysToErase: string[] = [];
+      for (let dx = 0; dx < eraserSize; dx++) {
+        for (let dy = 0; dy < eraserSize; dy++) {
+          keysToErase.push(tileKey(gx - half + dx, gy - half + dy));
+        }
+      }
+      setSelectedObstacleKey((prev) => (prev && keysToErase.includes(prev) ? null : prev));
       setObstacleParams((prev) => {
         const next = { ...prev };
-        delete next[key];
+        for (const k of keysToErase) delete next[k];
         return next;
       });
       setObstacles((prev) => {
         const next = { ...prev };
-        delete next[key];
+        for (const k of keysToErase) delete next[k];
         return next;
       });
       setStars((prev) => {
         const next = { ...prev };
-        delete next[key];
+        for (const k of keysToErase) delete next[k];
         return next;
       });
     } else if (tool === "star") {
@@ -3151,6 +3207,7 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
         ref={canvasRef}
         className="w-full h-full cursor-crosshair"
         onMouseDown={handleMouseDown}
+        onDoubleClick={handleDoubleClick}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
@@ -3244,6 +3301,12 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
                 <button onClick={() => { setContinuousLine(v => { const n = !v; updateSetting('continuousLine', n); return n; }); }} className={`px-2 py-1 rounded text-xs font-bold whitespace-nowrap ${continuousLine ? 'bg-green-700 text-white' : 'bg-gray-700 text-gray-300'}`}>{continuousLine ? '🔗 Continuous: On' : '🔗 Continuous: Off'}</button>
               )}
               <button onClick={() => setAutoconnect(a => !a)} className={`px-2 py-1 rounded text-xs font-bold whitespace-nowrap ${autoconnect ? 'bg-green-700 text-white' : 'bg-gray-700 text-gray-300'}`}>{autoconnect ? '🔗 Autoconnect: On' : '🔗 Autoconnect: Off'}</button>
+            </div>
+          )}
+          {tool === 'eraser' && (
+            <div className="fixed bottom-14 left-0 right-0 z-20 px-3 py-2 bg-game-card border-t border-game-card-border flex gap-2 items-center" style={{ scrollbarWidth: 'none' } as any}>
+              <span className="text-game-subtitle text-xs whitespace-nowrap">Size:</span>
+              {[1, 2, 3, 5].map((s) => (<button key={s} onClick={() => setEraserSize(s)} className={`w-7 h-7 rounded text-xs font-bold ${eraserSize === s ? 'bg-game-accent text-game-bg' : 'bg-gray-700 text-gray-300'}`}>{s}</button>))}
             </div>
           )}
           {tool === 'paint' && (
@@ -3479,6 +3542,20 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
                   {t.emoji} {t.label}
                 </button>
 
+                {t.tool === "eraser" && isActive && (
+                  <div className="bg-game-card border border-game-card-border rounded-lg p-2 shadow-lg flex items-center gap-2">
+                    <label className="text-game-subtitle text-xs whitespace-nowrap">Size:</label>
+                    {[1, 2, 3, 5].map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => setEraserSize(s)}
+                        className={`w-6 h-6 rounded text-xs font-bold ${eraserSize === s ? 'bg-game-accent text-game-bg' : 'bg-gray-700 text-gray-300'}`}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {(isFreeLine || t.tool === "line" || t.tool === "rail" || t.tool === "draw_rail") && isActive && (
                   <div className="bg-game-card border border-game-card-border rounded-lg p-2 min-w-[180px] shadow-lg flex flex-col gap-1">
                     {isFreeLine && (

@@ -167,6 +167,232 @@ export function drawReach(
   ctx.restore(); // undo translate + rotate
 }
 
+export interface DrawObstaclePreviewOptions {
+  alpha?: number;
+  hitboxOnly?: boolean;
+}
+
+function drawRotationTick(
+  ctx: CanvasRenderingContext2D,
+  screenX: number,
+  screenY: number,
+  rotRad: number,
+  length: number,
+): void {
+  const tipX = screenX + Math.cos(rotRad) * length;
+  const tipY = screenY + Math.sin(rotRad) * length;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(screenX, screenY);
+  ctx.lineTo(tipX, tipY);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  ctx.beginPath();
+  ctx.arc(tipX, tipY, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+export function drawObstaclePreview(
+  ctx: CanvasRenderingContext2D,
+  tileType: string,
+  params: ObstacleParams,
+  screenX: number,
+  screenY: number,
+  opts?: DrawObstaclePreviewOptions,
+): void {
+  const alpha = opts?.alpha ?? 1;
+  const rotRad = (((params as { rotation?: number }).rotation ?? 0) * Math.PI) / 180;
+  const def = obstacleDefMap.get(tileType);
+  if (!def) return;
+
+  ctx.save();
+  ctx.globalAlpha *= alpha;
+
+  if (opts?.hitboxOnly) {
+    drawReach(ctx, def.getReach(params as never), screenX, screenY, rotRad);
+    drawRotationTick(ctx, screenX, screenY, rotRad, 16);
+    ctx.restore();
+    return;
+  }
+
+  ctx.save();
+  ctx.translate(screenX, screenY);
+  ctx.rotate(rotRad);
+
+  switch (tileType) {
+    case 'spinner': {
+      const p = params as SpinnerParams;
+      ctx.strokeStyle = '#9aa0a6';
+      ctx.lineWidth = 8;
+      ctx.lineCap = 'round';
+      for (let a = 0; a < 4; a++) {
+        const armAngle = (a * Math.PI) / 2;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(armAngle) * p.armLength, Math.sin(armAngle) * p.armLength);
+        ctx.stroke();
+      }
+      ctx.fillStyle = '#c13e3e';
+      for (let a = 0; a < 4; a++) {
+        const armAngle = (a * Math.PI) / 2;
+        ctx.beginPath();
+        ctx.arc(Math.cos(armAngle) * p.armLength, Math.sin(armAngle) * p.armLength, 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = '#b0b7bf';
+      ctx.beginPath();
+      ctx.arc(0, 0, Math.max(4, p.radius), 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
+    case 'orbiter': {
+      const p = params as OrbiterParams;
+      ctx.strokeStyle = 'rgba(180,80,255,0.45)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      ctx.arc(0, 0, p.orbitRadius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.strokeStyle = 'rgba(180,80,255,0.7)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(p.orbitRadius, 0);
+      ctx.stroke();
+      ctx.fillStyle = '#b450ff';
+      ctx.beginPath();
+      ctx.arc(p.orbitRadius, 0, p.orbRadius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#7030aa';
+      ctx.beginPath();
+      ctx.arc(0, 0, 4, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
+    case 'pendulum': {
+      const p = params as PendulumParams;
+      ctx.strokeStyle = '#8aa7c8';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(0, p.cableLength);
+      ctx.stroke();
+      ctx.fillStyle = '#4f5966';
+      ctx.beginPath();
+      ctx.arc(0, p.cableLength, p.bobRadius, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
+    case 'bouncer': {
+      const p = params as BouncerParams;
+      ctx.strokeStyle = 'rgba(255,215,0,0.75)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, p.radius);
+      ctx.lineTo(0, p.radius + Math.min(60, p.amplitude * 0.5));
+      ctx.stroke();
+      ctx.fillStyle = '#e53935';
+      ctx.beginPath();
+      ctx.arc(0, 0, p.radius, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
+    case 'laser': {
+      const p = params as LaserParams;
+      const dx = p.direction === 'left' ? -p.beamLength : p.beamLength;
+      ctx.fillStyle = '#555';
+      ctx.fillRect(-8, -6, 14, 12);
+      ctx.strokeStyle = 'rgba(255,80,80,0.85)';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(dx, 0);
+      ctx.stroke();
+      break;
+    }
+    case 'crusher': {
+      const p = params as CrusherParams;
+      ctx.fillStyle = 'rgba(150,150,150,0.65)';
+      ctx.fillRect(-p.zoneWidth / 2, -p.zoneHeight / 2, p.zoneWidth, p.zoneHeight);
+      ctx.strokeStyle = 'rgba(210,210,210,0.9)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(-p.zoneWidth / 2, -p.zoneHeight / 2, p.zoneWidth, p.zoneHeight);
+      break;
+    }
+    case 'swoop': {
+      const p = params as SwoopParams;
+      ctx.strokeStyle = 'rgba(255,200,50,0.5)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.rect(-p.patrolWidth / 2, -p.patrolHeight, p.patrolWidth, p.patrolHeight + p.diveDepth);
+      ctx.stroke();
+      ctx.fillStyle = '#7a5030';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 12, 7, 0, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
+    case 'boulder': {
+      const p = params as BoulderParams;
+      ctx.fillStyle = '#7a6438';
+      ctx.beginPath();
+      ctx.arc(0, 0, p.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#4a3820';
+      ctx.lineWidth = Math.max(1, p.radius / 16);
+      ctx.beginPath();
+      ctx.moveTo(-p.radius * 0.4, -p.radius * 0.15);
+      ctx.lineTo(p.radius * 0.15, p.radius * 0.22);
+      ctx.stroke();
+      break;
+    }
+    case 'mine': {
+      const p = params as MineParams;
+      const bodyR = Math.max(8, Math.min(16, p.triggerRadius * 0.25));
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        ctx.strokeStyle = '#3a3a3a';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * bodyR * 0.7, Math.sin(a) * bodyR * 0.7);
+        ctx.lineTo(Math.cos(a) * (bodyR + 8), Math.sin(a) * (bodyR + 8));
+        ctx.stroke();
+      }
+      ctx.fillStyle = '#575757';
+      ctx.beginPath();
+      ctx.arc(0, 0, bodyR, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
+    case 'stalactite': {
+      const p = params as StalactiteParams;
+      ctx.fillStyle = 'rgba(180,220,255,0.75)';
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(-p.dropZoneWidth / 2, p.dropZoneHeight);
+      ctx.lineTo(p.dropZoneWidth / 2, p.dropZoneHeight);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    }
+    default: {
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.beginPath();
+      ctx.arc(0, 0, 8, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
+  }
+
+  ctx.restore();
+  drawRotationTick(ctx, screenX, screenY, rotRad, 16);
+  ctx.restore();
+}
+
 // Parse "#rrggbb" or named color into [r,g,b].  Falls back to orange on failure.
 function hexToRgb(color: string): [number, number, number] {
   const m = color.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);

@@ -598,13 +598,15 @@ export function deleteCustomLevel(name: string) {
 }
 
 // Adventure levels — static JSON files in src/game/levels/, bundled at build time
-const _adventureLevelModules = import.meta.glob<EditorLevel>(
+const _adventureLevelModules = import.meta.glob<any>(
   './levels/*.json',
   { eager: true, import: 'default' },
 );
 
 export function loadAdventureLevels(): EditorLevel[] {
   return Object.values(_adventureLevelModules)
+    .map((raw): EditorLevel => raw?.format === 'sky-lift-dash-level' ? raw.level : raw)
+    .filter((l): l is EditorLevel => !!l && !!(l.segments || l.tiles))
     .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
 }
 

@@ -34,12 +34,14 @@ interface CustomLevelPlayerProps {
   level: EditorLevel;
   ghostReplay: ReplayData | null;
   onBack: () => void;
+  onNextLevel?: (() => void) | null;
 }
 
 export default function CustomLevelPlayer({
   level,
   ghostReplay,
   onBack,
+  onNextLevel,
 }: CustomLevelPlayerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
@@ -472,6 +474,18 @@ export default function CustomLevelPlayer({
                 ← Menu
               </button>
             </div>
+            {onNextLevel && (
+              <button
+                onClick={() => {
+                  engineRef.current?.stop();
+                  musicManager.stop();
+                  onNextLevel();
+                }}
+                className="w-full mt-3 py-3 rounded-lg bg-yellow-500 text-black font-bold text-lg hover:bg-yellow-400"
+              >
+                Next Level →
+              </button>
+            )}
           </div>
         </div>
       )}

@@ -14,7 +14,7 @@ interface GameMenuProps {
   onUpdateSave: (save: SaveData) => void;
   onOpenEditor: (level?: EditorLevel) => void;
   onOpenSettings: () => void;
-  onPlayCustomLevel?: (level: EditorLevel, ghostReplay: ReplayData | null) => void;
+  onPlayCustomLevel?: (level: EditorLevel, ghostReplay: ReplayData | null, levelList: EditorLevel[], levelIndex: number, isAdventure: boolean) => void;
 }
 
 type MenuView = 'main' | 'shop' | 'playSelect' | 'play' | 'adventure' | 'experimental' | 'endless' | 'editorSelect';
@@ -136,6 +136,7 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
 
   if (view === 'adventure') {
     const levels = loadAdventureLevels();
+    const adventureList = levels;
 
     return (
       <div className="fixed inset-0 flex items-center justify-center bg-game-bg overflow-y-auto">
@@ -150,7 +151,7 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
             </div>
           ) : (
             <div className="space-y-3 max-h-[60vh] overflow-y-auto overscroll-contain pr-1">
-              {levels.map((level) => {
+              {levels.map((level, levelIdx) => {
                 const levelId = level.id || level.name;
                 const records = getRecords(levelId);
                 const replays = getReplaysForLevel(levelId);
@@ -171,14 +172,14 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
                     </div>
                     <div className="flex gap-2">
                       <button
-                        onClick={() => onPlayCustomLevel?.(level, null)}
+                        onClick={() => onPlayCustomLevel?.(level, null, adventureList, levelIdx, true)}
                         className="flex-1 py-2 rounded-lg bg-green-600 text-white font-bold text-sm hover:bg-green-500 active:scale-95 transition-all"
                       >
                         ▶ Play
                       </button>
                       {replays.length > 0 && (
                         <button
-                          onClick={() => onPlayCustomLevel?.(level, getReplay(levelId))}
+                          onClick={() => onPlayCustomLevel?.(level, getReplay(levelId), adventureList, levelIdx, true)}
                           className="flex-1 py-2 rounded-lg bg-blue-600 text-white font-bold text-sm hover:bg-blue-500 active:scale-95 transition-all"
                         >
                           👻 Race Ghost
@@ -225,7 +226,7 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
                               <span className="flex-1">{formatTime(r.time)}</span>
                               {matchReplay && (
                                 <button
-                                  onClick={() => onPlayCustomLevel?.(level, matchReplay)}
+                                  onClick={() => onPlayCustomLevel?.(level, matchReplay, adventureList, levelIdx, true)}
                                   className="text-xs px-2 py-0.5 rounded-md bg-blue-700 text-white hover:bg-blue-500 active:scale-95 transition-all"
                                 >
                                   👻 Race
@@ -240,7 +241,7 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
                       <GhostReplayDialog
                         levelId={levelId}
                         replays={replays}
-                        onRace={(r) => { setGhostListLevelId(null); onPlayCustomLevel?.(level, r); }}
+                        onRace={(r) => { setGhostListLevelId(null); onPlayCustomLevel?.(level, r, adventureList, levelIdx, true); }}
                         onClose={() => setGhostListLevelId(null)}
                       />
                     )}
@@ -263,6 +264,7 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
 
   if (view === 'play') {
     const levels = loadCustomLevels().sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt));
+    const customList = levels;
 
     return (
       <div className="fixed inset-0 flex items-center justify-center bg-game-bg overflow-y-auto">
@@ -278,7 +280,7 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
             </div>
           ) : (
             <div className="space-y-3 max-h-[60vh] overflow-y-auto overscroll-contain pr-1">
-              {levels.map((level) => {
+              {levels.map((level, levelIdx) => {
                 const levelId = level.id || level.name;
                 const records = getRecords(levelId);
                 const replays = getReplaysForLevel(levelId);
@@ -313,14 +315,14 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
                     </div>
                     <div className="flex gap-2">
                       <button
-                        onClick={() => onPlayCustomLevel?.(level, null)}
+                        onClick={() => onPlayCustomLevel?.(level, null, customList, levelIdx, false)}
                         className="flex-1 py-2 rounded-lg bg-green-600 text-white font-bold text-sm hover:bg-green-500 active:scale-95 transition-all"
                       >
                         ▶ Play
                       </button>
                       {replays.length > 0 && (
                         <button
-                          onClick={() => onPlayCustomLevel?.(level, getReplay(levelId))}
+                          onClick={() => onPlayCustomLevel?.(level, getReplay(levelId), customList, levelIdx, false)}
                           className="flex-1 py-2 rounded-lg bg-blue-600 text-white font-bold text-sm hover:bg-blue-500 active:scale-95 transition-all"
                         >
                           👻 Race Ghost
@@ -367,7 +369,7 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
                               <span className="flex-1">{formatTime(r.time)}</span>
                               {matchReplay && (
                                 <button
-                                  onClick={() => onPlayCustomLevel?.(level, matchReplay)}
+                                  onClick={() => onPlayCustomLevel?.(level, matchReplay, customList, levelIdx, false)}
                                   className="text-xs px-2 py-0.5 rounded-md bg-blue-700 text-white hover:bg-blue-500 active:scale-95 transition-all"
                                 >
                                   👻 Race
@@ -382,7 +384,7 @@ export default function GameMenu({ save, onStartGame, onUpdateSave, onOpenEditor
                       <GhostReplayDialog
                         levelId={levelId}
                         replays={replays}
-                        onRace={(r) => { setGhostListLevelId(null); onPlayCustomLevel?.(level, r); }}
+                        onRace={(r) => { setGhostListLevelId(null); onPlayCustomLevel?.(level, r, customList, levelIdx, false); }}
                         onClose={() => setGhostListLevelId(null)}
                       />
                     )}

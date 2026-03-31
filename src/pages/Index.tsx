@@ -19,6 +19,9 @@ const Index = () => {
   const [customLevel, setCustomLevel] = useState<EditorLevel | null>(null);
   const [editLevel, setEditLevel] = useState<EditorLevel | null>(null);
   const [raceGhost, setRaceGhost] = useState<ReplayData | null>(null);
+  const [levelPlayList, setLevelPlayList] = useState<EditorLevel[]>([]);
+  const [levelPlayIndex, setLevelPlayIndex] = useState(0);
+  const [isAdventurePlay, setIsAdventurePlay] = useState(false);
 
   const startGame = useCallback((w: WorldType) => {
     setWorld(w);
@@ -66,11 +69,24 @@ const Index = () => {
   }
 
   if (phase === 'customPlay' && customLevel) {
+    const hasNext = isAdventurePlay
+      ? levelPlayIndex < levelPlayList.length - 1
+      : levelPlayList.length > 1;
+    const onNextLevel = hasNext ? () => {
+      const nextIndex = isAdventurePlay
+        ? levelPlayIndex + 1
+        : (levelPlayIndex + 1) % levelPlayList.length;
+      setLevelPlayIndex(nextIndex);
+      setCustomLevel(levelPlayList[nextIndex]);
+      setRaceGhost(null);
+    } : null;
     return (
       <CustomLevelPlayer
+        key={`${customLevel.id}-${levelPlayIndex}`}
         level={customLevel}
         ghostReplay={raceGhost}
         onBack={backToMenu}
+        onNextLevel={onNextLevel}
       />
     );
   }
@@ -83,9 +99,12 @@ const Index = () => {
         onUpdateSave={setSave}
         onOpenEditor={(level) => { setEditLevel(level ?? null); setPhase('editor'); }}
         onOpenSettings={() => setShowSettings(true)}
-        onPlayCustomLevel={(level, ghostReplay) => {
+        onPlayCustomLevel={(level, ghostReplay, levelList, levelIndex, isAdventure) => {
           setCustomLevel(level);
           setRaceGhost(ghostReplay);
+          setLevelPlayList(levelList ?? []);
+          setLevelPlayIndex(levelIndex ?? 0);
+          setIsAdventurePlay(isAdventure ?? false);
           setPhase('customPlay');
         }}
       />
