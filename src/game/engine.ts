@@ -260,10 +260,10 @@ export class GameEngine {
 
   // --- Input ---
   handleKeyDown = (e: KeyboardEvent) => {
-    if (e.code === 'ArrowUp') { this.keys.up = true; e.preventDefault(); }
-    if (e.code === 'ArrowDown') { this.keys.down = true; e.preventDefault(); }
-    if (e.code === 'ArrowLeft') { this.keys.left = true; e.preventDefault(); }
-    if (e.code === 'ArrowRight') { this.keys.right = true; e.preventDefault(); }
+    if (e.code === 'ArrowUp' || e.code === 'KeyW') { this.keys.up = true; e.preventDefault(); }
+    if (e.code === 'ArrowDown' || e.code === 'KeyS') { this.keys.down = true; e.preventDefault(); }
+    if (e.code === 'ArrowLeft' || e.code === 'KeyA') { this.keys.left = true; e.preventDefault(); }
+    if (e.code === 'ArrowRight' || e.code === 'KeyD') { this.keys.right = true; e.preventDefault(); }
     if (e.code === 'Space') {
       this.directionFlipped = !this.directionFlipped;
       e.preventDefault();
@@ -285,10 +285,10 @@ export class GameEngine {
   };
 
   handleKeyUp = (e: KeyboardEvent) => {
-    if (e.code === 'ArrowUp') this.keys.up = false;
-    if (e.code === 'ArrowDown') this.keys.down = false;
-    if (e.code === 'ArrowLeft') this.keys.left = false;
-    if (e.code === 'ArrowRight') this.keys.right = false;
+    if (e.code === 'ArrowUp' || e.code === 'KeyW') this.keys.up = false;
+    if (e.code === 'ArrowDown' || e.code === 'KeyS') this.keys.down = false;
+    if (e.code === 'ArrowLeft' || e.code === 'KeyA') this.keys.left = false;
+    if (e.code === 'ArrowRight' || e.code === 'KeyD') this.keys.right = false;
   };
 
   // --- Lifecycle ---

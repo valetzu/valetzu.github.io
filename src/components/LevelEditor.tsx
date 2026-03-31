@@ -185,6 +185,9 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
   const [paintOutline, setPaintOutline] = useState(false);
   const [paintOutlineColor, setPaintOutlineColor] = useState('#000000');
   const [paintSize, setPaintSize] = useState(1);
+  const [paintLineMode, setPaintLineMode] = useState(false);
+  const [paintLineStart, setPaintLineStart] = useState<{ gx: number; gy: number } | null>(null);
+  const [paintLinePreview, setPaintLinePreview] = useState<{ gx: number; gy: number }[]>([]);
   const [eraserSize, setEraserSize] = useState(1);
   const [autoconnect, setAutoconnect] = useState(true);
 
@@ -329,6 +332,7 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
   useEffect(() => {
     if (tool !== "none") setSelectedObstacleKey(null);
     if (!obstacleDefMap.has(tool)) pendingToolRotRef.current = 0;
+    if (tool !== "paint") { setPaintLineStart(null); setPaintLinePreview([]); }
   }, [tool]);
 
   // R key: quick-rotate obstacle 90° clockwise
@@ -413,8 +417,8 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
       }
     }
 
-    // Paint tool brush preview
-    if (tool === "paint" && mouseWorld) {
+    // Paint tool brush preview (normal drag mode only)
+    if (tool === "paint" && !paintLineMode && mouseWorld) {
       const hoverGX = Math.floor(mouseWorld.x / GRID_SIZE);
       const hoverGY = Math.floor(mouseWorld.y / GRID_SIZE);
       const half = Math.floor(paintSize / 2);
@@ -428,6 +432,56 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
         }
       }
       ctx.globalAlpha = 1;
+    }
+
+    // Paint line mode preview
+    if (tool === "paint" && paintLineMode && mouseWorld) {
+      const hoverGX = Math.floor(mouseWorld.x / GRID_SIZE);
+      const hoverGY = Math.floor(mouseWorld.y / GRID_SIZE);
+      if (paintLineStart) {
+        // Show tiles along the line
+        const preview = generateLine(paintLineStart, { gx: hoverGX, gy: hoverGY });
+        const half = Math.floor(paintSize / 2);
+        ctx.globalAlpha = 0.5;
+        ctx.fillStyle = paintColor;
+        for (const p of preview) {
+          for (let dx = 0; dx < paintSize; dx++) {
+            for (let dy = 0; dy < paintSize; dy++) {
+              const bx = (p.gx - half + dx) * GRID_SIZE - cx;
+              const by = (p.gy - half + dy) * GRID_SIZE - cy;
+              ctx.fillRect(bx, by, GRID_SIZE, GRID_SIZE);
+            }
+          }
+        }
+        ctx.globalAlpha = 1;
+        // Start marker
+        ctx.strokeStyle = paintColor;
+        ctx.lineWidth = 3;
+        ctx.strokeRect(
+          paintLineStart.gx * GRID_SIZE - cx + 1,
+          paintLineStart.gy * GRID_SIZE - cy + 1,
+          GRID_SIZE - 2,
+          GRID_SIZE - 2,
+        );
+        ctx.fillStyle = paintColor;
+        ctx.font = "bold 10px system-ui";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("A", paintLineStart.gx * GRID_SIZE + GRID_SIZE / 2 - cx, paintLineStart.gy * GRID_SIZE + GRID_SIZE / 2 - cy);
+      } else {
+        // No start picked yet — show normal brush preview
+        const half = Math.floor(paintSize / 2);
+        ctx.globalAlpha = 0.35;
+        ctx.fillStyle = paintColor;
+        for (let dx = 0; dx < paintSize; dx++) {
+          for (let dy = 0; dy < paintSize; dy++) {
+            const bx = (hoverGX - half + dx) * GRID_SIZE - cx;
+            const by = (hoverGY - half + dy) * GRID_SIZE - cy;
+            ctx.fillRect(bx, by, GRID_SIZE, GRID_SIZE);
+          }
+        }
+        ctx.globalAlpha = 1;
+      }
     }
 
     // Eraser tool brush preview
@@ -1224,6 +1278,8 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
     bgTiles,
     paintColor,
     paintSize,
+    paintLineMode,
+    paintLineStart,
     eraserSize,
     paintOutline,
     paintOutlineColor,
@@ -2024,6 +2080,31 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
           }
           return;
         }
+      }
+
+      // Paint line mode: first click sets start, second click paints the line
+      if (tool === "paint" && paintLineMode) {
+        if (!paintLineStart) {
+          setPaintLineStart({ gx, gy });
+        } else {
+          const pts = generateLine(paintLineStart, { gx, gy });
+          const half = Math.floor(paintSize / 2);
+          setBgTiles((prev) => {
+            const next = { ...prev };
+            for (const p of pts) {
+              for (let dx = 0; dx < paintSize; dx++) {
+                for (let dy = 0; dy < paintSize; dy++) {
+                  const k = tileKey(p.gx - half + dx, p.gy - half + dy);
+                  next[k] = { color: paintColor, outline: paintOutline || undefined, outlineColor: paintOutline ? paintOutlineColor : undefined };
+                }
+              }
+            }
+            return next;
+          });
+          setPaintLineStart(null);
+          setPaintLinePreview([]);
+        }
+        return;
       }
 
       // Clicking an existing obstacle of the same type → switch to hand tool and select it
@@ -3321,6 +3402,8 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
                 {paintOutline && <input type="color" value={paintOutlineColor} onChange={(e) => setPaintOutlineColor(e.target.value)} className="w-7 h-7 cursor-pointer border-0 p-0 bg-transparent" />}
                 <span className="text-game-subtitle text-xs">Size:</span>
                 {[1, 2, 3, 5].map((s) => (<button key={s} onClick={() => setPaintSize(s)} className={`w-7 h-7 rounded text-xs font-bold ${paintSize === s ? 'bg-game-accent text-game-bg' : 'bg-gray-700 text-gray-300'}`}>{s}</button>))}
+                <button onClick={() => { setPaintLineMode(v => !v); setPaintLineStart(null); setPaintLinePreview([]); }} className={`px-2 py-1 rounded text-xs font-bold ${paintLineMode ? 'bg-green-700 text-white' : 'bg-gray-700 text-gray-300'}`}>{paintLineMode ? '📏 Line: On' : '📏 Line: Off'}</button>
+                {paintLineMode && paintLineStart && <button onClick={() => { setPaintLineStart(null); setPaintLinePreview([]); }} className="px-2 py-1 rounded text-xs font-bold bg-red-800 text-white">✕</button>}
               </div>
             </div>
           )}
@@ -3729,6 +3812,22 @@ export default function LevelEditor({ onBack, initialLevel }: LevelEditorProps) 
                       {s}
                     </button>
                   ))}
+                </div>
+                <div className="flex items-center gap-2 mt-1">
+                  <button
+                    onClick={() => { setPaintLineMode(v => !v); setPaintLineStart(null); setPaintLinePreview([]); }}
+                    className={`px-2 py-1 rounded text-xs font-bold ${paintLineMode ? 'bg-green-700 text-white' : 'bg-gray-700 text-gray-300'}`}
+                  >
+                    {paintLineMode ? '📏 Line: On' : '📏 Line: Off'}
+                  </button>
+                  {paintLineMode && paintLineStart && (
+                    <button
+                      onClick={() => { setPaintLineStart(null); setPaintLinePreview([]); }}
+                      className="px-2 py-1 rounded text-xs font-bold bg-red-800 text-white"
+                    >
+                      ✕ Cancel
+                    </button>
+                  )}
                 </div>
               </div>
             )}
